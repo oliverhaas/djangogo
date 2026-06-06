@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.26.x"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version }}
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+      # Optional: upload coverage to Codecov.
+      # - uses: codecov/codecov-action@v5
+      #   with:
+      #     files: ./coverage.txt
+      #     fail_ci_if_error: false
+
+  # Integration tests against PostgreSQL land with the ORM relations milestone.
+  # When they do, add a job with a `postgres` service container and run them
+  # behind a build tag, e.g. `go test -tags=integration ./...`.

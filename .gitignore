@@ -1,0 +1,34 @@
+# Binaries / build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Coverage
+coverage.txt
+coverage.xml
+coverage.html
+*.cover
+
+# Go workspace (local-only multi-module dev)
+go.work
+go.work.sum
+
+# Vendored deps (not used)
+/vendor/
+
+# Local dev artifacts
+.private/
+*.sqlite3
+*.db
+.env
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Assistant scratch
+CLAUDE.md
