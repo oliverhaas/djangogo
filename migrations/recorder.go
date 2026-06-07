@@ -3,6 +3,7 @@ package migrations
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/oliverhaas/djangogo/orm"
@@ -11,18 +12,29 @@ import (
 // TableName is the migration-tracking table.
 const TableName = "djangogo_migrations"
 
+// trackingTableSQL returns the CREATE TABLE IF NOT EXISTS statement for the
+// migration-tracking table, rendered for the given dialect.
+func trackingTableSQL(d orm.Dialect) string {
+	idCol := d.Quote("id") + " " + d.ColumnType(&orm.Field{Kind: orm.KindAuto, PrimaryKey: true})
+	appCol := d.Quote("app") + " " + d.ColumnType(&orm.Field{Kind: orm.KindChar, MaxLength: 255})
+	nameCol := d.Quote("name") + " " + d.ColumnType(&orm.Field{Kind: orm.KindChar, MaxLength: 255})
+	appliedAtCol := d.Quote("applied_at") + " " + d.ColumnType(&orm.Field{Kind: orm.KindDateTime})
+	cols := strings.Join([]string{idCol, appCol, nameCol, appliedAtCol}, ", ")
+	return "CREATE TABLE IF NOT EXISTS " + d.Quote(TableName) + " (" + cols + ")"
+}
+
 // EnsureTable creates the tracking table if it does not exist.
 func EnsureTable(ctx context.Context, db *orm.DB) error {
-	const stmt = `CREATE TABLE IF NOT EXISTS "djangogo_migrations" ` +
-		`("id" INTEGER PRIMARY KEY AUTOINCREMENT, "app" TEXT NOT NULL, ` +
-		`"name" TEXT NOT NULL, "applied_at" DATETIME NOT NULL)`
-	_, err := db.SQL().ExecContext(ctx, stmt)
+	_, err := db.SQL().ExecContext(ctx, trackingTableSQL(db.Dialect()))
 	return err
 }
 
 // AppliedSet returns the set of already-applied migrations, keyed "<app>/<name>".
 func AppliedSet(ctx context.Context, db *orm.DB) (map[string]bool, error) {
-	rows, err := db.SQL().QueryContext(ctx, `SELECT app, name FROM "djangogo_migrations"`)
+	d := db.Dialect()
+	q := "SELECT " + d.Quote("app") + ", " + d.Quote("name") +
+		" FROM " + d.Quote(TableName)
+	rows, err := db.SQL().QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -43,10 +55,12 @@ func AppliedSet(ctx context.Context, db *orm.DB) (map[string]bool, error) {
 }
 
 // recordApplied inserts a tracking row for the (app, name) migration using tx so the
-// insert participates in the migration's transaction.
-func recordApplied(ctx context.Context, tx *sql.Tx, app, name string) error {
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO "djangogo_migrations" ("app", "name", "applied_at") VALUES (?, ?, ?)`,
-		app, name, time.Now().UTC())
+// insert participates in the migration's transaction. The dialect d is used to render
+// the correct placeholder syntax for the backend.
+func recordApplied(ctx context.Context, tx *sql.Tx, app, name string, d orm.Dialect) error {
+	q := "INSERT INTO " + d.Quote(TableName) +
+		" (" + d.Quote("app") + ", " + d.Quote("name") + ", " + d.Quote("applied_at") + ")" +
+		" VALUES (" + d.Placeholder(1) + ", " + d.Placeholder(2) + ", " + d.Placeholder(3) + ")"
+	_, err := tx.ExecContext(ctx, q, app, name, time.Now().UTC())
 	return err
 }

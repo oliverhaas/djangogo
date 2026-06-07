@@ -52,7 +52,7 @@ func Apply(ctx context.Context, db *orm.DB, migs []Migration) ([]string, error) 
 			}
 			op.Apply(ps)
 		}
-		if err := recordApplied(ctx, tx, mig.App, mig.Name); err != nil {
+		if err := recordApplied(ctx, tx, mig.App, mig.Name, d); err != nil {
 			_ = tx.Rollback()
 			return done, err
 		}
