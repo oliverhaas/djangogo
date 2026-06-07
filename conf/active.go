@@ -1,4 +1,3 @@
-// conf/active.go
 package conf
 
 // active is the process-wide settings object, set by Configure. It gives the

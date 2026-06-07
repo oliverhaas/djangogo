@@ -1,4 +1,3 @@
-// manage/registry.go
 package manage
 
 import (
@@ -54,9 +53,9 @@ func (r *Registry) Execute(args []string) error {
 }
 
 func (r *Registry) printUsage() {
-	fmt.Fprintln(r.Out, "usage: djangogo <command> [args]")
-	fmt.Fprintln(r.Out, "\nAvailable commands:")
+	_, _ = fmt.Fprintln(r.Out, "usage: djangogo <command> [args]")
+	_, _ = fmt.Fprintln(r.Out, "\nAvailable commands:")
 	for _, n := range r.Names() {
-		fmt.Fprintf(r.Out, "  %-16s %s\n", n, r.byName[n].Help())
+		_, _ = fmt.Fprintf(r.Out, "  %-16s %s\n", n, r.byName[n].Help())
 	}
 }

@@ -1,4 +1,3 @@
-// manage/command.go
 // Package manage provides the management-command dispatcher (Django's manage.py).
 package manage
 

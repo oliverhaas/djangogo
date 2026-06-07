@@ -1,4 +1,3 @@
-// application.go
 package djangogo
 
 import (

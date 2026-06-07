@@ -1,4 +1,3 @@
-// runserver.go
 package djangogo
 
 import (
@@ -18,7 +17,7 @@ func defaultHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprintf(w, "Djan-Go-Go %s is running.\n", Version)
+		_, _ = fmt.Fprintf(w, "Djan-Go-Go %s is running.\n", Version)
 	})
 	return mux
 }
@@ -44,7 +43,7 @@ func (c *runserverCommand) Run(_ []string) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		fmt.Fprintf(c.app.Out, "Djan-Go-Go development server at http://%s/  (Ctrl-C to quit)\n", addr)
+		_, _ = fmt.Fprintf(c.app.Out, "Djan-Go-Go development server at http://%s/  (Ctrl-C to quit)\n", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

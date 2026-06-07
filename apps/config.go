@@ -1,4 +1,3 @@
-// apps/config.go
 // Package apps provides the application registry (Django's AppConfig + apps registry).
 package apps
 

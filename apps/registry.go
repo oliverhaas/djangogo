@@ -1,4 +1,3 @@
-// apps/registry.go
 package apps
 
 import "fmt"

@@ -1,4 +1,3 @@
-// conf/settings.go
 // Package conf holds Djan-Go-Go application settings (the analog of Django's settings module).
 package conf
 

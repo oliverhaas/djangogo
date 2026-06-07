@@ -1,4 +1,3 @@
-// version.go
 package djangogo
 
 import (
@@ -15,6 +14,6 @@ func (versionCommand) Name() string { return "version" }
 func (versionCommand) Help() string { return "Print the Djan-Go-Go version" }
 
 func (c versionCommand) Run(_ []string) error {
-	fmt.Fprintf(c.out, "djangogo %s\n", Version)
+	_, _ = fmt.Fprintf(c.out, "djangogo %s\n", Version)
 	return nil
 }
