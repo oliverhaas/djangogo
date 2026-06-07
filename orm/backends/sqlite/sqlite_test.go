@@ -161,3 +161,34 @@ func TestIntegration(t *testing.T) {
 		t.Errorf("count = %d, want 1", count)
 	}
 }
+
+// TestOpenSharedMemoryDSN confirms that the "file:name?mode=memory&cache=shared"
+// form yields a working shared in-memory database whose state persists across
+// separate queries on the returned *sql.DB (i.e. the pool is pinned to one conn).
+func TestOpenSharedMemoryDSN(t *testing.T) {
+	db, err := sqlite.Open("file:sharedmem?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	defer db.Close()
+
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE t (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO t(id) VALUES (1)`); err != nil {
+		t.Fatalf("INSERT: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM t`).Scan(&count); err != nil {
+		t.Fatalf("SELECT count: %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("count = %d, want 1 (table did not persist across queries)", count)
+	}
+}

@@ -92,14 +92,15 @@ func (d Dialect) CreateTableSQL(m *orm.Model) string {
 }
 
 // Open opens a SQLite database at dsn and returns the *sql.DB. For in-memory
-// databases (dsn containing ":memory:") it pins the pool to a single connection
-// so the in-memory database is shared across queries.
+// databases it pins the pool to a single connection so the in-memory database is
+// shared across queries. This covers both the ":memory:" form and the named
+// shared form "file:name?mode=memory&cache=shared" (dsn containing "mode=memory").
 func Open(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
-	if strings.Contains(dsn, ":memory:") {
+	if strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory") {
 		db.SetMaxOpenConns(1)
 	}
 	return db, nil
