@@ -85,7 +85,7 @@ func renderOperation(buf *bytes.Buffer, op Operation) {
 		if len(o.Fields) > 0 {
 			buf.WriteString("\t\t\tFields: []migrations.FieldState{\n")
 			for _, f := range o.Fields {
-				renderFieldState(buf, "\t\t\t\t", f)
+				renderFieldStateElem(buf, f)
 			}
 			buf.WriteString("\t\t\t},\n")
 		}
@@ -100,7 +100,7 @@ func renderOperation(buf *bytes.Buffer, op Operation) {
 		buf.WriteString("\t\tmigrations.AddField{\n")
 		fmt.Fprintf(buf, "\t\t\tModel: %q,\n", o.Model)
 		buf.WriteString("\t\t\tField: ")
-		renderFieldState(buf, "\t\t\t", o.Field)
+		renderFieldStateInline(buf, o.Field)
 		buf.WriteString("\t\t},\n")
 
 	case RemoveField:
@@ -113,15 +113,29 @@ func renderOperation(buf *bytes.Buffer, op Operation) {
 		buf.WriteString("\t\tmigrations.AlterField{\n")
 		fmt.Fprintf(buf, "\t\t\tModel: %q,\n", o.Model)
 		buf.WriteString("\t\t\tField: ")
-		renderFieldState(buf, "\t\t\t", o.Field)
+		renderFieldStateInline(buf, o.Field)
 		buf.WriteString("\t\t},\n")
 	}
 }
 
-// renderFieldState writes a migrations.FieldState{...} literal. indent is the
-// indentation prefix used for continuation lines when the field is part of a
-// slice; for inline use (AddField/AlterField) the caller handles the surrounding context.
-func renderFieldState(buf *bytes.Buffer, _ string, f FieldState) {
+// renderFieldStateInline writes a migrations.FieldState{...} literal for
+// non-slice contexts (AddField, AlterField) where the type name is required.
+func renderFieldStateInline(buf *bytes.Buffer, f FieldState) {
+	buf.WriteString("migrations.FieldState{")
+	buf.WriteString(fieldStateParts(f))
+	buf.WriteString("},\n")
+}
+
+// renderFieldStateElem writes a FieldState element inside a []migrations.FieldState
+// slice literal. The leading type name is omitted so that gofmt -s is satisfied.
+func renderFieldStateElem(buf *bytes.Buffer, f FieldState) {
+	buf.WriteString("\t\t\t\t{")
+	buf.WriteString(fieldStateParts(f))
+	buf.WriteString("},\n")
+}
+
+// fieldStateParts returns the comma-separated key:value fields for a FieldState literal.
+func fieldStateParts(f FieldState) string {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("Name: %q", f.Name))
 	parts = append(parts, fmt.Sprintf("Column: %q", f.Column))
@@ -138,9 +152,7 @@ func renderFieldState(buf *bytes.Buffer, _ string, f FieldState) {
 	if f.MaxLength != 0 {
 		parts = append(parts, fmt.Sprintf("MaxLength: %d", f.MaxLength))
 	}
-	buf.WriteString("migrations.FieldState{")
-	buf.WriteString(strings.Join(parts, ", "))
-	buf.WriteString("},\n")
+	return strings.Join(parts, ", ")
 }
 
 // WriteMigration renders m and writes it to <dir>/<m.Name>.go, creating dir if needed.

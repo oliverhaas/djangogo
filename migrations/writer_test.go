@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -44,6 +45,42 @@ func TestRenderMigration_ParsesCleanly(t *testing.T) {
 	_, parseErr := parser.ParseFile(fset, "", src, parser.AllErrors)
 	if parseErr != nil {
 		t.Fatalf("rendered source does not parse: %v\n\n%s", parseErr, src)
+	}
+}
+
+// TestRenderMigration_GofmtSClean verifies that the rendered output is already
+// in gofmt -s canonical form (format.Source output equals the rendered source)
+// and that FieldState slice elements are emitted without a redundant type name.
+func TestRenderMigration_GofmtSClean(t *testing.T) {
+	t.Parallel()
+	src, err := RenderMigration("mypkg", testMigration())
+	if err != nil {
+		t.Fatalf("RenderMigration error: %v", err)
+	}
+
+	// format.Source applies gofmt (including -s simplification) -- the result
+	// must be identical to what we rendered.
+	formatted, err := format.Source([]byte(src))
+	if err != nil {
+		t.Fatalf("format.Source error: %v\n\nsource:\n%s", err, src)
+	}
+	if string(formatted) != src {
+		t.Errorf("rendered source is not gofmt -s clean; diff (want formatted):\n%s\n\ngot:\n%s", string(formatted), src)
+	}
+
+	// Slice elements inside []migrations.FieldState{...} must NOT carry a
+	// redundant type name. gofmt -s flags "T{...}" elements inside a []T literal
+	// as simplifiable. We detect this by asserting that no line starts with
+	// tab-indented "migrations.FieldState{" (which is the element-literal form);
+	// the only allowed forms are the slice type "[]migrations.FieldState{" and
+	// the struct-field form "Field: migrations.FieldState{".
+	if strings.Contains(src, "\tmigrations.FieldState{") {
+		t.Errorf(
+			"rendered source contains a redundant FieldState element type "+
+				"(tab-indented migrations.FieldState{ inside a slice literal); "+
+				"gofmt -s requires bare {..} for slice elements\n\nsource:\n%s",
+			src,
+		)
 	}
 }
 
