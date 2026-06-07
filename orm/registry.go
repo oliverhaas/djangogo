@@ -136,6 +136,14 @@ func (r *Registry) Register(model any) (*Model, error) {
 	return m, nil
 }
 
+// Models returns the registered models in registration order. The returned slice is
+// a copy; the *Model values are read-only.
+func (r *Registry) Models() []*Model {
+	cp := make([]*Model, len(r.models))
+	copy(cp, r.models)
+	return cp
+}
+
 // Freeze marks the registry as read-only. After Freeze, Register will return
 // an error.
 func (r *Registry) Freeze() { r.frozen = true }
