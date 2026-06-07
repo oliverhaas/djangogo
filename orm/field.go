@@ -65,6 +65,9 @@ type Field struct {
 	MaxLength int
 	// Index is the index of this field within the parent struct (for reflect).
 	Index int
+	// Rel describes the relation when this field is a relation field (e.g. FK[T]);
+	// it is nil for scalar fields.
+	Rel *Relation
 }
 
 // timeType is the reflect.Type for time.Time, used for KindDateTime inference.
@@ -88,6 +91,28 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 		Name:   sf.Name,
 		Column: toSnakeCase(sf.Name),
 		Index:  index,
+	}
+
+	// Relation fields (e.g. FK[T]) are detected before the scalar type switch.
+	// They map to an integer FK column and carry a *Relation; the column defaults
+	// to "<snake>_id" and may be overridden by a column= tag.
+	if rm, ok := reflect.Zero(sf.Type).Interface().(relationMarker); ok {
+		f.Kind = KindInt
+		f.Column = toSnakeCase(sf.Name) + "_id"
+		f.Rel = &Relation{Kind: rm.relKind(), targetType: rm.relTarget()}
+		if tag != "" {
+			for _, token := range strings.Split(tag, ";") {
+				token = strings.TrimSpace(token)
+				if token == "" {
+					continue
+				}
+				if err := applyRelationTagOption(f, sf.Name, token); err != nil {
+					return nil, false, err
+				}
+			}
+		}
+		f.Rel.Column = f.Column
+		return f, true, nil
 	}
 
 	switch sf.Type.Kind() { // unsupported kinds handled by default
@@ -172,6 +197,31 @@ func applyTagOption(f *Field, fieldName, token string) error {
 			return fmt.Errorf("orm: field %s: invalid max_length %q: must be a positive integer", fieldName, raw)
 		}
 		f.MaxLength = n
+	default:
+		return fmt.Errorf("orm: field %s: unknown tag option %q", fieldName, token)
+	}
+	return nil
+}
+
+// applyRelationTagOption applies a single parsed tag token to a relation field.
+// A relation field accepts null, unique, and column= but rejects scalar-only
+// options such as max_length, type=text, and pk.
+func applyRelationTagOption(f *Field, fieldName, token string) error {
+	switch {
+	case token == "null":
+		f.Null = true
+	case token == "unique":
+		f.Unique = true
+	case strings.HasPrefix(token, "column="):
+		name := token[len("column="):]
+		if name == "" {
+			return fmt.Errorf("orm: field %s: column name must not be empty", fieldName)
+		}
+		f.Column = name
+	case token == "pk":
+		return fmt.Errorf("orm: field %s: pk is not valid on a relation field", fieldName)
+	case token == "type=text" || strings.HasPrefix(token, "max_length="):
+		return fmt.Errorf("orm: field %s: %q is not valid on a relation field", fieldName, token)
 	default:
 		return fmt.Errorf("orm: field %s: unknown tag option %q", fieldName, token)
 	}

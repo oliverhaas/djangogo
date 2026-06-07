@@ -80,13 +80,22 @@ func (Dialect) ColumnType(f *orm.Field) string {
 	return b.String()
 }
 
-// CreateTableSQL returns a CREATE TABLE statement for m in field-declaration order.
+// CreateTableSQL returns a CREATE TABLE statement for m in field-declaration
+// order. Each resolved foreign-key field also emits a table-level FOREIGN KEY
+// constraint after the column definitions.
 func (d Dialect) CreateTableSQL(m *orm.Model) string {
 	fields := m.Fields()
-	defs := make([]string, len(fields))
+	defs := make([]string, 0, len(fields))
 
-	for i, f := range fields {
-		defs[i] = d.Quote(f.Column) + " " + d.ColumnType(f)
+	for _, f := range fields {
+		defs = append(defs, d.Quote(f.Column)+" "+d.ColumnType(f))
+	}
+	for _, f := range fields {
+		if f.Rel != nil && f.Rel.Target != nil {
+			target := f.Rel.Target
+			defs = append(defs, "FOREIGN KEY ("+d.Quote(f.Column)+") REFERENCES "+
+				d.Quote(target.Table())+" ("+d.Quote(target.PrimaryKey().Column)+")")
+		}
 	}
 
 	return "CREATE TABLE " + d.Quote(m.Table()) + " (" + strings.Join(defs, ", ") + ")"

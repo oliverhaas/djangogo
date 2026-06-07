@@ -144,6 +144,28 @@ func (r *Registry) Models() []*Model {
 	return cp
 }
 
+// Resolve links every relation field to its target model. Call it after all
+// models are registered and before Freeze. It returns an error if a relation
+// references a model that was never registered. Resolve is idempotent.
+func (r *Registry) Resolve() error {
+	for _, m := range r.models {
+		for _, f := range m.fields {
+			if f.Rel == nil {
+				continue
+			}
+			tm, ok := r.byType[f.Rel.targetType]
+			if !ok {
+				return fmt.Errorf(
+					"orm: model %s field %s references unregistered model %s",
+					m.name, f.Name, f.Rel.targetType,
+				)
+			}
+			f.Rel.Target = tm
+		}
+	}
+	return nil
+}
+
 // Freeze marks the registry as read-only. After Freeze, Register will return
 // an error.
 func (r *Registry) Freeze() { r.frozen = true }

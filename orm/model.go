@@ -34,6 +34,18 @@ func (m *Model) Fields() []*Field {
 // PrimaryKey returns the primary-key field, or nil if none was resolved.
 func (m *Model) PrimaryKey() *Field { return m.pk }
 
+// Relations returns the model's relation fields (those with a non-nil Rel) in
+// field-declaration order.
+func (m *Model) Relations() []*Field {
+	var rels []*Field
+	for _, f := range m.fields {
+		if f.Rel != nil {
+			rels = append(rels, f)
+		}
+	}
+	return rels
+}
+
 // FieldByName looks up a field by its Go struct name.
 func (m *Model) FieldByName(name string) (*Field, bool) {
 	f, ok := m.byName[name]
