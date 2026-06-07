@@ -26,3 +26,13 @@ func TestSettingsCheck(t *testing.T) {
 		t.Error("missing SecretKey should be an error")
 	}
 }
+
+func TestConfigureAndActive(t *testing.T) {
+	got := Configure(Settings{SecretKey: "k"})
+	if got.Host != "127.0.0.1" {
+		t.Errorf("Configure should apply defaults; Host = %q", got.Host)
+	}
+	if Active() != got {
+		t.Error("Active() should return the configured settings")
+	}
+}
