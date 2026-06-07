@@ -16,6 +16,12 @@ type FieldState struct {
 	Null       bool
 	Unique     bool
 	MaxLength  int
+	// RelKind classifies a relation field; orm.RelNone for scalar fields.
+	RelKind orm.RelKind
+	// RelTargetTable is the referenced table for a FK, e.g. "author".
+	RelTargetTable string
+	// RelTargetColumn is the referenced primary-key column for a FK, e.g. "id".
+	RelTargetColumn string
 }
 
 // Equal reports whether two field states are schema-equivalent.
@@ -26,12 +32,17 @@ func (f FieldState) Equal(other FieldState) bool {
 		f.PrimaryKey == other.PrimaryKey &&
 		f.Null == other.Null &&
 		f.Unique == other.Unique &&
-		f.MaxLength == other.MaxLength
+		f.MaxLength == other.MaxLength &&
+		f.RelKind == other.RelKind &&
+		f.RelTargetTable == other.RelTargetTable &&
+		f.RelTargetColumn == other.RelTargetColumn
 }
 
-// fieldStateFromField builds a FieldState from an orm.Field pointer.
+// fieldStateFromField builds a FieldState from an orm.Field pointer. Relation
+// metadata is captured only when f carries a relation; the target table and
+// column require the registry to have been resolved (Rel.Target set).
 func fieldStateFromField(f *orm.Field) FieldState {
-	return FieldState{
+	fs := FieldState{
 		Name:       f.Name,
 		Column:     f.Column,
 		Kind:       f.Kind,
@@ -40,6 +51,14 @@ func fieldStateFromField(f *orm.Field) FieldState {
 		Unique:     f.Unique,
 		MaxLength:  f.MaxLength,
 	}
+	if f.Rel != nil {
+		fs.RelKind = f.Rel.Kind
+		if f.Rel.Target != nil {
+			fs.RelTargetTable = f.Rel.Target.Table()
+			fs.RelTargetColumn = f.Rel.Target.PrimaryKey().Column
+		}
+	}
+	return fs
 }
 
 // ModelState is a snapshot of one model's table and ordered fields.

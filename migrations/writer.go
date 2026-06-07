@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // RenderMigration renders an editable Go source file (in package pkgName) that
@@ -152,7 +154,28 @@ func fieldStateParts(f FieldState) string {
 	if f.MaxLength != 0 {
 		parts = append(parts, fmt.Sprintf("MaxLength: %d", f.MaxLength))
 	}
+	if f.RelKind != orm.RelNone {
+		parts = append(parts, "RelKind: "+relKindSource(f.RelKind))
+	}
+	if f.RelTargetTable != "" {
+		parts = append(parts, fmt.Sprintf("RelTargetTable: %q", f.RelTargetTable))
+	}
+	if f.RelTargetColumn != "" {
+		parts = append(parts, fmt.Sprintf("RelTargetColumn: %q", f.RelTargetColumn))
+	}
 	return strings.Join(parts, ", ")
+}
+
+// relKindSource maps an orm.RelKind to its Go source constant name (e.g.
+// "orm.RelFK"), so generated migrations reference the constant rather than a
+// raw integer.
+func relKindSource(k orm.RelKind) string {
+	switch k {
+	case orm.RelFK:
+		return "orm.RelFK"
+	default:
+		return "orm.RelNone"
+	}
 }
 
 // WriteMigration renders m and writes it to <dir>/<m.Name>.go, creating dir if needed.

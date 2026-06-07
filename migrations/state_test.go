@@ -22,6 +22,14 @@ type Post struct {
 	Body  string `orm:"type=text"`
 }
 
+// Article has a forward foreign key to Author, used to verify that FieldState
+// captures relation metadata from a RESOLVED registry.
+type Article struct {
+	ID     int64
+	Title  string `orm:"max_length=200"`
+	Author orm.FK[Author]
+}
+
 func newTestRegistry(t *testing.T) *orm.Registry {
 	t.Helper()
 	r := orm.NewRegistry()
@@ -30,6 +38,23 @@ func newTestRegistry(t *testing.T) *orm.Registry {
 	}
 	if _, err := r.Register(&Post{}); err != nil {
 		t.Fatalf("Register(Post): %v", err)
+	}
+	return r
+}
+
+// newRelationRegistry registers Author and Article(FK[Author]) and resolves the
+// relations so FieldState capture can read Rel.Target.
+func newRelationRegistry(t *testing.T) *orm.Registry {
+	t.Helper()
+	r := orm.NewRegistry()
+	if _, err := r.Register(&Author{}); err != nil {
+		t.Fatalf("Register(Author): %v", err)
+	}
+	if _, err := r.Register(&Article{}); err != nil {
+		t.Fatalf("Register(Article): %v", err)
+	}
+	if err := r.Resolve(); err != nil {
+		t.Fatalf("Resolve: %v", err)
 	}
 	return r
 }
@@ -165,6 +190,46 @@ func TestStateFromRegistry_PostModelState(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// StateFromRegistry: relation capture
+// ---------------------------------------------------------------------------
+
+func TestStateFromRegistry_CapturesFK(t *testing.T) {
+	t.Parallel()
+	r := newRelationRegistry(t)
+	ps := StateFromRegistry(r)
+
+	ms := ps.Models["Article"]
+	if ms == nil {
+		t.Fatal("Models[\"Article\"] missing")
+	}
+	fk, ok := ms.FieldByName("Author")
+	if !ok {
+		t.Fatal("Article.Author field missing from state")
+	}
+	if fk.Column != "author_id" {
+		t.Errorf("Author.Column = %q, want author_id", fk.Column)
+	}
+	if fk.RelKind != orm.RelFK {
+		t.Errorf("Author.RelKind = %v, want RelFK", fk.RelKind)
+	}
+	if fk.RelTargetTable != "author" {
+		t.Errorf("Author.RelTargetTable = %q, want author", fk.RelTargetTable)
+	}
+	if fk.RelTargetColumn != "id" {
+		t.Errorf("Author.RelTargetColumn = %q, want id", fk.RelTargetColumn)
+	}
+
+	// Scalar fields carry no relation metadata.
+	title, _ := ms.FieldByName("Title")
+	if title.RelKind != orm.RelNone {
+		t.Errorf("Title.RelKind = %v, want RelNone", title.RelKind)
+	}
+	if title.RelTargetTable != "" || title.RelTargetColumn != "" {
+		t.Errorf("Title relation targets should be empty, got %q/%q", title.RelTargetTable, title.RelTargetColumn)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // FieldState.Equal
 // ---------------------------------------------------------------------------
 
@@ -207,6 +272,9 @@ func TestFieldState_Equal_EachFieldDiffers(t *testing.T) {
 		{"Null", func() FieldState { f := base; f.Null = true; return f }()},
 		{"Unique", func() FieldState { f := base; f.Unique = true; return f }()},
 		{"MaxLength", func() FieldState { f := base; f.MaxLength = 200; return f }()},
+		{"RelKind", func() FieldState { f := base; f.RelKind = orm.RelFK; return f }()},
+		{"RelTargetTable", func() FieldState { f := base; f.RelTargetTable = "author"; return f }()},
+		{"RelTargetColumn", func() FieldState { f := base; f.RelTargetColumn = "id"; return f }()},
 	}
 
 	for _, tc := range cases {

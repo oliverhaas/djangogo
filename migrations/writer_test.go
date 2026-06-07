@@ -34,6 +34,29 @@ func testMigration() Migration {
 	}
 }
 
+// fkMigration creates an Article model whose Author field is a foreign key, so
+// the writer must round-trip the relation metadata.
+func fkMigration() Migration {
+	return Migration{
+		App:  "myapp",
+		Name: "0002_article",
+		Operations: []Operation{
+			CreateModel{
+				Name:  "Article",
+				Table: "article",
+				Fields: []FieldState{
+					{Name: "ID", Column: "id", Kind: orm.KindAuto, PrimaryKey: true},
+					{Name: "Title", Column: "title", Kind: orm.KindChar, MaxLength: 200},
+					{
+						Name: "Author", Column: "author_id", Kind: orm.KindInt,
+						RelKind: orm.RelFK, RelTargetTable: "author", RelTargetColumn: "id",
+					},
+				},
+			},
+		},
+	}
+}
+
 func TestRenderMigration_ParsesCleanly(t *testing.T) {
 	t.Parallel()
 	src, err := RenderMigration("mypkg", testMigration())
@@ -105,6 +128,42 @@ func TestRenderMigration_ContainsExpectedTokens(t *testing.T) {
 		if !strings.Contains(src, want) {
 			t.Errorf("rendered source missing %q\n\nsource:\n%s", want, src)
 		}
+	}
+}
+
+// TestRenderMigration_RendersFK verifies that an FK FieldState round-trips its
+// relation metadata: the rendered source names orm.RelFK and the target table
+// and column, is gofmt -s clean, and parses.
+func TestRenderMigration_RendersFK(t *testing.T) {
+	t.Parallel()
+	src, err := RenderMigration("mypkg", fkMigration())
+	if err != nil {
+		t.Fatalf("RenderMigration error: %v", err)
+	}
+
+	checks := []string{
+		"RelKind: orm.RelFK",
+		`RelTargetTable: "author"`,
+		`RelTargetColumn: "id"`,
+	}
+	for _, want := range checks {
+		if !strings.Contains(src, want) {
+			t.Errorf("rendered FK source missing %q\n\nsource:\n%s", want, src)
+		}
+	}
+
+	// gofmt -s clean: format.Source output must equal the rendered source.
+	formatted, err := format.Source([]byte(src))
+	if err != nil {
+		t.Fatalf("format.Source error: %v\n\nsource:\n%s", err, src)
+	}
+	if string(formatted) != src {
+		t.Errorf("rendered FK source is not gofmt -s clean; diff (want formatted):\n%s\n\ngot:\n%s", string(formatted), src)
+	}
+
+	fset := token.NewFileSet()
+	if _, parseErr := parser.ParseFile(fset, "", src, parser.AllErrors); parseErr != nil {
+		t.Fatalf("rendered FK source does not parse: %v\n\n%s", parseErr, src)
 	}
 }
 

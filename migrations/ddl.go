@@ -20,12 +20,20 @@ func toOrmField(fs FieldState) *orm.Field {
 }
 
 // createTableSQL renders a CREATE TABLE for the given table and fields using d.
+// Each FK field also emits a table-level FOREIGN KEY constraint after the column
+// definitions.
 func createTableSQL(d orm.Dialect, table string, fields []FieldState) string {
-	colDefs := make([]string, len(fields))
-	for i, f := range fields {
-		colDefs[i] = d.Quote(f.Column) + " " + d.ColumnType(toOrmField(f))
+	defs := make([]string, 0, len(fields))
+	for _, f := range fields {
+		defs = append(defs, d.Quote(f.Column)+" "+d.ColumnType(toOrmField(f)))
 	}
-	return "CREATE TABLE " + d.Quote(table) + " (" + strings.Join(colDefs, ", ") + ")"
+	for _, f := range fields {
+		if f.RelKind == orm.RelFK && f.RelTargetTable != "" {
+			defs = append(defs, "FOREIGN KEY ("+d.Quote(f.Column)+") REFERENCES "+
+				d.Quote(f.RelTargetTable)+" ("+d.Quote(f.RelTargetColumn)+")")
+		}
+	}
+	return "CREATE TABLE " + d.Quote(table) + " (" + strings.Join(defs, ", ") + ")"
 }
 
 // rebuildTableSQL renders the SQLite temp-table rebuild that transforms a table from
