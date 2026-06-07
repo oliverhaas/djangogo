@@ -35,3 +35,26 @@ func TestRegistryDuplicate(t *testing.T) {
 		t.Error("duplicate app name should error")
 	}
 }
+
+type readyApp struct {
+	name string
+	log  *[]string
+}
+
+func (a readyApp) Name() string { return a.name }
+func (a readyApp) Ready() error { *a.log = append(*a.log, a.name); return nil }
+
+func TestRegistryReadyOrder(t *testing.T) {
+	var log []string
+	r := NewRegistry()
+	_ = r.Register(readyApp{"first", &log})
+	_ = r.Register(fakeApp{"plain"}) // no Ready(), must be skipped without error
+	_ = r.Register(readyApp{"second", &log})
+
+	if err := r.Ready(); err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	if len(log) != 2 || log[0] != "first" || log[1] != "second" {
+		t.Errorf("Ready order = %v, want [first second]", log)
+	}
+}

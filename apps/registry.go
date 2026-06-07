@@ -40,3 +40,15 @@ func (r *Registry) Names() []string {
 	copy(out, r.order)
 	return out
 }
+
+// Ready runs Ready() on every app implementing Initializer, in registration order.
+func (r *Registry) Ready() error {
+	for _, name := range r.order {
+		if init, ok := r.byName[name].(Initializer); ok {
+			if err := init.Ready(); err != nil {
+				return fmt.Errorf("apps: %s.Ready: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
