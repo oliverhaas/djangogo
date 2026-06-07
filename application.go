@@ -106,6 +106,8 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	_ = app.Commands.Register(&runserverCommand{app: app})
 	_ = app.Commands.Register(&makemigrationsCommand{app: app})
 	_ = app.Commands.Register(&migrateCommand{app: app})
+	_ = app.Commands.Register(&startprojectCommand{out: app.Out})
+	_ = app.Commands.Register(&startappCommand{out: app.Out})
 
 	return app, nil
 }

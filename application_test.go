@@ -76,6 +76,9 @@ func TestNewWiresRegistries(t *testing.T) {
 	if !found["runserver"] || !found["version"] {
 		t.Errorf("built-in commands missing: %v", names)
 	}
+	if !found["startproject"] || !found["startapp"] {
+		t.Errorf("scaffold commands missing: %v", names)
+	}
 }
 
 func TestNewRejectsBadSettings(t *testing.T) {
