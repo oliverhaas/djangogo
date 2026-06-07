@@ -253,7 +253,15 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request) {
 		}
 		form := s.formFor(e).Bind(r.PostForm)
 		if form.IsValid() {
-			obj := e.ops.newPtr()
+			obj, err := e.ops.get(r.Context(), pk)
+			if errors.Is(err, orm.ErrDoesNotExist) {
+				http.NotFound(w, r)
+				return
+			}
+			if err != nil {
+				http.Error(w, "failed to load row", http.StatusInternalServerError)
+				return
+			}
 			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
 				http.Error(w, "failed to populate object", http.StatusInternalServerError)
 				return

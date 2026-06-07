@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -631,5 +632,95 @@ func TestWriteViewsRedirectNonStaff(t *testing.T) {
 		if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, site.LoginURL) {
 			t.Errorf("%s %s redirect Location = %q, want prefix %q", c.method, c.path, loc, site.LoginURL)
 		}
+	}
+}
+
+// SecretDoc is the model used to verify that excluded fields are not clobbered
+// on a change POST. The Secret field is excluded from the admin form; EditTitle
+// is the field the test edits.
+type SecretDoc struct {
+	ID        int64
+	EditTitle string `orm:"max_length=200"`
+	Secret    string `orm:"max_length=200"`
+}
+
+// newSecretDocDB creates an in-memory DB with SecretDoc registered and its
+// table created.
+func newSecretDocDB(t *testing.T) *orm.DB {
+	t.Helper()
+	reg := orm.NewRegistry()
+	if _, err := reg.Register(&SecretDoc{}); err != nil {
+		t.Fatalf("Register(SecretDoc): %v", err)
+	}
+	if err := reg.Resolve(); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	reg.Freeze()
+
+	sdb, err := sqlite.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = sdb.Close() })
+	db := orm.NewDB(sdb, sqlite.New(), reg)
+
+	m, ok := reg.Get("SecretDoc")
+	if !ok {
+		t.Fatal("SecretDoc model not found in registry")
+	}
+	if err := db.CreateTable(context.Background(), m); err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	return db
+}
+
+// TestChangePOSTDoesNotClobberExcludedFields is a regression test for the
+// data-loss bug where a change POST would zero out any field not present in
+// the submitted form (excluded/readonly fields).
+func TestChangePOSTDoesNotClobberExcludedFields(t *testing.T) {
+	db := newSecretDocDB(t)
+	ctx := context.Background()
+
+	// Seed a row with a non-zero Secret value.
+	original := &SecretDoc{EditTitle: "original title", Secret: "s3cr3t"}
+	if err := orm.Query[SecretDoc](db).Create(ctx, original); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	site, err := admin.NewAdminSite(db)
+	if err != nil {
+		t.Fatalf("NewAdminSite: %v", err)
+	}
+	admin.Register[SecretDoc](site, admin.ModelAdmin{
+		ExcludeFields: []string{"Secret"},
+	})
+	router := urls.NewRouter(site.Routes()...)
+
+	// POST a change that edits only EditTitle; Secret is absent from the form.
+	form := url.Values{}
+	form.Set("EditTitle", "updated title")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/admin/secretdoc/"+strconv.FormatInt(original.ID, 10)+"/change/",
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	staffInjector(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("change POST status = %d, want 302\n%s", rec.Code, rec.Body.String())
+	}
+
+	// Reload from DB and assert both the edited and the excluded fields.
+	got, err := orm.Query[SecretDoc](db).Get(ctx, "id", original.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.EditTitle != "updated title" {
+		t.Errorf("EditTitle = %q, want %q", got.EditTitle, "updated title")
+	}
+	if got.Secret != "s3cr3t" {
+		t.Errorf("Secret = %q after change POST, want %q (excluded field was clobbered)", got.Secret, "s3cr3t")
 	}
 }

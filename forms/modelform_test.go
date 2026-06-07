@@ -174,3 +174,26 @@ func TestPopulateStruct_FK(t *testing.T) {
 		t.Errorf("Author FK pk: got %d, want 42", dest.Author.PK())
 	}
 }
+
+func TestHumanize(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"Title", "Title"},
+		{"CreatedAt", "Created at"},
+		{"FirstName", "First name"},
+		{"ID", "ID"},
+		{"URL", "URL"},
+		{"PublishedAt", "Published at"},
+		{"Views", "Views"},
+		{"IsActive", "Is active"},
+	}
+	for _, tc := range cases {
+		got := humanize(tc.input)
+		if got != tc.want {
+			t.Errorf("humanize(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

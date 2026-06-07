@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/oliverhaas/djangogo/orm"
@@ -210,6 +211,94 @@ func setScalar(mf *orm.Field, fv reflect.Value, val any) error {
 	return nil
 }
 
-// humanize turns a Go field name into a display label. For now it returns the
-// name unchanged; a future revision may insert spaces at word boundaries.
-func humanize(name string) string { return name }
+// humanize turns a Go identifier into a readable display label.
+// It splits on camelCase/PascalCase word boundaries and on runs of upper-case
+// letters (acronyms), then Title-cases the first word and lowercases the rest,
+// while preserving all-caps acronyms.
+//
+// Examples:
+//
+//	"CreatedAt"  -> "Created at"
+//	"FirstName"  -> "First name"
+//	"ID"         -> "ID"
+//	"URL"        -> "URL"
+//	"Title"      -> "Title"
+func humanize(name string) string {
+	words := splitIdentifier(name)
+	if len(words) == 0 {
+		return name
+	}
+	var sb strings.Builder
+	for i, w := range words {
+		if i > 0 {
+			sb.WriteByte(' ')
+		}
+		switch {
+		case isAcronym(w):
+			// All-caps short runs (e.g. ID, URL) stay upper-case.
+			sb.WriteString(w)
+		case i == 0:
+			// First word: Title-case.
+			sb.WriteString(strings.ToUpper(w[:1]) + strings.ToLower(w[1:]))
+		default:
+			sb.WriteString(strings.ToLower(w))
+		}
+	}
+	return sb.String()
+}
+
+// splitIdentifier breaks a Go identifier into words at camelCase/PascalCase
+// transitions and acronym runs. For example:
+//
+//	"CreatedAt" -> ["Created", "At"]
+//	"HTTPSProxy" -> ["HTTPS", "Proxy"]
+//	"ID" -> ["ID"]
+func splitIdentifier(s string) []string {
+	if s == "" {
+		return nil
+	}
+	runes := []rune(s)
+	n := len(runes)
+	var words []string
+	start := 0
+	for i := 1; i < n; i++ {
+		prev := runes[i-1]
+		curr := runes[i]
+		var next rune
+		if i+1 < n {
+			next = runes[i+1]
+		}
+		cut := false
+		if isUpper(curr) {
+			if isLower(prev) {
+				// "camelCase" boundary: e before C.
+				cut = true
+			} else if isUpper(prev) && next != 0 && isLower(next) {
+				// Acronym-to-word boundary: "HTTPSProxy" splits before P.
+				cut = true
+			}
+		}
+		if cut {
+			words = append(words, string(runes[start:i]))
+			start = i
+		}
+	}
+	words = append(words, string(runes[start:]))
+	return words
+}
+
+func isUpper(r rune) bool { return r >= 'A' && r <= 'Z' }
+func isLower(r rune) bool { return r >= 'a' && r <= 'z' }
+
+// isAcronym returns true when every rune in w is an upper-case ASCII letter.
+func isAcronym(w string) bool {
+	if w == "" {
+		return false
+	}
+	for _, r := range w {
+		if !isUpper(r) {
+			return false
+		}
+	}
+	return true
+}
