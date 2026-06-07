@@ -4,6 +4,9 @@
 *.exe
 *.test
 *.out
+# example binaries (go build ./examples/<name> drops a bare binary)
+/blog
+/examples/blog/blog
 
 # Coverage
 coverage.txt
