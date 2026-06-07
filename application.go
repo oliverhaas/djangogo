@@ -72,6 +72,9 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 			}
 		}
 	}
+	if err := modelReg.Resolve(); err != nil {
+		return nil, fmt.Errorf("djangogo: resolve model relations: %w", err)
+	}
 	modelReg.Freeze()
 	app.Models = modelReg
 

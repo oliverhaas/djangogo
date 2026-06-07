@@ -25,6 +25,37 @@ type testApp struct{ name string }
 func (a testApp) Name() string  { return a.name }
 func (a testApp) Models() []any { return []any{&TestModel{}} }
 
+// blogAuthor and blogArticle exercise a forward foreign key between two models
+// declared by the same app, so New must Resolve relations before Freeze.
+type blogAuthor struct {
+	ID   int64
+	Name string
+}
+
+type blogArticle struct {
+	ID     int64
+	Title  string `orm:"max_length=200"`
+	Author orm.FK[blogAuthor]
+}
+
+// relApp declares Author and Article(FK[Author]); both targets are registered.
+type relApp struct{ name string }
+
+func (a relApp) Name() string  { return a.name }
+func (a relApp) Models() []any { return []any{&blogAuthor{}, &blogArticle{}} }
+
+// danglingFK has an FK to a model the app never registers, so Resolve must fail.
+type danglingFK struct {
+	ID     int64
+	Author orm.FK[blogAuthor]
+}
+
+// danglingApp declares only danglingFK, whose FK target blogAuthor is unregistered.
+type danglingApp struct{ name string }
+
+func (a danglingApp) Name() string  { return a.name }
+func (a danglingApp) Models() []any { return []any{&danglingFK{}} }
+
 func TestNewWiresRegistries(t *testing.T) {
 	app, err := New(conf.Settings{SecretKey: "k"})
 	if err != nil {
@@ -176,5 +207,66 @@ func TestMakemigrationsAndMigrate(t *testing.T) {
 	}
 	if out := buf.String(); out != "No changes detected\n" {
 		t.Errorf("rerun output = %q, want %q", out, "No changes detected\n")
+	}
+}
+
+// TestNewResolvesRelations verifies that New resolves model relations before
+// freezing, so an FK field's Rel.Target is set and the relational model's
+// CREATE TABLE emits a FOREIGN KEY constraint.
+func TestNewResolvesRelations(t *testing.T) {
+	app, err := New(conf.Settings{
+		SecretKey: "k",
+		Database:  conf.Database{Driver: "sqlite", DSN: "file:relapp?mode=memory&cache=shared"},
+	}, relApp{name: "blog"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	article, ok := app.Models.Get("blogArticle")
+	if !ok {
+		t.Fatal("Models registry should contain blogArticle")
+	}
+	author, ok := app.Models.Get("blogAuthor")
+	if !ok {
+		t.Fatal("Models registry should contain blogAuthor")
+	}
+
+	fk, ok := article.FieldByName("Author")
+	if !ok {
+		t.Fatal("blogArticle should have an Author field")
+	}
+	if fk.Rel == nil {
+		t.Fatal("Author field should carry a relation")
+	}
+	if fk.Rel.Target != author {
+		t.Fatalf("Author Rel.Target = %v, want blogAuthor model (relations not resolved)", fk.Rel.Target)
+	}
+
+	// The resolved relation must surface as a FOREIGN KEY in the table DDL.
+	if err := app.DB.CreateTable(context.Background(), author); err != nil {
+		t.Fatalf("CreateTable(blogAuthor): %v", err)
+	}
+	if err := app.DB.CreateTable(context.Background(), article); err != nil {
+		t.Fatalf("CreateTable(blogArticle): %v", err)
+	}
+	rows, err := app.DB.SQL().QueryContext(context.Background(), `PRAGMA foreign_key_list("blogarticle")`)
+	if err != nil {
+		t.Fatalf("PRAGMA foreign_key_list: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		t.Fatal("blogarticle table has no foreign key after CreateTable")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("foreign_key_list rows err: %v", err)
+	}
+}
+
+// TestNewRejectsUnresolvableRelation verifies that New returns an error when a
+// model's FK targets a model that is never registered.
+func TestNewRejectsUnresolvableRelation(t *testing.T) {
+	_, err := New(conf.Settings{SecretKey: "k"}, danglingApp{name: "blog"})
+	if err == nil {
+		t.Fatal("New should reject an app whose FK target is unregistered")
 	}
 }
