@@ -3,6 +3,7 @@ module github.com/oliverhaas/djangogo
 go 1.26
 
 require (
+	github.com/flosch/pongo2/v6 v6.1.0
 	github.com/jackc/pgx/v5 v5.10.0
 	modernc.org/sqlite v1.52.0
 )
@@ -16,6 +17,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/rogpeppe/go-internal v1.15.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
