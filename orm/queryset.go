@@ -21,13 +21,14 @@ type orderClause struct {
 // QuerySet is a lazy, immutable, clone-per-method query builder for model T.
 // Chain methods never mutate their receiver; each returns a fresh clone.
 type QuerySet[T any] struct {
-	db     *DB
-	model  *Model
-	wheres []whereClause
-	orders []orderClause
-	limit  int // -1 means no limit
-	offset int // 0 means no offset
-	err    error
+	db            *DB
+	model         *Model
+	wheres        []whereClause
+	orders        []orderClause
+	selectRelated []string // FK field NAMES to eager-load via LEFT JOIN
+	limit         int      // -1 means no limit
+	offset        int      // 0 means no offset
+	err           error
 }
 
 // Query starts a new QuerySet for model T resolved from db's registry.
@@ -61,6 +62,20 @@ func (q *QuerySet[T]) clone() *QuerySet[T] {
 		cp.orders = make([]orderClause, len(q.orders))
 		copy(cp.orders, q.orders)
 	}
+	if len(q.selectRelated) > 0 {
+		cp.selectRelated = make([]string, len(q.selectRelated))
+		copy(cp.selectRelated, q.selectRelated)
+	}
+	return cp
+}
+
+// SelectRelated returns a clone that eager-loads the named forward-FK fields via
+// a single LEFT JOIN, populating each FK's loaded object during the read. Each
+// name must identify a forward-FK field on the model; an unknown or non-FK name
+// is reported as an error when the queryset is compiled or executed.
+func (q *QuerySet[T]) SelectRelated(fields ...string) *QuerySet[T] {
+	cp := q.clone()
+	cp.selectRelated = append(cp.selectRelated, fields...)
 	return cp
 }
 

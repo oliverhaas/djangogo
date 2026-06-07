@@ -104,6 +104,14 @@ type relationMarker interface {
 	relTarget() reflect.Type
 }
 
+// RelatedObjects returns a QuerySet of Child rows whose FK column equals
+// parentPK. fkColumn is the FK column on Child (e.g. "author_id"). It documents
+// the reverse-FK pattern; callers may equivalently write
+// Query[Child](db).Filter(fkColumn, parentPK).
+func RelatedObjects[Child any](db *DB, fkColumn string, parentPK int64) *QuerySet[Child] {
+	return Query[Child](db).Filter(fkColumn, parentPK)
+}
+
 // Fetch loads the related object. If it is already loaded it is returned
 // directly; otherwise it is fetched via Query[T](db).Get on the stored pk. Any
 // error (including ErrDoesNotExist) is propagated.

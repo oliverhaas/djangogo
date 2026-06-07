@@ -68,7 +68,7 @@ func TestBuildPredicate_exact(t *testing.T) {
 	m := mustPersonModel(t)
 
 	// exact with value
-	sql, args, err := buildPredicate(d, m, "name", "bob", alwaysNext())
+	sql, args, err := buildPredicate(d, m, "name", "bob", alwaysNext(), "")
 	if err != nil {
 		t.Fatalf("exact value: unexpected error: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestBuildPredicate_exact(t *testing.T) {
 	}
 
 	// exact nil -> IS NULL
-	sql, args, err = buildPredicate(d, m, "name", nil, alwaysNext())
+	sql, args, err = buildPredicate(d, m, "name", nil, alwaysNext(), "")
 	if err != nil {
 		t.Fatalf("exact nil: unexpected error: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestBuildPredicate_comparisons(t *testing.T) {
 		{"age__lte", `"age" <= ?`},
 	}
 	for _, tc := range cases {
-		sql, args, err := buildPredicate(d, m, tc.key, int64(18), alwaysNext())
+		sql, args, err := buildPredicate(d, m, tc.key, int64(18), alwaysNext(), "")
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", tc.key, err)
 			continue
@@ -140,7 +140,7 @@ func TestBuildPredicate_like(t *testing.T) {
 		{"name__endswith", "ob", `"name" LIKE ? ESCAPE '\'`, "%ob"},
 	}
 	for _, tc := range cases {
-		sql, args, err := buildPredicate(d, m, tc.key, tc.value, alwaysNext())
+		sql, args, err := buildPredicate(d, m, tc.key, tc.value, alwaysNext(), "")
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", tc.key, err)
 			continue
@@ -161,7 +161,7 @@ func TestBuildPredicate_like_escape(t *testing.T) {
 	m := mustPersonModel(t)
 
 	// "a%b" in contains -> "%a\%b%"
-	_, args, err := buildPredicate(d, m, "name__contains", "a%b", alwaysNext())
+	_, args, err := buildPredicate(d, m, "name__contains", "a%b", alwaysNext(), "")
 	if err != nil {
 		t.Fatalf("contains escape: unexpected error: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestBuildPredicate_like_escape(t *testing.T) {
 	}
 
 	// "a_b" in startswith -> "a\_b%"
-	_, args, err = buildPredicate(d, m, "name__startswith", "a_b", alwaysNext())
+	_, args, err = buildPredicate(d, m, "name__startswith", "a_b", alwaysNext(), "")
 	if err != nil {
 		t.Fatalf("startswith escape: unexpected error: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestBuildPredicate_like_escape(t *testing.T) {
 	}
 
 	// "a\b" in endswith -> "%a\\b"
-	_, args, err = buildPredicate(d, m, "name__endswith", `a\b`, alwaysNext())
+	_, args, err = buildPredicate(d, m, "name__endswith", `a\b`, alwaysNext(), "")
 	if err != nil {
 		t.Fatalf("endswith escape: unexpected error: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestBuildPredicate_in(t *testing.T) {
 	m := mustPersonModel(t)
 
 	// normal in
-	sql, args, err := buildPredicate(d, m, "age__in", []int64{1, 2, 3}, alwaysNext())
+	sql, args, err := buildPredicate(d, m, "age__in", []int64{1, 2, 3}, alwaysNext(), "")
 	if err != nil {
 		t.Fatalf("in: unexpected error: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestBuildPredicate_in(t *testing.T) {
 	}
 
 	// empty slice -> 0 = 1
-	sql, args, err = buildPredicate(d, m, "age__in", []int64{}, alwaysNext())
+	sql, args, err = buildPredicate(d, m, "age__in", []int64{}, alwaysNext(), "")
 	if err != nil {
 		t.Fatalf("in empty: unexpected error: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestBuildPredicate_in(t *testing.T) {
 	}
 
 	// non-slice -> error
-	_, _, err = buildPredicate(d, m, "age__in", 42, alwaysNext())
+	_, _, err = buildPredicate(d, m, "age__in", 42, alwaysNext(), "")
 	if err == nil {
 		t.Error("in non-slice: expected error, got nil")
 	}
@@ -238,7 +238,7 @@ func TestBuildPredicate_isnull(t *testing.T) {
 	m := mustPersonModel(t)
 
 	// true -> IS NULL
-	sql, args, err := buildPredicate(d, m, "name__isnull", true, alwaysNext())
+	sql, args, err := buildPredicate(d, m, "name__isnull", true, alwaysNext(), "")
 	if err != nil {
 		t.Fatalf("isnull true: unexpected error: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestBuildPredicate_isnull(t *testing.T) {
 	}
 
 	// false -> IS NOT NULL
-	sql, args, err = buildPredicate(d, m, "name__isnull", false, alwaysNext())
+	sql, args, err = buildPredicate(d, m, "name__isnull", false, alwaysNext(), "")
 	if err != nil {
 		t.Fatalf("isnull false: unexpected error: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestBuildPredicate_isnull(t *testing.T) {
 	}
 
 	// non-bool -> error
-	_, _, err = buildPredicate(d, m, "name__isnull", "yes", alwaysNext())
+	_, _, err = buildPredicate(d, m, "name__isnull", "yes", alwaysNext(), "")
 	if err == nil {
 		t.Error("isnull non-bool: expected error, got nil")
 	}
@@ -274,7 +274,7 @@ func TestBuildPredicate_unknownField(t *testing.T) {
 	d := stubDialect{}
 	m := mustPersonModel(t)
 
-	_, _, err := buildPredicate(d, m, "bogus", "x", alwaysNext())
+	_, _, err := buildPredicate(d, m, "bogus", "x", alwaysNext(), "")
 	if err == nil {
 		t.Error("unknown field: expected error, got nil")
 	}
@@ -286,7 +286,7 @@ func TestBuildPredicate_unknownLookup(t *testing.T) {
 	d := stubDialect{}
 	m := mustPersonModel(t)
 
-	_, _, err := buildPredicate(d, m, "name__weird", "x", alwaysNext())
+	_, _, err := buildPredicate(d, m, "name__weird", "x", alwaysNext(), "")
 	if err == nil {
 		t.Error("unknown lookup: expected error, got nil")
 	}

@@ -7,8 +7,10 @@ import (
 )
 
 // compileWhere appends predicates, threading placeholders via next, and returns the
-// " WHERE ..." fragment (empty if no clauses) and the collected args.
-func (q *QuerySet[T]) compileWhere(next func() string) (string, []any, error) {
+// " WHERE ..." fragment (empty if no clauses) and the collected args. When qualify
+// is non-empty, each column reference is prefixed with that table name so the
+// predicate is unambiguous in a JOIN query.
+func (q *QuerySet[T]) compileWhere(next func() string, qualify string) (string, []any, error) {
 	if len(q.wheres) == 0 {
 		return "", nil, nil
 	}
@@ -16,7 +18,7 @@ func (q *QuerySet[T]) compileWhere(next func() string) (string, []any, error) {
 	preds := make([]string, 0, len(q.wheres))
 	var args []any
 	for _, w := range q.wheres {
-		pred, pArgs, err := buildPredicate(d, q.model, w.key, w.value, next)
+		pred, pArgs, err := buildPredicate(d, q.model, w.key, w.value, next, qualify)
 		if err != nil {
 			return "", nil, err
 		}
@@ -30,9 +32,14 @@ func (q *QuerySet[T]) compileWhere(next func() string) (string, []any, error) {
 }
 
 // compileSelect renders the SELECT statement and its args for the queryset.
+// When select_related fields are requested it delegates to compileSelectRelated,
+// which renders a LEFT JOIN query instead.
 func (q *QuerySet[T]) compileSelect() (string, []any, error) {
 	if q.err != nil {
 		return "", nil, q.err
+	}
+	if len(q.selectRelated) > 0 {
+		return q.compileSelectRelated()
 	}
 	d := q.db.Dialect()
 
@@ -52,13 +59,13 @@ func (q *QuerySet[T]) compileSelect() (string, []any, error) {
 		n++
 		return d.Placeholder(n)
 	}
-	where, args, err := q.compileWhere(next)
+	where, args, err := q.compileWhere(next, "")
 	if err != nil {
 		return "", nil, err
 	}
 	b.WriteString(where)
 
-	order, err := q.compileOrderBy()
+	order, err := q.compileOrderBy("")
 	if err != nil {
 		return "", nil, err
 	}
@@ -71,7 +78,9 @@ func (q *QuerySet[T]) compileSelect() (string, []any, error) {
 
 // compileOrderBy renders the " ORDER BY ..." fragment, validating each column
 // against the model. It returns an empty string when there are no order terms.
-func (q *QuerySet[T]) compileOrderBy() (string, error) {
+// When qualify is non-empty, each column reference is prefixed with that table
+// name so the ordering is unambiguous in a JOIN query.
+func (q *QuerySet[T]) compileOrderBy(qualify string) (string, error) {
 	if len(q.orders) == 0 {
 		return "", nil
 	}
@@ -82,6 +91,9 @@ func (q *QuerySet[T]) compileOrderBy() (string, error) {
 			return "", fmt.Errorf("orm: unknown order field %q on model %s", o.column, q.model.Name())
 		}
 		term := d.Quote(o.column)
+		if qualify != "" {
+			term = d.Quote(qualify) + "." + term
+		}
 		if o.desc {
 			term += " DESC"
 		}
@@ -123,7 +135,7 @@ func (q *QuerySet[T]) compileCount() (string, []any, error) {
 		n++
 		return d.Placeholder(n)
 	}
-	where, args, err := q.compileWhere(next)
+	where, args, err := q.compileWhere(next, "")
 	if err != nil {
 		return "", nil, err
 	}
@@ -142,7 +154,7 @@ func (q *QuerySet[T]) compileDelete() (string, []any, error) {
 		n++
 		return d.Placeholder(n)
 	}
-	where, args, err := q.compileWhere(next)
+	where, args, err := q.compileWhere(next, "")
 	if err != nil {
 		return "", nil, err
 	}
@@ -180,7 +192,7 @@ func (q *QuerySet[T]) compileUpdate(assigns []assignment) (string, []any, error)
 		args = append(args, a.value)
 	}
 
-	where, wArgs, err := q.compileWhere(next)
+	where, wArgs, err := q.compileWhere(next, "")
 	if err != nil {
 		return "", nil, err
 	}

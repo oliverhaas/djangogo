@@ -41,10 +41,112 @@ func scanRows[T any](rows *sql.Rows, m *Model) ([]T, error) {
 	return out, nil
 }
 
+// scanRowsJoined scans the result of a select_related LEFT JOIN. Each row holds
+// the main model's columns followed, for each joined FK, by the target's
+// columns. The main columns scan into a fresh T; each target's columns scan into
+// NULL-tolerant holders. When the target primary key is non-null the holders are
+// materialised into a target struct and attached to the FK field via SetObject;
+// a null target (no match / null FK) leaves the FK unloaded but keeps the row.
+func scanRowsJoined[T any](rows *sql.Rows, m *Model, rels []joinedRel) ([]T, error) {
+	fields := m.Fields()
+	var out []T
+	for rows.Next() {
+		dest := reflect.New(m.GoType())
+		mainElem := dest.Elem()
+
+		ncols := len(fields)
+		for _, r := range rels {
+			ncols += len(r.target.Fields())
+		}
+		targets := make([]any, 0, ncols)
+		for _, f := range fields {
+			targets = append(targets, mainElem.Field(f.Index).Addr().Interface())
+		}
+		// One *any holder per target column, NULL-tolerant for the LEFT JOIN.
+		holders := make([][]any, len(rels))
+		for ri, r := range rels {
+			tf := r.target.Fields()
+			holders[ri] = make([]any, len(tf))
+			for ci := range tf {
+				holders[ri][ci] = new(any)
+				targets = append(targets, holders[ri][ci])
+			}
+		}
+
+		if err := rows.Scan(targets...); err != nil {
+			return nil, fmt.Errorf("orm: scan %s: %w", m.Name(), err)
+		}
+
+		for ri, r := range rels {
+			if err := attachJoined(mainElem, r, holders[ri]); err != nil {
+				return nil, fmt.Errorf("orm: scan %s: %w", m.Name(), err)
+			}
+		}
+		out = append(out, mainElem.Interface().(T))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("orm: scan %s: %w", m.Name(), err)
+	}
+	return out, nil
+}
+
+// attachJoined materialises one joined FK's scanned holders into a target struct
+// and attaches it to the FK field via SetObject. When the target primary key is
+// null (no match or null FK) the FK is left unloaded.
+func attachJoined(mainElem reflect.Value, r joinedRel, holders []any) error {
+	tf := r.target.Fields()
+	pk := r.target.PrimaryKey()
+	pkColIdx := -1
+	for i, f := range tf {
+		if f == pk {
+			pkColIdx = i
+			break
+		}
+	}
+	if pkColIdx < 0 {
+		return fmt.Errorf("orm: target model %s has no primary key column", r.target.Name())
+	}
+	pkVal := *(holders[pkColIdx].(*any))
+	if pkVal == nil {
+		return nil // null FK / no match: leave the FK unloaded.
+	}
+	pkInt, err := asInt64(pkVal)
+	if err != nil {
+		return err
+	}
+
+	tgt := reflect.New(r.target.GoType())
+	tgtElem := tgt.Elem()
+	for i, f := range tf {
+		v := *(holders[i].(*any))
+		if err := assignScanned(tgtElem.Field(f.Index), v); err != nil {
+			return err
+		}
+	}
+
+	fkVal := mainElem.Field(r.field.Index).Addr()
+	method := fkVal.MethodByName("SetObject")
+	if !method.IsValid() {
+		return fmt.Errorf("orm: field %s does not expose SetObject", r.field.Name)
+	}
+	method.Call([]reflect.Value{tgt, reflect.ValueOf(pkInt)})
+	return nil
+}
+
 // All runs the compiled SELECT and returns every matching row scanned into []T.
+// When select_related fields are requested it uses the joined scan path so the
+// related objects are loaded in the same query.
 func (q *QuerySet[T]) All(ctx context.Context) ([]T, error) {
 	if q.err != nil {
 		return nil, q.err
+	}
+	var rels []joinedRel
+	if len(q.selectRelated) > 0 {
+		var err error
+		rels, err = q.resolveSelectRelated()
+		if err != nil {
+			return nil, err
+		}
 	}
 	query, args, err := q.compileSelect()
 	if err != nil {
@@ -55,6 +157,9 @@ func (q *QuerySet[T]) All(ctx context.Context) ([]T, error) {
 		return nil, fmt.Errorf("orm: query %s: %w", q.model.Name(), err)
 	}
 	defer func() { _ = rows.Close() }()
+	if len(rels) > 0 {
+		return scanRowsJoined[T](rows, q.model, rels)
+	}
 	return scanRows[T](rows, q.model)
 }
 
@@ -109,7 +214,7 @@ func (q *QuerySet[T]) Exists(ctx context.Context) (bool, error) {
 		n++
 		return d.Placeholder(n)
 	}
-	where, args, err := q.compileWhere(next)
+	where, args, err := q.compileWhere(next, "")
 	if err != nil {
 		return false, err
 	}

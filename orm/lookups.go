@@ -35,8 +35,10 @@ func toString(v any) string {
 
 // buildPredicate resolves a filter key/value against the model and renders one SQL
 // predicate plus its args. next yields successive bind placeholders (so the caller
-// controls numbering across predicates); for SQLite each call returns "?".
-func buildPredicate(d Dialect, m *Model, key string, value any, next func() string) (sql string, args []any, err error) {
+// controls numbering across predicates); for SQLite each call returns "?". When
+// qualify is non-empty, the column reference is prefixed with that table name so
+// the predicate is unambiguous in a JOIN query.
+func buildPredicate(d Dialect, m *Model, key string, value any, next func() string, qualify string) (sql string, args []any, err error) {
 	column, lookup := parseLookup(key)
 
 	f, ok := m.byColumn[column]
@@ -45,6 +47,9 @@ func buildPredicate(d Dialect, m *Model, key string, value any, next func() stri
 	}
 
 	qcol := d.Quote(f.Column)
+	if qualify != "" {
+		qcol = d.Quote(qualify) + "." + qcol
+	}
 
 	switch lookup {
 	case "exact":
