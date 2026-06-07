@@ -233,6 +233,11 @@ func (q *QuerySet[T]) Create(ctx context.Context, obj *T) error {
 	if q.err != nil {
 		return q.err
 	}
+	// PreSave fires before the INSERT so a handler may mutate *obj (e.g. normalise
+	// fields). An error aborts the create and no row is written.
+	if err := firePreSave(ctx, q.db, obj); err != nil {
+		return err
+	}
 	d := q.db.Dialect()
 	v := reflect.ValueOf(obj).Elem()
 	pk := q.model.PrimaryKey()
@@ -263,7 +268,10 @@ func (q *QuerySet[T]) Create(ctx context.Context, obj *T) error {
 		if err := q.db.conn(ctx).QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
 			return fmt.Errorf("orm: insert %s: %w", q.model.Name(), err)
 		}
-		return writeBackAutoPK(v.Field(pk.Index), id, q.model.Name())
+		if err := writeBackAutoPK(v.Field(pk.Index), id, q.model.Name()); err != nil {
+			return err
+		}
+		return firePostSave(ctx, q.db, obj)
 	}
 
 	result, err := q.db.conn(ctx).ExecContext(ctx, query, args...)
@@ -277,9 +285,12 @@ func (q *QuerySet[T]) Create(ctx context.Context, obj *T) error {
 		if err != nil {
 			return fmt.Errorf("orm: insert %s: last insert id: %w", q.model.Name(), err)
 		}
-		return writeBackAutoPK(v.Field(pk.Index), id, q.model.Name())
+		if err := writeBackAutoPK(v.Field(pk.Index), id, q.model.Name()); err != nil {
+			return err
+		}
 	}
-	return nil
+	// PostSave fires after the row exists and the PK has been written back.
+	return firePostSave(ctx, q.db, obj)
 }
 
 // writeBackAutoPK assigns the database-generated id into the auto primary-key
@@ -331,10 +342,24 @@ func (q *QuerySet[T]) Update(ctx context.Context, assignments ...any) (int64, er
 }
 
 // Delete removes every matching row and returns the number of rows deleted.
+//
+// When any PreDelete or PostDelete signal handler is registered for T, Delete
+// first fetches the matching rows so it can fire those signals per object: it
+// runs PreDelete for each row, performs the DELETE, then runs PostDelete for
+// each row. This per-object firing is the reason delete signals require an extra
+// fetch; when no delete handlers are registered the fast path skips it.
 func (q *QuerySet[T]) Delete(ctx context.Context) (int64, error) {
 	if q.err != nil {
 		return 0, q.err
 	}
+	if hasDeleteHandlers[T]() {
+		return q.deleteWithSignals(ctx)
+	}
+	return q.deleteRows(ctx)
+}
+
+// deleteRows runs the compiled DELETE and returns the number of rows affected.
+func (q *QuerySet[T]) deleteRows(ctx context.Context) (int64, error) {
 	query, args, err := q.compileDelete()
 	if err != nil {
 		return 0, err
@@ -346,6 +371,30 @@ func (q *QuerySet[T]) Delete(ctx context.Context) (int64, error) {
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("orm: delete %s: rows affected: %w", q.model.Name(), err)
+	}
+	return affected, nil
+}
+
+// deleteWithSignals fetches the matching rows, fires PreDelete for each, performs
+// the DELETE, then fires PostDelete for each, returning the rows affected.
+func (q *QuerySet[T]) deleteWithSignals(ctx context.Context) (int64, error) {
+	rows, err := q.All(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for i := range rows {
+		if err := firePreDelete(ctx, q.db, &rows[i]); err != nil {
+			return 0, err
+		}
+	}
+	affected, err := q.deleteRows(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for i := range rows {
+		if err := firePostDelete(ctx, q.db, &rows[i]); err != nil {
+			return 0, err
+		}
 	}
 	return affected, nil
 }
