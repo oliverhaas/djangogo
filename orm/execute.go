@@ -151,25 +151,42 @@ func (q *QuerySet[T]) Create(ctx context.Context, obj *T) error {
 	query := "INSERT INTO " + d.Quote(q.model.Table()) +
 		" (" + strings.Join(cols, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 
+	// Auto PK with a RETURNING-capable backend: read the assigned id straight back.
+	if autoPK && d.SupportsReturning() {
+		query += " RETURNING " + d.Quote(pk.Column)
+		var id int64
+		if err := q.db.sqlDB.QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
+			return fmt.Errorf("orm: insert %s: %w", q.model.Name(), err)
+		}
+		return writeBackAutoPK(v.Field(pk.Index), id, q.model.Name())
+	}
+
 	result, err := q.db.sqlDB.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("orm: insert %s: %w", q.model.Name(), err)
 	}
 
+	// Auto PK without RETURNING (e.g. SQLite): fall back to LastInsertId.
 	if autoPK {
 		id, err := result.LastInsertId()
 		if err != nil {
 			return fmt.Errorf("orm: insert %s: last insert id: %w", q.model.Name(), err)
 		}
-		pkField := v.Field(pk.Index)
-		switch pkField.Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			pkField.SetInt(id)
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			pkField.SetUint(uint64(id))
-		default:
-			return fmt.Errorf("orm: insert %s: cannot assign auto pk to %s field", q.model.Name(), pkField.Kind())
-		}
+		return writeBackAutoPK(v.Field(pk.Index), id, q.model.Name())
+	}
+	return nil
+}
+
+// writeBackAutoPK assigns the database-generated id into the auto primary-key
+// struct field, handling both signed and unsigned integer kinds.
+func writeBackAutoPK(pkField reflect.Value, id int64, modelName string) error {
+	switch pkField.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		pkField.SetInt(id)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		pkField.SetUint(uint64(id))
+	default:
+		return fmt.Errorf("orm: insert %s: cannot assign auto pk to %s field", modelName, pkField.Kind())
 	}
 	return nil
 }
