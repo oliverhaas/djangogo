@@ -7,23 +7,29 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/csrf"
 	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
+	"github.com/oliverhaas/djangogo/sessions"
 	"github.com/oliverhaas/djangogo/urls"
 )
 
-// Routes returns the admin's URL routes: the index, the per-model changelist,
-// and the form-driven add, change, and delete write views. The write routes are
-// registered without a method token so each handler sees both GET and POST and
-// dispatches on r.Method. Every handler is wrapped with staffRequired so only
-// authenticated staff users reach it.
+// Routes returns the admin's URL routes: the login page, the index, the
+// per-model changelist, and the form-driven add, change, and delete write views.
+// The write routes are registered without a method token so each handler sees
+// both GET and POST and dispatches on r.Method. Every handler except login is
+// wrapped with staffRequired so only authenticated staff users reach it; the
+// login view must stay reachable anonymously, so it is mounted unwrapped. Its
+// exact path (LoginURL) takes precedence over the {model} changelist pattern
+// under net/http's ServeMux specificity rules.
 func (s *AdminSite) Routes() []urls.Route {
 	staff := s.staffRequired
 	p := s.Prefix
 	return []urls.Route{
+		urls.Path(s.LoginURL+"{$}", http.HandlerFunc(s.login), "admin-login"),
 		urls.Path(p+"/{$}", staff(http.HandlerFunc(s.index)), "admin-index"),
 		urls.Path(p+"/{model}/{$}", staff(http.HandlerFunc(s.changelist)), "admin-changelist"),
 		urls.Path(p+"/{model}/add/{$}", staff(http.HandlerFunc(s.add)), "admin-add"),
@@ -45,6 +51,71 @@ func (s *AdminSite) staffRequired(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// login renders and processes the admin login form. It is mounted unwrapped by
+// staffRequired so anonymous users can reach it. GET renders the form. POST looks
+// up the user by username, and on a correct password for a staff account logs the
+// user into the session and redirects to a safe next target (falling back to the
+// admin index); any failure re-renders the form with an error.
+func (s *AdminSite) login(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		s.loginPOST(w, r)
+		return
+	}
+	s.renderLogin(w, r, safeNext(r.URL.Query().Get("next")), "")
+}
+
+// loginPOST validates submitted credentials and, on success, establishes the
+// session and redirects; otherwise it re-renders the login form with an error.
+func (s *AdminSite) loginPOST(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	next := safeNext(r.PostForm.Get("next"))
+	username := r.PostForm.Get("username")
+	password := r.PostForm.Get("password")
+
+	user, err := orm.Query[auth.User](s.db).Get(r.Context(), "username", username)
+	if err != nil || !user.CheckPassword(password) || !user.IsStaff {
+		s.renderLogin(w, r, next, "Please enter a correct username and password, or you are not staff.")
+		return
+	}
+
+	sess, ok := sessions.FromContext(r.Context())
+	if !ok {
+		http.Error(w, "no session", http.StatusInternalServerError)
+		return
+	}
+	auth.Login(sess, &user)
+
+	target := next
+	if target == "" {
+		target = s.Prefix + "/"
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// renderLogin renders the login form with the optional next target and error.
+func (s *AdminSite) renderLogin(w http.ResponseWriter, r *http.Request, next, errMsg string) {
+	s.render(w, r, "login.html", map[string]any{
+		"csrf_token": csrf.Token(r.Context()),
+		"action":     s.LoginURL,
+		"next":       next,
+		"error":      errMsg,
+		"prefix":     s.Prefix,
+	})
+}
+
+// safeNext returns next when it is a safe, local path (begins with a single "/")
+// and otherwise the empty string, guarding the login redirect against open
+// redirects to "//host" or absolute URLs.
+func safeNext(next string) string {
+	if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
+		return next
+	}
+	return ""
 }
 
 // index renders the admin landing page listing every registered model.

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+  <h1>Log in</h1>
+  {% if error %}<p class="errornote">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ action }}">
+    {% csrf_token %}
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <p><label for="id_username">Username:</label>
+      <input type="text" name="username" id="id_username" autofocus></p>
+    <p><label for="id_password">Password:</label>
+      <input type="password" name="password" id="id_password"></p>
+    <p><button type="submit">Log in</button></p>
+  </form>
+{% endblock %}
