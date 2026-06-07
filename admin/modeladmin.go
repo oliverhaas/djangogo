@@ -15,7 +15,9 @@ type ModelAdmin struct {
 	// SearchFields names the fields searched by the changelist search box.
 	// Search execution may be added later; the value is stored for now.
 	SearchFields []string
-	// ReadonlyFields names fields rendered read-only on the change form.
+	// ReadonlyFields names fields the change form must not edit. For now they are
+	// omitted from the form (their stored values are preserved on save) rather than
+	// rendered as disabled inputs.
 	ReadonlyFields []string
 	// ExcludeFields names fields omitted from the add and change forms.
 	ExcludeFields []string

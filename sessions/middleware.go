@@ -75,6 +75,8 @@ func (w *sessionWriter) save() {
 	if err != nil {
 		return
 	}
+	// Secure is intentionally not set here so the cookie works over plain HTTP in
+	// development. A real deployment behind TLS should set Secure: true.
 	http.SetCookie(w.ResponseWriter, &http.Cookie{
 		Name:     w.cookieName,
 		Value:    value,

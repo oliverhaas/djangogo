@@ -123,6 +123,23 @@ pongo2 engine and asserts byte-equality. Twelve cases are byte-identical to
 Django 6.0.3. The one documented cosmetic divergence (apostrophe escaping) is
 skipped with a reason; divergences are catalogued in `fidelity/divergences.md`.
 
+## Known limitations
+
+This is a proof of concept. The notable slimmed or deferred areas are:
+
+- **Relations:** only forward `FK[T]` is built. One-to-one and many-to-many are
+  represented with explicit link models, not dedicated `O2O[T]`/`M2M[T]` types.
+- **Migrations:** generated migration files register via `init()`, so a separate
+  `migrate` process only sees migrations compiled into the binary (rebuild after
+  `makemigrations`). An in-process flow works without a rebuild.
+- **Admin:** `SearchFields`/`ListFilter`/pagination/inlines and FK chooser widgets
+  are not implemented. `ReadonlyFields` are currently omitted from the change form
+  rather than rendered as disabled inputs.
+- **Sessions/CSRF:** the session cookie sets `HttpOnly` and `SameSite=Lax` but not
+  `Secure`; enable `Secure` behind TLS in a real deployment.
+- **Fidelity:** the differential harness covers template rendering only. Query-SQL
+  and migration-SQL differential comparison are future work.
+
 ## Testing
 
 ```console
