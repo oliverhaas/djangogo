@@ -16,6 +16,9 @@ func TestSettingsApplyDefaults(t *testing.T) {
 	if len(s.AllowedHosts) == 0 {
 		t.Error("AllowedHosts should default to a non-empty list")
 	}
+	if s.Database.Driver != "sqlite" {
+		t.Errorf("Database.Driver = %q, want sqlite", s.Database.Driver)
+	}
 }
 
 func TestSettingsCheck(t *testing.T) {
