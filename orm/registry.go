@@ -114,7 +114,7 @@ func (r *Registry) Register(model any) (*Model, error) {
 	byColumn := make(map[string]*Field, len(fields))
 	for _, f := range fields {
 		byName[f.Name] = f
-		if existing, dup := byColumn[f.Column]; dup && existing != f {
+		if _, dup := byColumn[f.Column]; dup {
 			return nil, fmt.Errorf("orm: model %s has duplicate column %s", name, f.Column)
 		}
 		byColumn[f.Column] = f

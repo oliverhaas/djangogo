@@ -1,4 +1,3 @@
-// Package orm provides the metadata primitives for the Djan-Go-Go ORM.
 package orm
 
 import (
