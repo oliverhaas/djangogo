@@ -1,0 +1,67 @@
+[
+  {
+    "name": "variable",
+    "template": "Hello {{ name }}",
+    "context": { "name": "World" }
+  },
+  {
+    "name": "nested_attr",
+    "template": "{{ user.name }} <{{ user.email }}>",
+    "context": { "user": { "name": "Ada Lovelace", "email": "ada@example.com" } }
+  },
+  {
+    "name": "for_loop",
+    "template": "{% for x in items %}{{ x }},{% endfor %}",
+    "context": { "items": ["alpha", "beta", "gamma"] }
+  },
+  {
+    "name": "if_else_true",
+    "template": "{% if cond %}A{% else %}B{% endif %}",
+    "context": { "cond": true }
+  },
+  {
+    "name": "if_else_false",
+    "template": "{% if cond %}A{% else %}B{% endif %}",
+    "context": { "cond": false }
+  },
+  {
+    "name": "filter_upper",
+    "template": "{{ s|upper }}",
+    "context": { "s": "django fidelity" }
+  },
+  {
+    "name": "filter_lower",
+    "template": "{{ s|lower }}",
+    "context": { "s": "DJANGO Fidelity" }
+  },
+  {
+    "name": "filter_default",
+    "template": "{{ missing|default:\"none\" }}",
+    "context": {}
+  },
+  {
+    "name": "filter_default_present",
+    "template": "{{ present|default:\"none\" }}",
+    "context": { "present": "value" }
+  },
+  {
+    "name": "filter_length",
+    "template": "{{ items|length }}",
+    "context": { "items": ["a", "b", "c", "d"] }
+  },
+  {
+    "name": "filter_join",
+    "template": "{{ items|join:\", \" }}",
+    "context": { "items": ["one", "two", "three"] }
+  },
+  {
+    "name": "autoescape",
+    "template": "{{ v }}",
+    "context": { "v": "Tom & <b>\"Jerry\"</b>" }
+  },
+  {
+    "name": "autoescape_apostrophe",
+    "template": "{{ v }}",
+    "context": { "v": "it's a <trap>" }
+  }
+]

@@ -41,6 +41,18 @@ jobs:
       #     files: ./coverage.txt
       #     fail_ci_if_error: false
 
+  fidelity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - run: pip install "django==6.0.3"
+      - run: python3 fidelity/oracle/render.py
+      - name: Fail if golden files drift from a fresh Django render
+        run: git diff --exit-code fidelity/golden/
+
   # Integration tests against PostgreSQL land with the ORM relations milestone.
   # When they do, add a job with a `postgres` service container and run them
   # behind a build tag, e.g. `go test -tags=integration ./...`.
