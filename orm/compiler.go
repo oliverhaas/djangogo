@@ -148,3 +148,43 @@ func (q *QuerySet[T]) compileDelete() (string, []any, error) {
 	}
 	return "DELETE FROM " + d.Quote(q.model.Table()) + where, args, nil
 }
+
+// assignment is a single column/value pair for an UPDATE ... SET clause.
+type assignment struct {
+	column string
+	value  any
+}
+
+// compileUpdate renders the UPDATE statement and its args for the queryset.
+// Placeholders thread the SET values first, then the WHERE args, sharing one
+// counter. Each assignment column must be a known column on the model.
+func (q *QuerySet[T]) compileUpdate(assigns []assignment) (string, []any, error) {
+	if q.err != nil {
+		return "", nil, q.err
+	}
+	d := q.db.Dialect()
+
+	n := 0
+	next := func() string {
+		n++
+		return d.Placeholder(n)
+	}
+
+	sets := make([]string, len(assigns))
+	args := make([]any, 0, len(assigns)+len(q.wheres))
+	for i, a := range assigns {
+		if _, ok := q.model.byColumn[a.column]; !ok {
+			return "", nil, fmt.Errorf("orm: unknown update column %q on model %s", a.column, q.model.Name())
+		}
+		sets[i] = d.Quote(a.column) + " = " + next()
+		args = append(args, a.value)
+	}
+
+	where, wArgs, err := q.compileWhere(next)
+	if err != nil {
+		return "", nil, err
+	}
+	args = append(args, wArgs...)
+
+	return "UPDATE " + d.Quote(q.model.Table()) + " SET " + strings.Join(sets, ", ") + where, args, nil
+}
