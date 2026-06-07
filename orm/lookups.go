@@ -66,6 +66,9 @@ func buildPredicate(d Dialect, m *Model, key string, value any, next func() stri
 		return qcol + " <= " + next(), []any{value}, nil
 
 	case "contains", "icontains":
+		// icontains is rendered identically to contains for the SQLite backend
+		// because SQLite's default LIKE is case-insensitive for ASCII characters;
+		// other backends may need explicit case-folding (e.g. ILIKE or LOWER()).
 		arg := "%" + escapeLike(toString(value)) + "%"
 		return qcol + ` LIKE ` + next() + ` ESCAPE '\'`, []any{arg}, nil
 

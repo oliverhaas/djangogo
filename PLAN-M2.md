@@ -71,8 +71,9 @@ Inference: `string` becomes KindChar (or KindText with `type=text`); `int*` beco
 KindInt; `bool` becomes KindBool; `time.Time` becomes KindDateTime. PK: a field
 tagged `pk`, else a field named `ID` of integer type becomes a KindAuto PK. Tag
 grammar (`;`-separated): `pk`, `column=<name>`, `max_length=<n>`, `null`, `unique`,
-`type=text`, `-` (skip). Unknown options are an error. The default column is
-`strings.ToLower(Name)`.
+`type=text`, `-` (skip). Unknown options are an error. The default column is the
+snake_case form of the field name (e.g. `CreatedAt` -> `created_at`, `APIKey` ->
+`api_key`, `Name` -> `name`); a `column=<name>` tag overrides this.
 
 ### Model plus Registry (`model.go`, `registry.go`)
 

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Kind identifies the logical type of a model field.
@@ -85,7 +86,7 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 	// Step 2: infer Kind from the Go type.
 	f := &Field{
 		Name:   sf.Name,
-		Column: strings.ToLower(sf.Name),
+		Column: toSnakeCase(sf.Name),
 		Index:  index,
 	}
 
@@ -122,6 +123,25 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 	}
 
 	return f, true, nil
+}
+
+// toSnakeCase converts a Go identifier (PascalCase/camelCase, possibly with acronym
+// runs) into snake_case for use as a default column name.
+func toSnakeCase(s string) string {
+	runes := []rune(s)
+	var b strings.Builder
+	for i, r := range runes {
+		if unicode.IsUpper(r) {
+			if i > 0 && (unicode.IsLower(runes[i-1]) || unicode.IsDigit(runes[i-1]) ||
+				(i+1 < len(runes) && unicode.IsLower(runes[i+1]))) {
+				b.WriteByte('_')
+			}
+			b.WriteRune(unicode.ToLower(r))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // applyTagOption applies a single parsed tag token to the field.

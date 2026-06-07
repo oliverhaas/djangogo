@@ -241,6 +241,88 @@ func TestParseStructField_Secret(t *testing.T) {
 	}
 }
 
+// --- snake_case column default tests ---
+
+// snakeFixture covers multi-word, acronym-leading, and acronym-run field names.
+type snakeFixture struct {
+	CreatedAt  string
+	ID         int64
+	APIKey     string
+	URLSlug    string
+	HTTPServer string
+	Name       string
+}
+
+func TestToSnakeCase(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"CreatedAt", "created_at"},
+		{"ID", "id"},
+		{"APIKey", "api_key"},
+		{"URLSlug", "url_slug"},
+		{"HTTPServer", "http_server"},
+		{"Name", "name"},
+	}
+	for _, c := range cases {
+		got := toSnakeCase(c.input)
+		if got != c.want {
+			t.Errorf("toSnakeCase(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+func TestParseStructField_SnakeCase(t *testing.T) {
+	t.Parallel()
+	typ := reflect.TypeOf(snakeFixture{})
+	cases := []struct {
+		field  string
+		column string
+	}{
+		{"CreatedAt", "created_at"},
+		{"ID", "id"},
+		{"APIKey", "api_key"},
+		{"URLSlug", "url_slug"},
+		{"HTTPServer", "http_server"},
+		{"Name", "name"},
+	}
+	for _, c := range cases {
+		i := fieldIndex(typ, c.field)
+		sf := typ.Field(i)
+		f, keep, err := parseStructField(sf, i)
+		if err != nil {
+			t.Fatalf("field %s: unexpected error: %v", c.field, err)
+		}
+		if !keep {
+			t.Fatalf("field %s: expected keep=true", c.field)
+		}
+		if f.Column != c.column {
+			t.Errorf("field %s: Column = %q, want %q", c.field, f.Column, c.column)
+		}
+	}
+}
+
+// TestParseStructField_ColumnOverrideWins confirms column= tag still beats snake_case default.
+func TestParseStructField_ColumnOverrideWins(t *testing.T) {
+	t.Parallel()
+	typ := reflect.TypeOf(struct {
+		CreatedAt string `orm:"column=ts_created"`
+	}{})
+	sf := typ.Field(0)
+	f, keep, err := parseStructField(sf, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !keep {
+		t.Fatal("expected keep=true")
+	}
+	if f.Column != "ts_created" {
+		t.Errorf("Column: got %q, want %q", f.Column, "ts_created")
+	}
+}
+
 // --- Negative / error cases ---
 
 func TestParseStructField_UnknownTag(t *testing.T) {

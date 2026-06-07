@@ -96,9 +96,11 @@ func (d Dialect) CreateTableSQL(m *orm.Model) string {
 // so the in-memory database is shared across queries.
 func Open(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
 	if strings.Contains(dsn, ":memory:") {
 		db.SetMaxOpenConns(1)
 	}
-
-	return db, err
+	return db, nil
 }
