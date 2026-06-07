@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Site administration{% endblock %}
+{% block content %}
+  <h1>Site administration</h1>
+  {% if entries %}
+    <ul>
+      {% for entry in entries %}
+        <li><a href="{{ prefix }}/{{ entry.slug }}/">{{ entry.name }}</a></li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No models are registered.</p>
+  {% endif %}
+{% endblock %}

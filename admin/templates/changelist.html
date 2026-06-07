@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Select {{ model }} to change{% endblock %}
+{% block content %}
+  <h1>Select {{ model }} to change</h1>
+  <p><a href="{{ prefix }}/{{ slug }}/add/">Add {{ model }}</a></p>
+  <table>
+    <thead>
+      <tr>
+        {% for column in columns %}<th>{{ column }}</th>{% endfor %}
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          {% for cell in row.cells %}<td>{{ cell }}</td>{% endfor %}
+          <td>
+            <a href="{{ prefix }}/{{ slug }}/{{ row.pk }}/change/">Change</a>
+            <a href="{{ prefix }}/{{ slug }}/{{ row.pk }}/delete/">Delete</a>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}
