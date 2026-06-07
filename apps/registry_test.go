@@ -44,6 +44,31 @@ type readyApp struct {
 func (a readyApp) Name() string { return a.name }
 func (a readyApp) Ready() error { *a.log = append(*a.log, a.name); return nil }
 
+type modelApp struct {
+	name   string
+	models []any
+}
+
+func (a modelApp) Name() string  { return a.name }
+func (a modelApp) Models() []any { return a.models }
+
+func TestModelProviderAssertion(t *testing.T) {
+	var c Config = modelApp{name: "blog", models: []any{struct{}{}}}
+
+	mp, ok := c.(ModelProvider)
+	if !ok {
+		t.Fatal("modelApp should satisfy ModelProvider")
+	}
+	if len(mp.Models()) != 1 {
+		t.Errorf("Models() length = %d, want 1", len(mp.Models()))
+	}
+
+	var plain Config = fakeApp{"plain"}
+	if _, ok := plain.(ModelProvider); ok {
+		t.Error("fakeApp should not satisfy ModelProvider")
+	}
+}
+
 func TestRegistryReadyOrder(t *testing.T) {
 	var log []string
 	r := NewRegistry()

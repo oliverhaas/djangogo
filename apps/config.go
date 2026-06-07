@@ -10,3 +10,9 @@ type Config interface {
 type Initializer interface {
 	Ready() error
 }
+
+// ModelProvider is implemented by apps that declare ORM models. Models returns
+// pointers to zero-valued model structs (e.g. &Article{}).
+type ModelProvider interface {
+	Models() []any
+}
