@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ object.Title }}{% endblock %}
+{% block content %}
+  <article>
+    <h1>{{ object.Title }}</h1>
+    <div class="body">{{ object.Body }}</div>
+  </article>
+  <p><a href="/">Back to posts</a></p>
+{% endblock %}

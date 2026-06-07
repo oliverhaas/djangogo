@@ -5,67 +5,139 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/oliverhaas/djangogo)](https://goreportcard.com/report/github.com/oliverhaas/djangogo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Django's developer experience, ported to Go.**
+Djan-Go-Go ports the Django developer experience to Go. You declare a model as a
+Go struct with `orm` tags; at startup the framework reflects over the registered
+structs to build model metadata, and that one source of metadata drives the ORM,
+migrations, admin, and forms. It compiles to a single static binary with no
+runtime Python and supports SQLite and PostgreSQL.
 
-Djan-Go-Go is a batteries-included web framework that reproduces Django's
-developer experience on a pure-Go, single-binary foundation. You define a
-model struct, and the ORM, migrations, admin, and forms all work from that one
-definition. It is the Django analog of what Goravel is for Laravel: a faithful
-DX port, built in idiomatic Go with no runtime Python.
+## Status
 
-> **Status: early proof-of-concept.** APIs are unstable and most subsystems are
-> still being built. See [PLAN.md](PLAN.md) for the roadmap.
+Proof-of-concept. The seven milestones below are implemented. The public APIs
+are unstable and may change between commits.
 
-## Why
+- **M1 Spine.** Settings, the app registry, and a `manage`-style command
+  dispatcher with a runserver.
+- **M2 ORM core.** Struct-tag model metadata, a registry, and a lazy generic
+  `Query[T]` query builder (Filter, Exclude, OrderBy, Limit, Get, All, Count,
+  Create, Update, Delete).
+- **M3 Migrations.** State autodetection, generated migration files, a runner,
+  and a `migrations` recorder, wired to `makemigrations` and `migrate`.
+- **M4 relations + PostgreSQL.** `FK[T]` foreign keys, relation resolution,
+  `SelectRelated` joins, signals, transactions, and a PostgreSQL backend
+  alongside SQLite.
+- **M5 web layer.** A `urls` router with named-route reverse, a pongo2 template
+  engine with Django-style tags, and generic `ListView`/`DetailView`.
+- **M6 forms + admin.** Form fields and widgets, `ModelForm` from model
+  metadata, sessions, CSRF, password hashing and auth, and a staff-gated admin
+  site with add/change/delete views.
+- **M7 fidelity + scaffolding.** A Django-as-oracle template fidelity harness,
+  project/app scaffolding, and this documentation plus a runnable example.
 
-Go's web ecosystem is either lightweight routers (no ORM, no admin, no auth) or
-batteries-included frameworks with their own conventions. What is missing, and
-what Django developers reach for Python for, is the integrated triad of an
-introspection-driven admin, pluggable apps, and an ORM with autodetecting
-migrations, glued by a consistent project structure and a single `manage`-style
-command.
+## Quickstart
 
-## Install
-
-```console
-go get github.com/oliverhaas/djangogo
-```
-
-The `djangogo` CLI (project/app scaffolding, `runserver`, `makemigrations`,
-`migrate`):
-
-```console
-go install github.com/oliverhaas/djangogo/cmd/djangogo@latest
-```
-
-## A taste (target API)
+Declare a model. An integer field named `ID` is auto-promoted to the primary
+key; `orm` tags set column types and constraints.
 
 ```go
-type Article struct {
-	orm.Model
-	Title   string    `orm:"max_length=200"`
-	Slug    string    `orm:"unique"`
-	Body    string    `orm:"type=text"`
-	Author  *User     `orm:"on_delete=cascade"`
-	Created time.Time `orm:"auto_now_add"`
+type Post struct {
+	ID        int64
+	Title     string `orm:"max_length=200"`
+	Body      string `orm:"type=text"`
+	Published bool
+	CreatedAt time.Time
 }
-
-// Articles.Filter("author__name", "Neo").OrderBy("-created").All(ctx)
 ```
 
-One declaration drives the ORM, `makemigrations`, the admin, and `ModelForm`.
+Register the model, resolve relations, freeze the registry, and open a database:
 
-## Development
+```go
+reg := orm.NewRegistry()
+reg.Register(&Post{})
+reg.Resolve()
+reg.Freeze()
+
+sdb, _ := sqlite.Open("blog.sqlite3")
+db := orm.NewDB(sdb, sqlite.New(), reg)
+```
+
+Generate and apply migrations from the CLI built on `djangogo.New`:
 
 ```console
-make            # fmt + vet + test
-make test-race  # race detector
-make cover      # coverage report
-make lint       # golangci-lint
-make run        # run the djangogo CLI
+go run . makemigrations
+go run . migrate
 ```
 
-Requires Go 1.26+.
+Query with the generic `Query[T]` builder:
+
+```go
+posts, _ := orm.Query[Post](db).
+	Filter("published", true).
+	OrderBy("-created_at").
+	All(ctx)
+
+post, _ := orm.Query[Post](db).Get(ctx, "id", 1)
+```
+
+Register the model in the admin site:
+
+```go
+site, _ := admin.NewAdminSite(db)
+admin.Register[Post](site, admin.ModelAdmin{
+	ListDisplay: []string{"ID", "Title", "Published"},
+	Ordering:    []string{"-id"},
+})
+router := urls.NewRouter(site.Routes()...)
+```
+
+See [`examples/blog`](examples/blog) for a full application that wires the public
+list and detail pages and the admin together; run it with `go run ./examples/blog`.
+
+## Package map
+
+| Package           | Responsibility                                                              |
+| ----------------- | -------------------------------------------------------------------------- |
+| `conf`            | Typed application settings and boot-time validation.                       |
+| `apps`            | The app registry and the `Config`/`ModelProvider` app contracts.           |
+| `manage`          | The CLI command dispatcher (the `manage`-style entry point).               |
+| `orm`             | Model metadata, the registry, and the generic `Query[T]` builder.          |
+| `orm/backends`    | Dialect implementations: `sqlite` and `postgres`.                          |
+| `migrations`      | Autodetection, generated migration files, the runner, and the recorder.    |
+| `auth`            | Users, groups, permissions, password hashing, and auth middleware.         |
+| `sessions`        | Per-request sessions with signed-cookie and database-backed stores.        |
+| `csrf`            | CSRF token middleware.                                                      |
+| `urls`            | Route declaration, a `ServeMux` router, and named-route reverse.           |
+| `views`           | Request/response helpers and generic `ListView`/`DetailView`.              |
+| `templates`       | A pongo2 engine with `{% static %}`, `{% url %}`, `{% csrf_token %}` tags. |
+| `forms`           | Form fields, widgets, and `ModelForm` derived from model metadata.         |
+| `admin`           | The staff-gated admin site with add/change/delete views.                   |
+| `scaffold`        | Project and app scaffolding used by `startproject`/`startapp`.             |
+| `fidelity`        | The Django-as-oracle template fidelity harness.                            |
+
+## Django fidelity
+
+`fidelity/` holds a Django-as-oracle differential harness. Canonical
+template+context cases are rendered by Django's DTL (see `fidelity/oracle`) into
+committed golden files; the Go test renders the same cases with the project's
+pongo2 engine and asserts byte-equality. Twelve cases are byte-identical to
+Django 6.0.3. The one documented cosmetic divergence (apostrophe escaping) is
+skipped with a reason; divergences are catalogued in `fidelity/divergences.md`.
+
+## Testing
+
+```console
+go test ./...
+```
+
+PostgreSQL integration tests are skipped unless `DJANGOGO_TEST_POSTGRES_DSN`
+points at a reachable database:
+
+```console
+DJANGOGO_TEST_POSTGRES_DSN="postgres://user:pass@localhost:5432/djangogo?sslmode=disable" go test ./...
+```
+
+The `Makefile` provides `make` (fmt + vet + test), `make test-race`,
+`make cover`, and `make lint`. Requires Go 1.26+.
 
 ## License
 
