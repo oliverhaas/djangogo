@@ -1,7 +1,6 @@
 // Package admin provides a Django-style admin site: an AdminSite that registers
-// models, gates access to staff users, and renders read-only index and
-// changelist views from embedded pongo2 templates. Write views (add, change,
-// delete) are wired as placeholders here and implemented in a follow-up.
+// models, gates access to staff users, and renders index, changelist, and the
+// form-driven add, change, and delete write views from embedded pongo2 templates.
 package admin
 
 // ModelAdmin is the per-model admin customization surface. A zero value is a

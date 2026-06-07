@@ -5,13 +5,16 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/auth"
+	"github.com/oliverhaas/djangogo/csrf"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/orm/backends/sqlite"
+	"github.com/oliverhaas/djangogo/sessions"
 	"github.com/oliverhaas/djangogo/urls"
 )
 
@@ -93,6 +96,22 @@ func staffInjector(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), u)))
 	})
+}
+
+// staffCSRF wraps next with a staff user, a fresh session, and the CSRF
+// middleware so a token is seeded and exposed via csrf.Token(ctx). It models the
+// real middleware chain the admin runs under so handlers can read the token and
+// render {% csrf_token %}.
+func staffCSRF(next http.Handler) http.Handler {
+	u := &auth.User{ID: 1, Username: "admin", IsStaff: true}
+	withSession := func(inner http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := auth.WithUser(r.Context(), u)
+			ctx = sessions.NewContext(ctx, &sessions.Session{})
+			inner.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+	return withSession(csrf.Middleware(next))
 }
 
 func TestIndexListsModels(t *testing.T) {
@@ -373,5 +392,244 @@ func TestOpsDelete(t *testing.T) {
 	}
 	if _, err := orm.Query[Article](db).Get(context.Background(), "id", seeded[0].ID); !errors.Is(err, orm.ErrDoesNotExist) {
 		t.Fatalf("after delete, Get err = %v, want ErrDoesNotExist", err)
+	}
+}
+
+// --- write views: add / change / delete ---
+
+func TestAddGETRendersForm(t *testing.T) {
+	db := newArticleDB(t)
+	site := newSite(t, db)
+	router := urls.NewRouter(site.Routes()...)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/article/add/", nil)
+	staffCSRF(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("add GET status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `<form method="post"`) {
+		t.Errorf("add GET body missing post form:\n%s", body)
+	}
+	for _, name := range []string{`name="Title"`, `name="Views"`, `name="Published"`} {
+		if !strings.Contains(body, name) {
+			t.Errorf("add GET body missing input %q:\n%s", name, body)
+		}
+	}
+	// The auto PK must not be an editable input.
+	if strings.Contains(body, `name="ID"`) {
+		t.Errorf("add GET body should not expose the auto PK input:\n%s", body)
+	}
+	if !strings.Contains(body, `name="csrfmiddlewaretoken"`) {
+		t.Errorf("add GET body missing csrf hidden input:\n%s", body)
+	}
+}
+
+func TestAddPOSTValidCreatesAndRedirects(t *testing.T) {
+	db := newArticleDB(t)
+	site := newSite(t, db)
+	router := urls.NewRouter(site.Routes()...)
+
+	form := url.Values{}
+	form.Set("Title", "Posted Title")
+	form.Set("Views", "42")
+	form.Set("Published", "on")
+	form.Set(csrf.FormField, "ignored-by-handler")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/article/add/", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	staffInjector(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("add POST status = %d, want 302\n%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/admin/article/" {
+		t.Errorf("add POST redirect Location = %q, want %q", loc, "/admin/article/")
+	}
+
+	got, err := orm.Query[Article](db).Filter("title", "Posted Title").All(context.Background())
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("after add POST, found %d rows with Title %q, want 1", len(got), "Posted Title")
+	}
+	if got[0].Views != 42 || !got[0].Published {
+		t.Errorf("created row = {Views:%d Published:%v}, want {42 true}", got[0].Views, got[0].Published)
+	}
+}
+
+func TestAddPOSTInvalidReRendersNoRow(t *testing.T) {
+	db := newArticleDB(t)
+	site := newSite(t, db)
+	router := urls.NewRouter(site.Routes()...)
+
+	form := url.Values{}
+	// Title exceeds max_length=200, so validation fails.
+	form.Set("Title", strings.Repeat("x", 201))
+	form.Set("Views", "1")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/article/add/", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	staffInjector(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("invalid add POST status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "at most 200 characters") {
+		t.Errorf("invalid add POST body missing error message:\n%s", body)
+	}
+
+	all, err := orm.Query[Article](db).All(context.Background())
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(all) != 0 {
+		t.Errorf("invalid add POST created %d rows, want 0", len(all))
+	}
+}
+
+func TestChangeGETPrefillsForm(t *testing.T) {
+	db := newArticleDB(t)
+	seeded := seedArticles(t, db)
+	site := newSite(t, db)
+	router := urls.NewRouter(site.Routes()...)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/article/1/change/", nil)
+	staffCSRF(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("change GET status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `value="`+seeded[0].Title+`"`) {
+		t.Errorf("change GET body not pre-filled with Title %q:\n%s", seeded[0].Title, body)
+	}
+	if !strings.Contains(body, `name="csrfmiddlewaretoken"`) {
+		t.Errorf("change GET body missing csrf hidden input:\n%s", body)
+	}
+}
+
+func TestChangeGETMissing404(t *testing.T) {
+	db := newArticleDB(t)
+	site := newSite(t, db)
+	router := urls.NewRouter(site.Routes()...)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/article/99999/change/", nil)
+	staffCSRF(router).ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("change GET missing status = %d, want 404", rec.Code)
+	}
+}
+
+func TestChangePOSTUpdatesAndRedirects(t *testing.T) {
+	db := newArticleDB(t)
+	seedArticles(t, db)
+	site := newSite(t, db)
+	router := urls.NewRouter(site.Routes()...)
+
+	form := url.Values{}
+	form.Set("Title", "Renamed")
+	form.Set("Views", "7")
+	// Published omitted -> false.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/article/1/change/", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	staffInjector(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("change POST status = %d, want 302\n%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/admin/article/" {
+		t.Errorf("change POST redirect Location = %q, want %q", loc, "/admin/article/")
+	}
+
+	got, err := orm.Query[Article](db).Get(context.Background(), "id", 1)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.Title != "Renamed" || got.Views != 7 {
+		t.Errorf("after change POST = {Title:%q Views:%d}, want {Renamed 7}", got.Title, got.Views)
+	}
+}
+
+func TestDeleteGETConfirms(t *testing.T) {
+	db := newArticleDB(t)
+	seeded := seedArticles(t, db)
+	site := newSite(t, db)
+	router := urls.NewRouter(site.Routes()...)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/article/1/delete/", nil)
+	staffCSRF(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete GET status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Are you sure") {
+		t.Errorf("delete GET body missing confirmation prompt:\n%s", body)
+	}
+	if !strings.Contains(body, seeded[0].Title) && !strings.Contains(body, "Article 1") {
+		t.Errorf("delete GET body does not mention the object:\n%s", body)
+	}
+	if !strings.Contains(body, `name="csrfmiddlewaretoken"`) {
+		t.Errorf("delete GET body missing csrf hidden input:\n%s", body)
+	}
+}
+
+func TestDeletePOSTRemovesAndRedirects(t *testing.T) {
+	db := newArticleDB(t)
+	seedArticles(t, db)
+	site := newSite(t, db)
+	router := urls.NewRouter(site.Routes()...)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/article/1/delete/", nil)
+	staffInjector(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("delete POST status = %d, want 302\n%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/admin/article/" {
+		t.Errorf("delete POST redirect Location = %q, want %q", loc, "/admin/article/")
+	}
+	if _, err := orm.Query[Article](db).Get(context.Background(), "id", 1); !errors.Is(err, orm.ErrDoesNotExist) {
+		t.Fatalf("after delete POST, Get err = %v, want ErrDoesNotExist", err)
+	}
+}
+
+func TestWriteViewsRedirectNonStaff(t *testing.T) {
+	db := newArticleDB(t)
+	seedArticles(t, db)
+	site := newSite(t, db)
+	router := urls.NewRouter(site.Routes()...)
+
+	cases := []struct {
+		method, path string
+	}{
+		{http.MethodGet, "/admin/article/add/"},
+		{http.MethodPost, "/admin/article/add/"},
+		{http.MethodGet, "/admin/article/1/change/"},
+		{http.MethodPost, "/admin/article/1/change/"},
+		{http.MethodGet, "/admin/article/1/delete/"},
+		{http.MethodPost, "/admin/article/1/delete/"},
+	}
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(c.method, c.path, nil)
+		router.ServeHTTP(rec, req) // anonymous: no user injected.
+		if rec.Code != http.StatusFound {
+			t.Errorf("%s %s anonymous status = %d, want 302", c.method, c.path, rec.Code)
+			continue
+		}
+		if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, site.LoginURL) {
+			t.Errorf("%s %s redirect Location = %q, want prefix %q", c.method, c.path, loc, site.LoginURL)
+		}
 	}
 }
