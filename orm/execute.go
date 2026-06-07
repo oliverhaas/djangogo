@@ -11,7 +11,7 @@ import (
 // CreateTable creates the table for m using the dialect's DDL.
 func (db *DB) CreateTable(ctx context.Context, m *Model) error {
 	ddl := db.dialect.CreateTableSQL(m)
-	if _, err := db.sqlDB.ExecContext(ctx, ddl); err != nil {
+	if _, err := db.conn(ctx).ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("orm: create table %s: %w", m.Table(), err)
 	}
 	return nil
@@ -152,7 +152,7 @@ func (q *QuerySet[T]) All(ctx context.Context) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.db.sqlDB.QueryContext(ctx, query, args...)
+	rows, err := q.db.conn(ctx).QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("orm: query %s: %w", q.model.Name(), err)
 	}
@@ -196,7 +196,7 @@ func (q *QuerySet[T]) Count(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	var n int64
-	if err := q.db.sqlDB.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+	if err := q.db.conn(ctx).QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("orm: count %s: %w", q.model.Name(), err)
 	}
 	return n, nil
@@ -220,7 +220,7 @@ func (q *QuerySet[T]) Exists(ctx context.Context) (bool, error) {
 	}
 	query := "SELECT EXISTS(SELECT 1 FROM " + d.Quote(q.model.Table()) + where + ")"
 	var exists bool
-	if err := q.db.sqlDB.QueryRowContext(ctx, query, args...).Scan(&exists); err != nil {
+	if err := q.db.conn(ctx).QueryRowContext(ctx, query, args...).Scan(&exists); err != nil {
 		return false, fmt.Errorf("orm: exists %s: %w", q.model.Name(), err)
 	}
 	return exists, nil
@@ -260,13 +260,13 @@ func (q *QuerySet[T]) Create(ctx context.Context, obj *T) error {
 	if autoPK && d.SupportsReturning() {
 		query += " RETURNING " + d.Quote(pk.Column)
 		var id int64
-		if err := q.db.sqlDB.QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
+		if err := q.db.conn(ctx).QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
 			return fmt.Errorf("orm: insert %s: %w", q.model.Name(), err)
 		}
 		return writeBackAutoPK(v.Field(pk.Index), id, q.model.Name())
 	}
 
-	result, err := q.db.sqlDB.ExecContext(ctx, query, args...)
+	result, err := q.db.conn(ctx).ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("orm: insert %s: %w", q.model.Name(), err)
 	}
@@ -319,7 +319,7 @@ func (q *QuerySet[T]) Update(ctx context.Context, assignments ...any) (int64, er
 	if err != nil {
 		return 0, err
 	}
-	result, err := q.db.sqlDB.ExecContext(ctx, query, args...)
+	result, err := q.db.conn(ctx).ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("orm: update %s: %w", q.model.Name(), err)
 	}
@@ -339,7 +339,7 @@ func (q *QuerySet[T]) Delete(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	result, err := q.db.sqlDB.ExecContext(ctx, query, args...)
+	result, err := q.db.conn(ctx).ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("orm: delete %s: %w", q.model.Name(), err)
 	}
