@@ -576,7 +576,7 @@ func TestDeleteGETConfirms(t *testing.T) {
 	if !strings.Contains(body, "Are you sure") {
 		t.Errorf("delete GET body missing confirmation prompt:\n%s", body)
 	}
-	if !strings.Contains(body, seeded[0].Title) && !strings.Contains(body, "Article 1") {
+	if !strings.Contains(body, seeded[0].Title) && !strings.Contains(body, "Article object (1)") {
 		t.Errorf("delete GET body does not mention the object:\n%s", body)
 	}
 	if !strings.Contains(body, `name="csrfmiddlewaretoken"`) {

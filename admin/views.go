@@ -2,7 +2,6 @@ package admin
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -158,7 +157,11 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request) {
 		for j, f := range cols {
 			cells[j] = formatCell(elem.Field(f.Index))
 		}
-		rows[i] = map[string]any{"pk": pkOf(elem, e), "cells": cells}
+		rows[i] = map[string]any{
+			"pk":    pkOf(elem, e),
+			"cells": cells,
+			"label": orm.Label(e.model, obj),
+		}
 	}
 
 	s.render(w, r, "changelist.html", map[string]any{
@@ -324,7 +327,8 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := e.ops.get(r.Context(), pk); errors.Is(err, orm.ErrDoesNotExist) {
+	obj, err := e.ops.get(r.Context(), pk)
+	if errors.Is(err, orm.ErrDoesNotExist) {
 		http.NotFound(w, r)
 		return
 	} else if err != nil {
@@ -334,7 +338,7 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request) {
 
 	s.render(w, r, "delete_confirm.html", map[string]any{
 		"title":      "Delete " + e.model.Name(),
-		"object":     fmt.Sprintf("%s %d", e.model.Name(), pk),
+		"object":     orm.Label(e.model, obj),
 		"csrf_token": csrf.Token(r.Context()),
 		"action":     r.URL.Path,
 		"prefix":     s.Prefix,

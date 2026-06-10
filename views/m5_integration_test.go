@@ -74,7 +74,7 @@ func newM5Engine(t *testing.T) *templates.Engine {
 			`<button type="submit">Log in</button>` +
 			`{% if error %}<p class="error">{{ error }}</p>{% endif %}` +
 			`</form>`,
-		"article.html": `<h1>{{ object.Title }}</h1>`,
+		"article.html": `<h1>{{ object.title }}</h1>`,
 	}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {

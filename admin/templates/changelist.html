@@ -6,6 +6,7 @@
   <table>
     <thead>
       <tr>
+        <th>{{ model }}</th>
         {% for column in columns %}<th>{{ column }}</th>{% endfor %}
         <th>Actions</th>
       </tr>
@@ -13,9 +14,9 @@
     <tbody>
       {% for row in rows %}
         <tr>
+          <td><a href="{{ prefix }}/{{ slug }}/{{ row.pk }}/change/">{{ row.label }}</a></td>
           {% for cell in row.cells %}<td>{{ cell }}</td>{% endfor %}
           <td>
-            <a href="{{ prefix }}/{{ slug }}/{{ row.pk }}/change/">Change</a>
             <a href="{{ prefix }}/{{ slug }}/{{ row.pk }}/delete/">Delete</a>
           </td>
         </tr>

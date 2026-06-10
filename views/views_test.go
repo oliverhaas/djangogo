@@ -133,7 +133,7 @@ func TestJSON(t *testing.T) {
 func TestDetailView(t *testing.T) {
 	db := newViewsDB(t)
 	eng := newViewsEngine(t, map[string]string{
-		"article.html": "Title: {{ object.Title }}",
+		"article.html": "Title: {{ object.title }}",
 	})
 	art := vArticle{Title: "Hello"}
 	if err := orm.Query[vArticle](db).Create(context.Background(), &art); err != nil {
@@ -158,7 +158,7 @@ func TestDetailView(t *testing.T) {
 
 func TestDetailViewNotFound(t *testing.T) {
 	db := newViewsDB(t)
-	eng := newViewsEngine(t, map[string]string{"article.html": "{{ object.Title }}"})
+	eng := newViewsEngine(t, map[string]string{"article.html": "{{ object.title }}"})
 
 	view := views.DetailView[vArticle]{DB: db, Engine: eng, Template: "article.html"}
 	mux := http.NewServeMux()
@@ -175,7 +175,7 @@ func TestDetailViewNotFound(t *testing.T) {
 
 func TestDetailViewBadPK(t *testing.T) {
 	db := newViewsDB(t)
-	eng := newViewsEngine(t, map[string]string{"article.html": "{{ object.Title }}"})
+	eng := newViewsEngine(t, map[string]string{"article.html": "{{ object.title }}"})
 
 	view := views.DetailView[vArticle]{DB: db, Engine: eng, Template: "article.html"}
 	mux := http.NewServeMux()
@@ -193,7 +193,7 @@ func TestDetailViewBadPK(t *testing.T) {
 func TestDetailViewCustomNames(t *testing.T) {
 	db := newViewsDB(t)
 	eng := newViewsEngine(t, map[string]string{
-		"article.html": "{{ art.Title }}|{{ extra }}",
+		"article.html": "{{ art.title }}|{{ extra }}",
 	})
 	art := vArticle{Title: "Custom"}
 	if err := orm.Query[vArticle](db).Create(context.Background(), &art); err != nil {
@@ -226,7 +226,7 @@ func TestDetailViewCustomNames(t *testing.T) {
 func TestListView(t *testing.T) {
 	db := newViewsDB(t)
 	eng := newViewsEngine(t, map[string]string{
-		"list.html": "{% for o in objects %}{{ o.Title }};{% endfor %}",
+		"list.html": "{% for o in objects %}{{ o.title }};{% endfor %}",
 	})
 	for _, title := range []string{"A", "B", "C"} {
 		art := vArticle{Title: title}
@@ -251,7 +251,7 @@ func TestListView(t *testing.T) {
 func TestListViewCustomQuery(t *testing.T) {
 	db := newViewsDB(t)
 	eng := newViewsEngine(t, map[string]string{
-		"list.html": "{% for o in rows %}{{ o.Title }};{% endfor %}",
+		"list.html": "{% for o in rows %}{{ o.title }};{% endfor %}",
 	})
 	for _, title := range []string{"keep", "drop", "keep"} {
 		art := vArticle{Title: title}

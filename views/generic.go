@@ -49,7 +49,7 @@ func (v DetailView[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		contextName = "object"
 	}
 	ctx := mergeExtra(r, v.Extra)
-	ctx[contextName] = obj
+	ctx[contextName] = wrapObject(v.DB, obj)
 
 	_ = Render(w, v.Engine, v.Template, ctx)
 }
@@ -83,9 +83,36 @@ func (v ListView[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		contextName = "objects"
 	}
 	ctx := mergeExtra(r, v.Extra)
-	ctx[contextName] = objects
+	wrapped := wrapObjects(v.DB, objects)
+	ctx[contextName] = wrapped
+	// Django's ListView always exposes the rows under "object_list" in addition
+	// to any model-specific name; mirror that unless the caller chose that name.
+	if contextName != "object_list" {
+		ctx["object_list"] = wrapped
+	}
 
 	_ = Render(w, v.Engine, v.Template, ctx)
+}
+
+// wrapObject returns obj as a templates.ModelMap (snake_case fields plus the
+// __str__ label) when its type is a registered model, so templates can use
+// {{ object.title }} and {{ object }}. It falls back to obj unchanged when the
+// type is not registered.
+func wrapObject[T any](db *orm.DB, obj T) any {
+	if m, ok := db.Registry().ModelOf(obj); ok {
+		return templates.ModelContext(m, obj)
+	}
+	return obj
+}
+
+// wrapObjects applies wrapObject to every element, returning a []any of
+// ModelMaps (or the raw values when the type is not registered).
+func wrapObjects[T any](db *orm.DB, objects []T) []any {
+	out := make([]any, len(objects))
+	for i := range objects {
+		out[i] = wrapObject(db, objects[i])
+	}
+	return out
 }
 
 // mergeExtra returns a fresh context map seeded with the result of extra (when
