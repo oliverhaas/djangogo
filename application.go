@@ -22,6 +22,7 @@ type Application struct {
 	Commands *manage.Registry
 	Handler  http.Handler
 	Out      io.Writer
+	In       io.Reader // command input (default os.Stdin); used by interactive prompts
 
 	DB            *orm.DB              // nil if no database configured
 	Models        *orm.Registry        // frozen registry built from app models
@@ -55,6 +56,7 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 		Commands:      manage.NewRegistry(),
 		Handler:       defaultHandler(),
 		Out:           os.Stdout,
+		In:            os.Stdin,
 		MigrationsDir: "migrations",
 	}
 	app.Commands.Out = app.Out
@@ -106,6 +108,7 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	_ = app.Commands.Register(&runserverCommand{app: app})
 	_ = app.Commands.Register(&makemigrationsCommand{app: app})
 	_ = app.Commands.Register(&migrateCommand{app: app})
+	_ = app.Commands.Register(&createsuperuserCommand{app: app})
 	_ = app.Commands.Register(&startprojectCommand{out: app.Out})
 	_ = app.Commands.Register(&startappCommand{out: app.Out})
 
@@ -132,4 +135,12 @@ func migrationsApp(appConfigs []apps.Config) string {
 // Execute dispatches the given CLI arguments (typically os.Args[1:]).
 func (a *Application) Execute(args []string) error {
 	return a.Commands.Execute(args)
+}
+
+// in returns the configured command input, defaulting to os.Stdin when unset.
+func (a *Application) in() io.Reader {
+	if a.In != nil {
+		return a.In
+	}
+	return os.Stdin
 }
