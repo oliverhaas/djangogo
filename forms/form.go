@@ -93,6 +93,23 @@ func (f *Form) AddError(field, msg string) {
 // Fields returns the form's fields in declaration order.
 func (f *Form) Fields() []*Field { return f.fields }
 
+// SetChoices populates the named field's option set, used to fill a foreign-key
+// <select> with the related model's rows after the form is built. It updates the
+// field's Choices (which ChoiceField validation reads) and, when the field
+// renders as a Select, refreshes the widget's options. Unknown names are ignored.
+func (f *Form) SetChoices(name string, choices [][2]string) {
+	for _, field := range f.fields {
+		if field.Name != name {
+			continue
+		}
+		field.Choices = choices
+		if _, ok := field.Widget.(Select); ok {
+			field.Widget = Select{Choices: choices}
+		}
+		return
+	}
+}
+
 // BoundValue returns the currently submitted value for name, for re-rendering.
 func (f *Form) BoundValue(name string) string {
 	if f.data == nil {

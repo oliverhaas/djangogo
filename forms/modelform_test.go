@@ -1,6 +1,8 @@
 package forms
 
 import (
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/oliverhaas/djangogo/orm"
@@ -114,11 +116,66 @@ func TestFromModel_FKField(t *testing.T) {
 	if author == nil {
 		t.Fatal("Author FK field missing")
 	}
-	if author.Kind != IntegerField {
-		t.Errorf("Author kind: got %v, want IntegerField", author.Kind)
+	if author.Kind != ChoiceField {
+		t.Errorf("Author kind: got %v, want ChoiceField", author.Kind)
 	}
-	if _, ok := author.Widget.(NumberInput); !ok {
-		t.Errorf("Author widget: got %T, want NumberInput", author.Widget)
+	if _, ok := author.Widget.(Select); !ok {
+		t.Errorf("Author widget: got %T, want Select", author.Widget)
+	}
+}
+
+func TestSetChoicesFillsFKSelect(t *testing.T) {
+	t.Parallel()
+	f := FromModel(commentModel(t))
+	f.SetChoices("Author", [][2]string{{"1", "Ada"}, {"2", "Linus"}})
+
+	var author *Field
+	for _, fld := range f.Fields() {
+		if fld.Name == "Author" {
+			author = fld
+		}
+	}
+	if author == nil {
+		t.Fatal("Author FK field missing")
+	}
+	if len(author.Choices) != 2 || author.Choices[0][1] != "Ada" {
+		t.Errorf("Choices = %v, want Ada/Linus pairs", author.Choices)
+	}
+	html := f.Render()
+	if !strings.Contains(html, `value="1"`) || !strings.Contains(html, "Ada") {
+		t.Errorf("rendered FK <select> missing populated options:\n%s", html)
+	}
+}
+
+func TestFKChoiceValidation(t *testing.T) {
+	t.Parallel()
+	f := FromModel(commentModel(t))
+	f.SetChoices("Author", [][2]string{{"1", "Ada"}})
+
+	if f.Bind(url.Values{"Text": {"Hi"}, "Author": {"99"}}).IsValid() {
+		t.Error("FK pk absent from the option set should be invalid")
+	}
+
+	g := FromModel(commentModel(t))
+	g.SetChoices("Author", [][2]string{{"1", "Ada"}})
+	if !g.Bind(url.Values{"Text": {"Hi"}, "Author": {"1"}}).IsValid() {
+		t.Errorf("FK pk in the option set should be valid; errors: %v", g.Errors())
+	}
+}
+
+func TestPopulateStruct_FKString(t *testing.T) {
+	t.Parallel()
+	m := commentModel(t)
+	cleaned := map[string]any{
+		"Text":   "Nice",
+		"Author": "42", // ChoiceField <select> yields a string value
+	}
+	var dest Comment
+	if err := PopulateStruct(m, cleaned, &dest); err != nil {
+		t.Fatalf("PopulateStruct: %v", err)
+	}
+	if dest.Author.PK() != 42 {
+		t.Errorf("Author FK pk: got %d, want 42", dest.Author.PK())
 	}
 }
 

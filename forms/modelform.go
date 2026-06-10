@@ -13,8 +13,9 @@ import (
 
 // FromModel derives a Form from an orm model. The auto primary key is skipped.
 // Each model field maps to a form Field whose Kind and default Widget follow the
-// orm Kind. A foreign-key column (Rel != nil) maps to an IntegerField for the
-// related id, named after the model field.
+// orm Kind. A foreign-key column (Rel != nil) maps to a ChoiceField rendered as a
+// <select>, named after the model field; its options start empty and are filled
+// in with the related rows via Form.SetChoices, mirroring Django's ModelChoiceField.
 func FromModel(m *orm.Model) *Form {
 	var fields []*Field
 	for _, mf := range m.Fields() {
@@ -30,15 +31,16 @@ func FromModel(m *orm.Model) *Form {
 // formFieldFor builds a form Field for a single orm field, or returns nil to
 // skip it (the auto primary key).
 func formFieldFor(mf *orm.Field) *Field {
-	// Foreign keys map to an integer id input before the scalar Kind switch,
-	// since an FK column has orm Kind KindInt but a non-nil Rel.
+	// Foreign keys map to a <select> before the scalar Kind switch, since an FK
+	// column has orm Kind KindInt but a non-nil Rel. Choices start empty; the
+	// caller fills them from the related model via Form.SetChoices.
 	if mf.Rel != nil {
 		return &Field{
 			Name:     mf.Name,
 			Label:    humanize(mf.Name),
 			Required: !mf.Null,
-			Kind:     IntegerField,
-			Widget:   NumberInput{},
+			Kind:     ChoiceField,
+			Widget:   Select{},
 		}
 	}
 
@@ -174,7 +176,8 @@ func stringifyFieldValue(mf *orm.Field, fv reflect.Value) (string, bool) {
 // PopulateStruct sets the exported fields of dest (a pointer to a struct) from
 // cleaned data, matching by orm Field.Name. It handles string, int64, bool, and
 // time.Time values, and sets a foreign key's primary key via its SetPK method
-// from the cleaned int64.
+// from the cleaned value (an int64 from an IntegerField or a string from a
+// ChoiceField <select>).
 func PopulateStruct(m *orm.Model, cleaned map[string]any, dest any) error {
 	rv := reflect.ValueOf(dest)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
@@ -193,9 +196,9 @@ func PopulateStruct(m *orm.Model, cleaned map[string]any, dest any) error {
 		fv := elem.Field(mf.Index)
 
 		if mf.Rel != nil {
-			pk, ok := val.(int64)
-			if !ok {
-				return fmt.Errorf("forms: field %s: FK value must be int64, got %T", mf.Name, val)
+			pk, err := fkPKFromCleaned(val)
+			if err != nil {
+				return fmt.Errorf("forms: field %s: %w", mf.Name, err)
 			}
 			fv.Addr().MethodByName("SetPK").Call([]reflect.Value{reflect.ValueOf(pk)})
 			continue
@@ -206,6 +209,28 @@ func PopulateStruct(m *orm.Model, cleaned map[string]any, dest any) error {
 		}
 	}
 	return nil
+}
+
+// fkPKFromCleaned coerces a cleaned foreign-key value into the related primary
+// key. A ChoiceField <select> yields the chosen option's string value; an
+// IntegerField yields an int64. An empty string means "no selection" and maps to
+// pk 0 (a cleared, nullable relation).
+func fkPKFromCleaned(val any) (int64, error) {
+	switch v := val.(type) {
+	case int64:
+		return v, nil
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return 0, nil
+		}
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("FK value %q is not a valid id", v)
+		}
+		return n, nil
+	default:
+		return 0, fmt.Errorf("FK value must be a string or int64, got %T", val)
+	}
 }
 
 // setScalar assigns a cleaned scalar value to a struct field, converting integer

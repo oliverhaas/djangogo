@@ -33,6 +33,24 @@ func formatCell(v reflect.Value) string {
 	return fmt.Sprint(v.Interface())
 }
 
+// fkCellLabel renders a foreign-key cell as the related object's label, looked up
+// by primary key in labels (a pk-string to label map for the related model). An
+// empty relation shows nothing; a key absent from labels falls back to the raw id.
+func fkCellLabel(v reflect.Value, labels map[string]string) string {
+	pk, ok := fkPK(v)
+	if !ok {
+		return formatCell(v)
+	}
+	if pk == 0 {
+		return ""
+	}
+	key := fmt.Sprint(pk)
+	if label, ok := labels[key]; ok {
+		return label
+	}
+	return key
+}
+
 // pkOf returns the primary-key value of the struct addressed by elem for model
 // e, as an int64 (0 when the model has no primary key).
 func pkOf(elem reflect.Value, e *entry) int64 {

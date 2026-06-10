@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -150,11 +151,34 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request) {
 		columns[i] = f.Name
 	}
 
+	// Pre-load foreign-key labels: one query per FK column, indexed by primary
+	// key string, so each FK cell shows the related object's label (driven by its
+	// String() method) rather than a raw id.
+	fkLabels := make(map[int]map[string]string)
+	for j, f := range cols {
+		if f.Rel == nil || f.Rel.Target == nil {
+			continue
+		}
+		opts, err := orm.LabeledRows(r.Context(), s.db, f.Rel.Target)
+		if err != nil {
+			continue
+		}
+		labels := make(map[string]string, len(opts))
+		for _, o := range opts {
+			labels[o[0]] = o[1]
+		}
+		fkLabels[j] = labels
+	}
+
 	rows := make([]map[string]any, len(objs))
 	for i, obj := range objs {
 		elem := reflect.ValueOf(obj).Elem()
 		cells := make([]string, len(cols))
 		for j, f := range cols {
+			if f.Rel != nil {
+				cells[j] = fkCellLabel(elem.Field(f.Index), fkLabels[j])
+				continue
+			}
 			cells[j] = formatCell(elem.Field(f.Index))
 		}
 		rows[i] = map[string]any{
@@ -175,9 +199,28 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request) {
 
 // formFor builds the editable form for an entry: the model form minus the
 // admin's ExcludeFields and ReadonlyFields (the auto primary key is already
-// dropped by forms.FromModel). The kept fields are reassembled into a fresh form.
-func (s *AdminSite) formFor(e *entry) *forms.Form {
-	return forms.New(s.keptFields(forms.FromModel(e.model), e)...)
+// dropped by forms.FromModel). The kept fields are reassembled into a fresh form,
+// then each foreign-key <select> is filled with the related model's rows.
+func (s *AdminSite) formFor(ctx context.Context, e *entry) *forms.Form {
+	form := forms.New(s.keptFields(forms.FromModel(e.model), e)...)
+	s.populateChoices(ctx, form, e)
+	return form
+}
+
+// populateChoices fills every foreign-key field's <select> with the related
+// model's (pk, label) rows. A load failure leaves the options empty, so a
+// submitted pk fails ChoiceField validation rather than 500-ing the request.
+func (s *AdminSite) populateChoices(ctx context.Context, form *forms.Form, e *entry) {
+	for _, mf := range e.model.Relations() {
+		if mf.Rel == nil || mf.Rel.Target == nil {
+			continue
+		}
+		opts, err := orm.LabeledRows(ctx, s.db, mf.Rel.Target)
+		if err != nil {
+			continue
+		}
+		form.SetChoices(mf.Name, opts)
+	}
 }
 
 // keptFields returns f's fields with the entry's excluded and read-only field
@@ -214,7 +257,7 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		form := s.formFor(e).Bind(r.PostForm)
+		form := s.formFor(r.Context(), e).Bind(r.PostForm)
 		if form.IsValid() {
 			obj := e.ops.newPtr()
 			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
@@ -232,7 +275,7 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderForm(w, r, e, "Add "+e.model.Name(), s.formFor(e))
+	s.renderForm(w, r, e, "Add "+e.model.Name(), s.formFor(r.Context(), e))
 }
 
 // change handles the change form: GET renders a form pre-filled from the row,
@@ -254,7 +297,7 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		form := s.formFor(e).Bind(r.PostForm)
+		form := s.formFor(r.Context(), e).Bind(r.PostForm)
 		if form.IsValid() {
 			obj, err := e.ops.get(r.Context(), pk)
 			if errors.Is(err, orm.ErrDoesNotExist) {
@@ -301,6 +344,7 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	form := forms.New(kept...).Bind(data)
+	s.populateChoices(r.Context(), form, e)
 	s.renderForm(w, r, e, "Change "+e.model.Name(), form)
 }
 

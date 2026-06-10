@@ -207,12 +207,15 @@ func TestChangelistUnknownModel404(t *testing.T) {
 	}
 }
 
-// Author and Post exercise the FK-display path: a Post has an FK to an Author,
-// and the changelist must render that FK as its related primary key.
+// Author and Post exercise the FK paths: a Post has an FK to an Author, so the
+// changelist renders that FK as the related object's label and the add/change
+// form offers the authors in a <select>. Author's String() drives the label.
 type Author struct {
 	ID   int64
 	Name string `orm:"max_length=100"`
 }
+
+func (a Author) String() string { return a.Name }
 
 type Post struct {
 	ID     int64
@@ -220,7 +223,11 @@ type Post struct {
 	Author orm.FK[Author]
 }
 
-func TestChangelistRendersFKAsPK(t *testing.T) {
+// newPostAuthorSite builds a Post+Author admin over an in-memory database seeded
+// with the given author names, returning the database, the admin site, and the
+// created author ids in order.
+func newPostAuthorSite(t *testing.T, authorNames ...string) (*orm.DB, *admin.AdminSite, []int64) {
+	t.Helper()
 	reg := orm.NewRegistry()
 	if _, err := reg.Register(&Author{}); err != nil {
 		t.Fatalf("Register(Author): %v", err)
@@ -233,7 +240,7 @@ func TestChangelistRendersFKAsPK(t *testing.T) {
 	}
 	reg.Freeze()
 
-	sdb, err := sqlite.Open("file::memory:?cache=shared")
+	sdb, err := sqlite.Open("file:" + t.Name() + "?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("sqlite.Open: %v", err)
 	}
@@ -247,14 +254,13 @@ func TestChangelistRendersFKAsPK(t *testing.T) {
 			t.Fatalf("CreateTable(%s): %v", name, err)
 		}
 	}
-	author := &Author{Name: "Ada"}
-	if err := orm.Query[Author](db).Create(ctx, author); err != nil {
-		t.Fatalf("Create(Author): %v", err)
-	}
-	post := &Post{Title: "On Computing"}
-	post.Author.SetPK(author.ID)
-	if err := orm.Query[Post](db).Create(ctx, post); err != nil {
-		t.Fatalf("Create(Post): %v", err)
+	ids := make([]int64, len(authorNames))
+	for i, name := range authorNames {
+		a := &Author{Name: name}
+		if err := orm.Query[Author](db).Create(ctx, a); err != nil {
+			t.Fatalf("Create(Author %q): %v", name, err)
+		}
+		ids[i] = a.ID
 	}
 
 	site, err := admin.NewAdminSite(db)
@@ -262,6 +268,16 @@ func TestChangelistRendersFKAsPK(t *testing.T) {
 		t.Fatalf("NewAdminSite: %v", err)
 	}
 	admin.Register[Post](site, admin.ModelAdmin{})
+	return db, site, ids
+}
+
+func TestChangelistRendersFKAsLabel(t *testing.T) {
+	db, site, ids := newPostAuthorSite(t, "Ada")
+	post := &Post{Title: "On Computing"}
+	post.Author.SetPK(ids[0])
+	if err := orm.Query[Post](db).Create(context.Background(), post); err != nil {
+		t.Fatalf("Create(Post): %v", err)
+	}
 	router := urls.NewRouter(site.Routes()...)
 
 	rec := httptest.NewRecorder()
@@ -272,12 +288,89 @@ func TestChangelistRendersFKAsPK(t *testing.T) {
 		t.Fatalf("post changelist status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	// The Author column header and the FK's related PK (the author's id) appear.
-	if !strings.Contains(body, "Author") {
-		t.Errorf("post changelist missing Author column:\n%s", body)
-	}
 	if !strings.Contains(body, "On Computing") {
 		t.Errorf("post changelist missing title:\n%s", body)
+	}
+	// The FK cell shows the related Author's label (its String()), not a raw id.
+	if !strings.Contains(body, "Ada") {
+		t.Errorf("post changelist FK cell missing the author label %q:\n%s", "Ada", body)
+	}
+}
+
+func TestAddFormRendersFKSelect(t *testing.T) {
+	_, site, _ := newPostAuthorSite(t, "Ada", "Linus")
+	router := urls.NewRouter(site.Routes()...)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/post/add/", nil)
+	staffInjector(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("add GET status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "<select") {
+		t.Errorf("add form has no FK <select>:\n%s", body)
+	}
+	for _, want := range []string{"Ada", "Linus", `value="1"`, `value="2"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("add form FK <select> missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestAddPOSTValidFKCreatesRow(t *testing.T) {
+	db, site, ids := newPostAuthorSite(t, "Ada", "Linus")
+	router := urls.NewRouter(site.Routes()...)
+
+	form := url.Values{}
+	form.Set("Title", "Hello")
+	form.Set("Author", strconv.FormatInt(ids[1], 10)) // Linus
+	form.Set(csrf.FormField, "ignored-by-handler")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/post/add/", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	staffInjector(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("FK add POST status = %d, want 302\n%s", rec.Code, rec.Body.String())
+	}
+	got, err := orm.Query[Post](db).Filter("title", "Hello").All(context.Background())
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("after FK add POST, found %d posts, want 1", len(got))
+	}
+	if got[0].Author.PK() != ids[1] {
+		t.Errorf("created post Author pk = %d, want %d", got[0].Author.PK(), ids[1])
+	}
+}
+
+func TestAddPOSTInvalidFKReRendersNoRow(t *testing.T) {
+	db, site, _ := newPostAuthorSite(t, "Ada")
+	router := urls.NewRouter(site.Routes()...)
+
+	form := url.Values{}
+	form.Set("Title", "Hello")
+	form.Set("Author", "999") // no such author -> not in the <select> option set
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/post/add/", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	staffInjector(router).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("invalid FK add POST status = %d, want 200 (re-render, not 500)\n%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Select a valid choice") {
+		t.Errorf("invalid FK add POST missing choice error:\n%s", rec.Body.String())
+	}
+	all, err := orm.Query[Post](db).All(context.Background())
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(all) != 0 {
+		t.Errorf("invalid FK add POST created %d posts, want 0", len(all))
 	}
 }
 
