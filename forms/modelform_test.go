@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -28,6 +29,16 @@ type Comment struct {
 	ID     int64
 	Text   string `orm:"max_length=500"`
 	Author orm.FK[Author]
+}
+
+// Stamped exercises auto_now/auto_now_add exclusion from the form and a nullable
+// FK that can be cleared (left blank).
+type Stamped struct {
+	ID        int64
+	Title     string         `orm:"max_length=100"`
+	Author    orm.FK[Author] `orm:"null"`
+	CreatedAt time.Time      `orm:"auto_now_add"`
+	UpdatedAt time.Time      `orm:"auto_now"`
 }
 
 func articleModel(t *testing.T) *orm.Model {
@@ -124,6 +135,55 @@ func TestFromModel_FKField(t *testing.T) {
 	}
 }
 
+func stampedModel(t *testing.T) *orm.Model {
+	t.Helper()
+	r := orm.NewRegistry()
+	if _, err := r.Register(&Author{}); err != nil {
+		t.Fatalf("Register(Author): %v", err)
+	}
+	m, err := r.Register(&Stamped{})
+	if err != nil {
+		t.Fatalf("Register(Stamped): %v", err)
+	}
+	if err := r.Resolve(); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	return m
+}
+
+func TestAutoNowFieldsExcludedFromForm(t *testing.T) {
+	t.Parallel()
+	f := FromModel(stampedModel(t))
+	for _, fld := range f.Fields() {
+		if fld.Name == "CreatedAt" || fld.Name == "UpdatedAt" {
+			t.Errorf("auto-now field %q should be excluded from the ModelForm", fld.Name)
+		}
+	}
+	// The editable fields are still present.
+	if !strings.Contains(strings.Join(fieldNames(f), ","), "Title") {
+		t.Errorf("Title should be present in the form; got %v", fieldNames(f))
+	}
+}
+
+func TestNullableFKClearsToEmpty(t *testing.T) {
+	t.Parallel()
+	m := stampedModel(t)
+	f := FromModel(m)
+	f.SetChoices("Author", [][2]string{{"1", "Ada"}})
+
+	// A nullable FK left blank validates and cleans to an empty (cleared) selection.
+	if !f.Bind(url.Values{"Title": {"Hi"}}).IsValid() {
+		t.Fatalf("nullable FK left blank should be valid; errors: %v", f.Errors())
+	}
+	dest := &Stamped{}
+	if err := PopulateStruct(m, f.Cleaned(), dest); err != nil {
+		t.Fatalf("PopulateStruct: %v", err)
+	}
+	if dest.Author.PK() != 0 {
+		t.Errorf("cleared FK PK = %d, want 0 (NULL)", dest.Author.PK())
+	}
+}
+
 func TestSetChoicesFillsFKSelect(t *testing.T) {
 	t.Parallel()
 	f := FromModel(commentModel(t))
@@ -138,12 +198,18 @@ func TestSetChoicesFillsFKSelect(t *testing.T) {
 	if author == nil {
 		t.Fatal("Author FK field missing")
 	}
-	if len(author.Choices) != 2 || author.Choices[0][1] != "Ada" {
-		t.Errorf("Choices = %v, want Ada/Linus pairs", author.Choices)
+	// SetChoices prepends Django's empty_label option, so the related rows follow
+	// a leading blank choice.
+	if len(author.Choices) != 3 || author.Choices[0] != ([2]string{"", EmptyChoiceLabel}) ||
+		author.Choices[1][1] != "Ada" {
+		t.Errorf("Choices = %v, want empty option then Ada/Linus pairs", author.Choices)
 	}
 	html := f.Render()
 	if !strings.Contains(html, `value="1"`) || !strings.Contains(html, "Ada") {
 		t.Errorf("rendered FK <select> missing populated options:\n%s", html)
+	}
+	if !strings.Contains(html, `>`+EmptyChoiceLabel+`</option>`) {
+		t.Errorf("rendered FK <select> missing the empty option:\n%s", html)
 	}
 }
 

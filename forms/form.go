@@ -93,18 +93,29 @@ func (f *Form) AddError(field, msg string) {
 // Fields returns the form's fields in declaration order.
 func (f *Form) Fields() []*Field { return f.fields }
 
+// EmptyChoiceLabel is the label of the blank option prepended to a foreign-key
+// <select>, mirroring Django's ModelChoiceField.empty_label ("---------").
+const EmptyChoiceLabel = "---------"
+
 // SetChoices populates the named field's option set, used to fill a foreign-key
-// <select> with the related model's rows after the form is built. It updates the
-// field's Choices (which ChoiceField validation reads) and, when the field
-// renders as a Select, refreshes the widget's options. Unknown names are ignored.
+// <select> with the related model's rows after the form is built. It prepends an
+// empty option (Django's empty_label) so the relation can be left blank: a
+// non-required FK then submits empty and clears to NULL, and a required FK is not
+// silently pre-set to the first row (Clean rejects the empty submission because
+// the empty value is checked before choice membership). It updates the field's
+// Choices (which ChoiceField validation reads) and, when the field renders as a
+// Select, refreshes the widget's options. Unknown names are ignored.
 func (f *Form) SetChoices(name string, choices [][2]string) {
 	for _, field := range f.fields {
 		if field.Name != name {
 			continue
 		}
-		field.Choices = choices
+		withEmpty := make([][2]string, 0, len(choices)+1)
+		withEmpty = append(withEmpty, [2]string{"", EmptyChoiceLabel})
+		withEmpty = append(withEmpty, choices...)
+		field.Choices = withEmpty
 		if _, ok := field.Widget.(Select); ok {
-			field.Widget = Select{Choices: choices}
+			field.Widget = Select{Choices: withEmpty}
 		}
 		return
 	}

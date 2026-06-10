@@ -47,8 +47,15 @@ func FromModel(m *orm.Model, opts ...ModelFormOption) *Form {
 }
 
 // formFieldFor builds a form Field for a single orm field, or returns nil to
-// skip it (the auto primary key).
+// skip it (the auto primary key, or a non-editable auto_now/auto_now_add field).
 func formFieldFor(mf *orm.Field) *Field {
+	// auto_now / auto_now_add fields are non-editable in Django (the ORM stamps
+	// them on save), so they are omitted from every ModelForm. Skip them here so
+	// a bare FromModel(model) does not surface an editable, soon-overwritten input.
+	if mf.AutoNow || mf.AutoNowAdd {
+		return nil
+	}
+
 	// Foreign keys map to a <select> before the scalar Kind switch, since an FK
 	// column has orm Kind KindInt but a non-nil Rel. Choices start empty; the
 	// caller fills them from the related model via Form.SetChoices.
