@@ -6,7 +6,7 @@
 </head>
 <body>
   <header>
-    <a href="/">Blog</a> &middot; <a href="/admin/">Admin</a>
+    <a href="{% url 'post-list' %}">Blog</a> &middot; <a href="/admin/">Admin</a>
   </header>
   <main>
     {% block content %}{% endblock %}

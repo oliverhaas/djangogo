@@ -1,9 +1,28 @@
 {% extends "base.html" %}
-{% block title %}{{ object.title }}{% endblock %}
+{% block title %}{{ post.title }}{% endblock %}
 {% block content %}
   <article>
-    <h1>{{ object.title }}</h1>
-    <div class="body">{{ object.body }}</div>
+    <h1>{{ post.title }}</h1>
+    <div class="body">{{ post.body }}</div>
   </article>
-  <p><a href="/">Back to posts</a></p>
+
+  <section class="comments">
+    <h2>Comments</h2>
+    <ul>
+      {% for comment in comments %}
+        <li><strong>{{ comment.name }}</strong>: {{ comment.body }}</li>
+      {% empty %}
+        <li class="empty">No comments yet. Be the first.</li>
+      {% endfor %}
+    </ul>
+
+    <h3>Add a comment</h3>
+    <form method="post" action="{% url 'post-detail' post.id %}">
+      {% csrf_token %}
+      {{ form_html|safe }}
+      <button type="submit">Post comment</button>
+    </form>
+  </section>
+
+  <p><a href="{% url 'post-list' %}">Back to posts</a></p>
 {% endblock %}

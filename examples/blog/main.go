@@ -59,6 +59,10 @@ func newServer(cfg config) (http.Handler, error) {
 	}
 
 	router := urls.NewRouter(append(publicRoutes(db, engine), site.Routes()...)...)
+	// Wire the router's reverse into the engine so {% url %} resolves named
+	// routes against it (Django's single root URLconf). This must follow router
+	// construction; templates render later, at request time.
+	engine.SetResolver(router.Reverse)
 
 	// Middleware chain (outer to inner): sessions -> csrf -> auth -> router.
 	// sessions must run first so csrf and auth can read the session; auth then
@@ -71,11 +75,11 @@ func newServer(cfg config) (http.Handler, error) {
 	return handler, nil
 }
 
-// openDB opens the SQLite database, registers Post plus the auth models, resolves
-// relations, freezes the registry, and creates every table.
+// openDB opens the SQLite database, registers Post and Comment plus the auth
+// models, resolves relations, freezes the registry, and creates every table.
 func openDB(dsn string) (*orm.DB, error) {
 	reg := orm.NewRegistry()
-	models := append([]any{&Post{}}, auth.AppModels()...)
+	models := append([]any{&Post{}, &Comment{}}, auth.AppModels()...)
 	for _, m := range models {
 		if _, err := reg.Register(m); err != nil {
 			return nil, fmt.Errorf("register %T: %w", m, err)
@@ -116,7 +120,9 @@ func publicEngine() (*templates.Engine, error) {
 }
 
 // publicRoutes returns the public post list ("/") and detail ("/posts/{pk}/")
-// routes backed by the generic ListView and DetailView.
+// routes. The list uses the generic ListView; the detail uses a custom
+// postDetailView that also accepts comment submissions, so its route carries no
+// method prefix and matches both GET (render) and POST (submit a comment).
 func publicRoutes(db *orm.DB, engine *templates.Engine) []urls.Route {
 	list := views.ListView[Post]{
 		DB:       db,
@@ -126,18 +132,16 @@ func publicRoutes(db *orm.DB, engine *templates.Engine) []urls.Route {
 			return orm.Query[Post](db).Filter("published", true).OrderBy("-created_at")
 		},
 	}
-	detail := views.DetailView[Post]{
-		DB:       db,
-		Engine:   engine,
-		Template: "post_detail.html",
-	}
+	detail := postDetailView{db: db, engine: engine}
 	return []urls.Route{
 		urls.Path("GET /{$}", list, "post-list"),
-		urls.Path("GET /posts/{pk}/", detail, "post-detail"),
+		urls.Path("/posts/{pk}/", detail, "post-detail"),
 	}
 }
 
-// adminSite builds the admin site and registers Post with a small ModelAdmin.
+// adminSite builds the admin site and registers Post and Comment, each with a
+// small ModelAdmin. Comment's changelist shows its FK to Post via the post's
+// __str__ label, and its change form renders the FK as a <select> of posts.
 func adminSite(db *orm.DB) (*admin.AdminSite, error) {
 	site, err := admin.NewAdminSite(db)
 	if err != nil {
@@ -145,6 +149,10 @@ func adminSite(db *orm.DB) (*admin.AdminSite, error) {
 	}
 	admin.Register[Post](site, admin.ModelAdmin{
 		ListDisplay: []string{"ID", "Title", "Published"},
+		Ordering:    []string{"-id"},
+	})
+	admin.Register[Comment](site, admin.ModelAdmin{
+		ListDisplay: []string{"ID", "Post", "Name"},
 		Ordering:    []string{"-id"},
 	})
 	return site, nil
