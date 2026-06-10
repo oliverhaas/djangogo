@@ -132,9 +132,26 @@ This is a proof of concept. The notable slimmed or deferred areas are:
 - **Migrations:** generated migration files register via `init()`, so a separate
   `migrate` process only sees migrations compiled into the binary (rebuild after
   `makemigrations`). An in-process flow works without a rebuild.
-- **Admin:** `SearchFields`/`ListFilter`/pagination/inlines and FK chooser widgets
-  are not implemented. `ReadonlyFields` are currently omitted from the change form
+- **Admin:** `SearchFields`/`ListFilter`/pagination/inlines are not implemented.
+  Foreign keys render as a `<select>` of the related rows (with Django's empty
+  `---------` option), but there is no raw-id/autocomplete widget, so the select
+  loads the whole related table. `ReadonlyFields` are omitted from the change form
   rather than rendered as disabled inputs.
+- **Forms:** a field's `required` is derived from the database `null`, not a
+  separate Django `blank` flag (the two are independent in Django). Rendered HTML
+  input names use the Go struct field name (e.g. `name="Title"`), not Django's
+  lowercase field name.
+- **Templates / URLs:** `{% url %}` takes positional arguments only (no `pk=...`
+  kwargs or `as var` capture), and `Reverse` substitutes them without
+  URL-escaping. The template model context exposes scalar columns under their
+  snake_case names and `{{ obj }}` as `__str__`, but relation fields
+  (`{{ obj.author }}` / `{{ obj.author_id }}`) are not exposed.
+- **ORM fields:** a declared `default=` overrides an explicitly-set Go zero value
+  (Django keeps an explicit zero), and `Update` stamps `auto_now` fields whereas
+  Django's `QuerySet.update()` does not (this ORM has no separate `save()` path).
+- **Auth:** `createsuperuser` prompts once (no interactive re-prompt on an empty or
+  duplicate username) and does not run password-strength validation; input is
+  line-based (unmasked).
 - **Sessions/CSRF:** the session cookie sets `HttpOnly` and `SameSite=Lax` but not
   `Secure`; enable `Secure` behind TLS in a real deployment.
 - **Fidelity:** the differential harness covers template rendering only. Query-SQL
