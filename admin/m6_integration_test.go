@@ -171,8 +171,8 @@ func TestM6EndToEndAdminCRUD(t *testing.T) {
 
 	// The admin templates reverse no named URLs, but restore the resolver anyway
 	// so the test leaves no global state behind.
-	savedResolver := templates.URLResolver
-	t.Cleanup(func() { templates.URLResolver = savedResolver })
+	savedResolver := templates.URLResolverFunc()
+	t.Cleanup(func() { templates.SetURLResolver(savedResolver) })
 
 	// Middleware chain (outer to inner): sessions -> csrf -> auth -> router.
 	store := sessions.NewSignedCookieStore([]byte("m6-integration-secret"))

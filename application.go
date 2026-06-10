@@ -131,7 +131,7 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 // plus, when a database is configured and an app opts into the admin, the mounted
 // admin site. The router is wrapped in the sessions -> csrf -> auth middleware
 // chain (auth only when a database is present, since it loads the request user),
-// and the router's Reverse is wired into templates.URLResolver so {% url %}
+// and the router's Reverse is wired in via templates.SetURLResolver so {% url %}
 // resolves against it (Django's single root URLconf). With no routes it falls
 // back to the liveness handler.
 func (a *Application) buildHandler(appConfigs []apps.Config) (http.Handler, error) {
@@ -160,7 +160,7 @@ func (a *Application) buildHandler(appConfigs []apps.Config) (http.Handler, erro
 	if err != nil {
 		return nil, fmt.Errorf("djangogo: build router: %w", err)
 	}
-	templates.URLResolver = router.Reverse
+	templates.SetURLResolver(router.Reverse)
 
 	var handler http.Handler = router
 	if a.DB != nil {

@@ -151,9 +151,9 @@ func TestM5LoginGatedExit(t *testing.T) {
 	)
 
 	// Wire {% url %} to the router and restore the default resolver afterwards.
-	prevResolver := templates.URLResolver
-	templates.URLResolver = router.Reverse
-	t.Cleanup(func() { templates.URLResolver = prevResolver })
+	prevResolver := templates.URLResolverFunc()
+	templates.SetURLResolver(router.Reverse)
+	t.Cleanup(func() { templates.SetURLResolver(prevResolver) })
 
 	// Compose middleware: sessions outermost so the session is in context before
 	// auth reads it.

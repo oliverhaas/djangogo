@@ -53,14 +53,14 @@ func TestStaticTagVariableArg(t *testing.T) {
 }
 
 func TestURLTag(t *testing.T) {
-	prev := URLResolver
-	t.Cleanup(func() { URLResolver = prev })
-	URLResolver = func(name string, args ...any) (string, error) {
+	prev := URLResolverFunc()
+	t.Cleanup(func() { SetURLResolver(prev) })
+	SetURLResolver(func(name string, args ...any) (string, error) {
 		if name == "article-detail" && len(args) == 1 && fmt.Sprint(args[0]) == "42" {
 			return "/articles/42/", nil
 		}
 		return "", fmt.Errorf("unexpected reverse: %s %v", name, args)
-	}
+	})
 
 	eng := newStringEngine(t)
 	got, err := eng.RenderString(`{% url "article-detail" 42 %}`, nil)
@@ -73,12 +73,12 @@ func TestURLTag(t *testing.T) {
 }
 
 func TestURLTagResolverErrorSurfaces(t *testing.T) {
-	prev := URLResolver
-	t.Cleanup(func() { URLResolver = prev })
+	prev := URLResolverFunc()
+	t.Cleanup(func() { SetURLResolver(prev) })
 	sentinel := errors.New("no such route")
-	URLResolver = func(_ string, _ ...any) (string, error) {
+	SetURLResolver(func(_ string, _ ...any) (string, error) {
 		return "", sentinel
-	}
+	})
 
 	eng := newStringEngine(t)
 	_, err := eng.RenderString(`{% url "missing" %}`, nil)
@@ -89,11 +89,11 @@ func TestURLTagResolverErrorSurfaces(t *testing.T) {
 
 func TestURLTagPrefersEngineResolver(t *testing.T) {
 	// The global resolver would error; the per-engine resolver must win.
-	prev := URLResolver
-	t.Cleanup(func() { URLResolver = prev })
-	URLResolver = func(_ string, _ ...any) (string, error) {
+	prev := URLResolverFunc()
+	t.Cleanup(func() { SetURLResolver(prev) })
+	SetURLResolver(func(_ string, _ ...any) (string, error) {
 		return "", errors.New("global resolver should not be called")
-	}
+	})
 
 	eng := newStringEngine(t)
 	eng.SetResolver(func(name string, args ...any) (string, error) {
@@ -113,14 +113,14 @@ func TestURLTagPrefersEngineResolver(t *testing.T) {
 }
 
 func TestURLTagFallsBackToGlobalResolver(t *testing.T) {
-	prev := URLResolver
-	t.Cleanup(func() { URLResolver = prev })
-	URLResolver = func(name string, _ ...any) (string, error) {
+	prev := URLResolverFunc()
+	t.Cleanup(func() { SetURLResolver(prev) })
+	SetURLResolver(func(name string, _ ...any) (string, error) {
 		if name == "home" {
 			return "/", nil
 		}
 		return "", fmt.Errorf("unexpected reverse: %s", name)
-	}
+	})
 
 	// No SetResolver call, so the engine falls back to the global resolver.
 	eng := newStringEngine(t)

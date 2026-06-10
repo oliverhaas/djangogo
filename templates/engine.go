@@ -20,7 +20,7 @@ type Engine struct {
 
 // SetResolver sets the URL resolver injected into every render context, so this
 // engine's {% url %} tags reverse against the given route table rather than the
-// process-global URLResolver. Passing nil clears it (falling back to the global).
+// process-global resolver. Passing nil clears it (falling back to the global).
 func (e *Engine) SetResolver(r Resolver) { e.resolver = r }
 
 // context builds a pongo2 context from ctx, injecting this engine's resolver

@@ -18,15 +18,36 @@ type Resolver func(name string, args ...any) (string, error)
 
 // resolverContextKey is the context key under which an Engine injects its
 // per-render Resolver (see Engine.SetResolver). {% url %} prefers it over the
-// process-global URLResolver, letting different engines reverse against different
+// process-global resolver, letting different engines reverse against different
 // route tables. The name is a valid identifier so pongo2 accepts it as a key.
 const resolverContextKey = "__djangogo_url_resolver__"
 
-// URLResolver is the process-global fallback called by {% url %} when no
-// per-render resolver is present in the context. Defaults to a stub returning an
-// error; wired by the urls package / app at boot.
-var URLResolver Resolver = func(name string, _ ...any) (string, error) {
-	return "", fmt.Errorf("templates: no URLResolver configured (cannot reverse %q)", name)
+// urlResolverMu guards the process-global fallback resolver. The global is read
+// during template rendering ({% url %}) and written at boot by the app, possibly
+// from different goroutines (a second Application, concurrent tests), so access is
+// synchronized to avoid a data race on the function value.
+var (
+	urlResolverMu sync.RWMutex
+	urlResolverFn Resolver = func(name string, _ ...any) (string, error) {
+		return "", fmt.Errorf("templates: no URLResolver configured (cannot reverse %q)", name)
+	}
+)
+
+// SetURLResolver sets the process-global fallback resolver called by {% url %}
+// when no per-render resolver is present in the context. It is wired by the app at
+// boot and is safe for concurrent use.
+func SetURLResolver(r Resolver) {
+	urlResolverMu.Lock()
+	defer urlResolverMu.Unlock()
+	urlResolverFn = r
+}
+
+// URLResolverFunc returns the current process-global fallback resolver. It is safe
+// for concurrent use, e.g. to save and restore the resolver in a test.
+func URLResolverFunc() Resolver {
+	urlResolverMu.RLock()
+	defer urlResolverMu.RUnlock()
+	return urlResolverFn
 }
 
 // registerOnce guards tag registration. pongo2's tag registry is process-global
@@ -98,8 +119,8 @@ type urlTagNode struct {
 
 // Execute resolves the route name and arguments against the context and writes the
 // reversed URL. It prefers a per-render Resolver injected into the context (by
-// Engine.SetResolver), falling back to the global URLResolver. A resolver error is
-// surfaced as a template error.
+// Engine.SetResolver), falling back to the process-global resolver. A resolver
+// error is surfaced as a template error.
 func (n *urlTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter) *pongo2.Error {
 	nameVal, err := n.nameExpr.Evaluate(ctx)
 	if err != nil {
@@ -125,14 +146,14 @@ func (n *urlTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWrit
 }
 
 // resolverFrom returns the per-render Resolver carried in the context, or the
-// global URLResolver when none is present.
+// process-global resolver (URLResolverFunc) when none is present.
 func resolverFrom(ctx *pongo2.ExecutionContext) Resolver {
 	if v, ok := ctx.Public[resolverContextKey]; ok {
 		if r, ok := v.(Resolver); ok && r != nil {
 			return r
 		}
 	}
-	return URLResolver
+	return URLResolverFunc()
 }
 
 // urlTagParser parses {% url "route-name" arg1 arg2 %}. The name and each argument
