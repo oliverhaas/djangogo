@@ -4,12 +4,18 @@ package djangogo
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/oliverhaas/djangogo/admin"
+	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/conf"
 	"github.com/oliverhaas/djangogo/orm"
+	"github.com/oliverhaas/djangogo/urls"
 )
 
 // TestModel is a minimal model used to exercise the model registry, migration,
@@ -129,6 +135,78 @@ func TestNewWiresModelsAndDB(t *testing.T) {
 	}
 	if !hasCommand(app, "makemigrations") || !hasCommand(app, "migrate") {
 		t.Errorf("migration commands missing: %v", app.Commands.Names())
+	}
+}
+
+// wiredPost is the model the wired test app registers with the admin.
+type wiredPost struct {
+	ID    int64
+	Title string `orm:"max_length=100"`
+}
+
+func (p wiredPost) String() string { return p.Title }
+
+// wiredApp implements Config, ModelProvider, URLProvider, and the admin
+// RegisterAdmin hook, so New must mount its URLs and its admin.
+type wiredApp struct{}
+
+func (wiredApp) Name() string  { return "wired" }
+func (wiredApp) Models() []any { return []any{&wiredPost{}} }
+
+func (wiredApp) URLs() []urls.Route {
+	home := func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("home-ok")) }
+	return []urls.Route{urls.PathFunc("GET /{$}", home, "home")}
+}
+
+func (wiredApp) RegisterAdmin(site *admin.AdminSite) {
+	admin.Register[wiredPost](site, admin.ModelAdmin{})
+}
+
+func TestNewBuildsWiredHandler(t *testing.T) {
+	app, err := New(conf.Settings{
+		SecretKey: "k",
+		Database:  conf.Database{Driver: "sqlite", DSN: "file:wiredhandler?mode=memory&cache=shared"},
+	}, wiredApp{}, auth.App{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// The URLProvider's home route is mounted at the site root.
+	rec := httptest.NewRecorder()
+	app.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / status = %d, want 200", rec.Code)
+	}
+	if got := rec.Body.String(); got != "home-ok" {
+		t.Errorf("GET / body = %q, want %q", got, "home-ok")
+	}
+
+	// The admin is mounted; an anonymous request is redirected to its login page
+	// by the staff gate, proving the sessions -> csrf -> auth chain is wired.
+	rec2 := httptest.NewRecorder()
+	app.Handler.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/admin/", nil))
+	if rec2.Code != http.StatusFound {
+		t.Fatalf("GET /admin/ status = %d, want 302", rec2.Code)
+	}
+	if loc := rec2.Header().Get("Location"); !strings.Contains(loc, "/admin/login/") {
+		t.Errorf("GET /admin/ Location = %q, want it to point at the admin login", loc)
+	}
+}
+
+func TestNewWithoutURLProviderUsesLivenessHandler(t *testing.T) {
+	// testApp provides models but neither URLs nor an admin registration, so the
+	// handler falls back to the liveness stub.
+	app, err := New(conf.Settings{SecretKey: "k"}, testApp{name: "blog"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	app.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "is running") {
+		t.Errorf("GET / body = %q, want the liveness line", rec.Body.String())
 	}
 }
 

@@ -52,6 +52,8 @@ func Project(dir, name, replacePath string) error {
 		{path: "main.go", tmpl: projectMain},
 		{path: filepath.Join(d.AppName, "app.go"), tmpl: appConfig},
 		{path: filepath.Join(d.AppName, "models.go"), tmpl: appModels},
+		{path: filepath.Join(d.AppName, "admin.go"), tmpl: appAdmin},
+		{path: filepath.Join(d.AppName, "urls.go"), tmpl: appURLs},
 	}
 	return render(dir, d, files)
 }

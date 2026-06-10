@@ -40,6 +40,8 @@ func TestProjectWritesExpectedFiles(t *testing.T) {
 		"main.go",
 		filepath.Join("myprojapp", "app.go"),
 		filepath.Join("myprojapp", "models.go"),
+		filepath.Join("myprojapp", "admin.go"),
+		filepath.Join("myprojapp", "urls.go"),
 	}
 	for _, rel := range goFiles {
 		path := filepath.Join(dir, rel)
@@ -85,6 +87,9 @@ func TestProjectMainWiresApp(t *testing.T) {
 	}
 	if !strings.Contains(src, "&myprojapp.App{}") {
 		t.Errorf("main.go missing app wiring:\n%s", src)
+	}
+	if !strings.Contains(src, "auth.App{}") {
+		t.Errorf("main.go missing auth app wiring (admin needs it):\n%s", src)
 	}
 	// Without a replace path, no replace directive is emitted.
 	gomod, err := os.ReadFile(filepath.Join(dir, "go.mod"))

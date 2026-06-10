@@ -6,12 +6,18 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/apps"
+	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/conf"
+	"github.com/oliverhaas/djangogo/csrf"
 	"github.com/oliverhaas/djangogo/manage"
 	"github.com/oliverhaas/djangogo/migrations"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/orm/backends/sqlite"
+	"github.com/oliverhaas/djangogo/sessions"
+	"github.com/oliverhaas/djangogo/templates"
+	"github.com/oliverhaas/djangogo/urls"
 )
 
 // Application is the wired-up framework instance: settings, the app registry,
@@ -54,7 +60,6 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 		Settings:      s,
 		Apps:          appReg,
 		Commands:      manage.NewRegistry(),
-		Handler:       defaultHandler(),
 		Out:           os.Stdout,
 		In:            os.Stdin,
 		MigrationsDir: "migrations",
@@ -103,6 +108,13 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 		}
 	}
 
+	// Assemble the root HTTP handler from the apps' URL configs and the admin.
+	handler, err := app.buildHandler(appConfigs)
+	if err != nil {
+		return nil, err
+	}
+	app.Handler = handler
+
 	// Built-in commands. Registration cannot collide here, so ignore the error.
 	_ = app.Commands.Register(versionCommand{out: app.Out})
 	_ = app.Commands.Register(&runserverCommand{app: app})
@@ -113,6 +125,78 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	_ = app.Commands.Register(&startappCommand{out: app.Out})
 
 	return app, nil
+}
+
+// buildHandler assembles the root HTTP handler: every URLProvider app's routes
+// plus, when a database is configured and an app opts into the admin, the mounted
+// admin site. The router is wrapped in the sessions -> csrf -> auth middleware
+// chain (auth only when a database is present, since it loads the request user),
+// and the router's Reverse is wired into templates.URLResolver so {% url %}
+// resolves against it (Django's single root URLconf). With no routes it falls
+// back to the liveness handler.
+func (a *Application) buildHandler(appConfigs []apps.Config) (http.Handler, error) {
+	var routes []urls.Route
+	for _, c := range appConfigs {
+		if up, ok := c.(apps.URLProvider); ok {
+			routes = append(routes, up.URLs()...)
+		}
+	}
+
+	if a.DB != nil {
+		site, err := a.adminSite(appConfigs)
+		if err != nil {
+			return nil, err
+		}
+		if site != nil {
+			routes = append(routes, site.Routes()...)
+		}
+	}
+
+	if len(routes) == 0 {
+		return defaultHandler(), nil
+	}
+
+	router, err := urls.NewRouterChecked(routes...)
+	if err != nil {
+		return nil, fmt.Errorf("djangogo: build router: %w", err)
+	}
+	templates.URLResolver = router.Reverse
+
+	var handler http.Handler = router
+	if a.DB != nil {
+		handler = auth.Middleware(a.DB)(handler)
+	}
+	handler = csrf.Middleware(handler)
+	store := sessions.NewSignedCookieStore([]byte(a.Settings.SecretKey))
+	handler = sessions.Middleware(store, "sessionid")(handler)
+	return handler, nil
+}
+
+// adminSite builds the admin site and lets every app that implements
+// RegisterAdmin(*admin.AdminSite) register its models with it. It returns a nil
+// site (and nil error) when no app opts in, so the admin is mounted only when at
+// least one app registers a model -- mirroring Django's contrib.admin opt-in.
+func (a *Application) adminSite(appConfigs []apps.Config) (*admin.AdminSite, error) {
+	type adminRegistrar interface {
+		RegisterAdmin(*admin.AdminSite)
+	}
+	var registrars []adminRegistrar
+	for _, c := range appConfigs {
+		if ar, ok := c.(adminRegistrar); ok {
+			registrars = append(registrars, ar)
+		}
+	}
+	if len(registrars) == 0 {
+		return nil, nil
+	}
+	site, err := admin.NewAdminSite(a.DB)
+	if err != nil {
+		return nil, fmt.Errorf("djangogo: build admin site: %w", err)
+	}
+	for _, ar := range registrars {
+		ar.RegisterAdmin(site)
+	}
+	return site, nil
 }
 
 // migrationsApp determines the app name migrations are attributed to. If exactly

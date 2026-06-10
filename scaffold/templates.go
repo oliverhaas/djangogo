@@ -31,8 +31,9 @@ func settings() conf.Settings {
 }
 `
 
-// projectMain is main.go: it wires the generated app into djangogo.New and runs
-// the management CLI, mirroring cmd/djangogo/main.go.
+// projectMain is main.go: it wires the generated app (and the built-in auth app,
+// which the admin needs) into djangogo.New and runs the management CLI, mirroring
+// cmd/djangogo/main.go.
 const projectMain = `package main
 
 import (
@@ -40,12 +41,13 @@ import (
 	"os"
 
 	"github.com/oliverhaas/djangogo"
+	"github.com/oliverhaas/djangogo/auth"
 
 	"{{.Module}}/{{.AppName}}"
 )
 
 func main() {
-	app, err := djangogo.New(settings(), &{{.AppName}}.App{})
+	app, err := djangogo.New(settings(), &{{.AppName}}.App{}, auth.App{})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -72,7 +74,8 @@ func (App) Name() string { return "{{.AppName}}" }
 func (App) Models() []any { return []any{&Post{}} }
 `
 
-// appModels is models.go: a sample model exercising several orm field tags.
+// appModels is models.go: a sample model exercising several orm field tags and a
+// String() method (Django's __str__) so the admin and templates show a label.
 const appModels = `package {{.AppName}}
 
 // Post is a sample model. Replace it with your own models and run
@@ -83,29 +86,49 @@ type Post struct {
 	Body      string ` + "`orm:\"type=text\"`" + `
 	Published bool
 }
+
+// String is Django's __str__: the admin changelist and templates use it as the
+// object's label.
+func (p Post) String() string { return p.Title }
 `
 
-// appAdmin is admin.go: a commented example showing how to register the app's
-// models with the admin, without forcing the admin import on a fresh app.
+// appAdmin is admin.go: the app's RegisterAdmin hook. djangogo.New calls it with
+// the project's admin site (mounted at /admin/) when a database is configured.
 const appAdmin = `package {{.AppName}}
 
-// Register this app's models with the admin by uncommenting the import and the
-// init function below, then wiring the returned site into your URL config.
-//
-// import "github.com/oliverhaas/djangogo/admin"
-//
-// func registerAdmin(site *admin.AdminSite) {
-// 	admin.Register[Post](site, admin.ModelAdmin{})
-// }
+import "github.com/oliverhaas/djangogo/admin"
+
+// RegisterAdmin registers this app's models with the project's admin site.
+// djangogo.New calls it automatically and mounts the admin at /admin/.
+func (App) RegisterAdmin(site *admin.AdminSite) {
+	admin.Register[Post](site, admin.ModelAdmin{
+		ListDisplay: []string{"ID", "Title", "Published"},
+		Ordering:    []string{"-id"},
+	})
+}
 `
 
-// appURLs is urls.go: a URL config stub returning this app's routes.
+// appURLs is urls.go: the app's URL config. djangogo.New mounts these routes at
+// the site root. Add data-backed pages with views.ListView / views.DetailView.
 const appURLs = `package {{.AppName}}
 
-import "github.com/oliverhaas/djangogo/urls"
+import (
+	"net/http"
 
-// URLs returns this app's routes. Add routes with urls.Path and urls.PathFunc.
-func URLs() []urls.Route {
-	return []urls.Route{}
+	"github.com/oliverhaas/djangogo/urls"
+)
+
+// URLs returns this app's routes, mounted at the site root by djangogo.New.
+func (App) URLs() []urls.Route {
+	return []urls.Route{
+		urls.PathFunc("GET /{$}", welcome, "home"),
+	}
+}
+
+// welcome is a placeholder landing page. Replace it with your own views.
+func welcome(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(` + "`" + `<h1>It worked!</h1>
+<p>Your {{.AppName}} app is running. The admin is at <a href="/admin/">/admin/</a>.</p>` + "`" + `))
 }
 `
