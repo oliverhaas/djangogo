@@ -54,8 +54,10 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }
 
-// placeholderRe matches {name} and {name...} wildcards in a ServeMux pattern.
-var placeholderRe = regexp.MustCompile(`\{[^{}]+\}`)
+// placeholderRe matches {name} and {name...} wildcards in a ServeMux pattern. It
+// deliberately excludes the special {$} end-of-path anchor (which carries a '$'),
+// since that is not a parameter and is stripped before substitution.
+var placeholderRe = regexp.MustCompile(`\{[^{}$]+\}`)
 
 // Reverse builds the URL for a named route, substituting {param} placeholders
 // with args in order. It returns an error for an unknown name or an arg-count
@@ -67,6 +69,9 @@ func (r *Router) Reverse(name string, args ...any) (string, error) {
 	}
 	// Strip optional leading METHOD token to get the path only.
 	_, path := splitMethodPath(pattern)
+	// The {$} end-of-path anchor is not a parameter; drop it so reversing
+	// "/posts/{$}" yields "/posts/" and "/{$}" yields "/".
+	path = strings.ReplaceAll(path, "{$}", "")
 
 	// Collect placeholder positions.
 	matches := placeholderRe.FindAllStringIndex(path, -1)

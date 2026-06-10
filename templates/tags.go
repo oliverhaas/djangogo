@@ -12,9 +12,20 @@ import (
 // StaticBase is the URL prefix for {% static %} (default "/static/").
 var StaticBase = "/static/"
 
-// URLResolver is called by {% url %} to reverse a named route. Wired by the urls
-// package / app at boot. Defaults to a stub returning an error.
-var URLResolver = func(name string, _ ...any) (string, error) {
+// Resolver reverses a named route to a URL path, the signature behind {% url %}.
+// It matches urls.Router.Reverse so a router can be wired in directly.
+type Resolver func(name string, args ...any) (string, error)
+
+// resolverContextKey is the context key under which an Engine injects its
+// per-render Resolver (see Engine.SetResolver). {% url %} prefers it over the
+// process-global URLResolver, letting different engines reverse against different
+// route tables. The name is a valid identifier so pongo2 accepts it as a key.
+const resolverContextKey = "__djangogo_url_resolver__"
+
+// URLResolver is the process-global fallback called by {% url %} when no
+// per-render resolver is present in the context. Defaults to a stub returning an
+// error; wired by the urls package / app at boot.
+var URLResolver Resolver = func(name string, _ ...any) (string, error) {
 	return "", fmt.Errorf("templates: no URLResolver configured (cannot reverse %q)", name)
 }
 
@@ -86,7 +97,9 @@ type urlTagNode struct {
 }
 
 // Execute resolves the route name and arguments against the context and writes the
-// result of URLResolver. A resolver error is surfaced as a template error.
+// reversed URL. It prefers a per-render Resolver injected into the context (by
+// Engine.SetResolver), falling back to the global URLResolver. A resolver error is
+// surfaced as a template error.
 func (n *urlTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter) *pongo2.Error {
 	nameVal, err := n.nameExpr.Evaluate(ctx)
 	if err != nil {
@@ -100,7 +113,8 @@ func (n *urlTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWrit
 		}
 		args = append(args, val.Interface())
 	}
-	resolved, rerr := URLResolver(nameVal.String(), args...)
+	resolve := resolverFrom(ctx)
+	resolved, rerr := resolve(nameVal.String(), args...)
 	if rerr != nil {
 		return ctx.OrigError(fmt.Errorf("templates: url %q: %w", nameVal.String(), rerr), nil)
 	}
@@ -108,6 +122,17 @@ func (n *urlTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWrit
 		return ctx.OrigError(werr, nil)
 	}
 	return nil
+}
+
+// resolverFrom returns the per-render Resolver carried in the context, or the
+// global URLResolver when none is present.
+func resolverFrom(ctx *pongo2.ExecutionContext) Resolver {
+	if v, ok := ctx.Public[resolverContextKey]; ok {
+		if r, ok := v.(Resolver); ok && r != nil {
+			return r
+		}
+	}
+	return URLResolver
 }
 
 // urlTagParser parses {% url "route-name" arg1 arg2 %}. The name and each argument

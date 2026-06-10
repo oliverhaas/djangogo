@@ -14,7 +14,27 @@ import (
 
 // Engine renders pongo2 templates loaded from one or more directories or an fs.FS.
 type Engine struct {
-	set *pongo2.TemplateSet
+	set      *pongo2.TemplateSet
+	resolver Resolver
+}
+
+// SetResolver sets the URL resolver injected into every render context, so this
+// engine's {% url %} tags reverse against the given route table rather than the
+// process-global URLResolver. Passing nil clears it (falling back to the global).
+func (e *Engine) SetResolver(r Resolver) { e.resolver = r }
+
+// context builds a pongo2 context from ctx, injecting this engine's resolver
+// (when set) under resolverContextKey. The caller's map is copied, never mutated.
+func (e *Engine) context(ctx map[string]any) pongo2.Context {
+	if e.resolver == nil {
+		return pongo2.Context(ctx)
+	}
+	pc := make(pongo2.Context, len(ctx)+1)
+	for k, v := range ctx {
+		pc[k] = v
+	}
+	pc[resolverContextKey] = e.resolver
+	return pc
 }
 
 // NewEngine returns an Engine loading templates from the given directories (searched
@@ -55,7 +75,7 @@ func (e *Engine) Render(name string, ctx map[string]any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("templates: load %q: %w", name, err)
 	}
-	out, err := tpl.Execute(pongo2.Context(ctx))
+	out, err := tpl.Execute(e.context(ctx))
 	if err != nil {
 		return "", fmt.Errorf("templates: render %q: %w", name, err)
 	}
@@ -68,7 +88,7 @@ func (e *Engine) RenderTo(w io.Writer, name string, ctx map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("templates: load %q: %w", name, err)
 	}
-	if err := tpl.ExecuteWriter(pongo2.Context(ctx), w); err != nil {
+	if err := tpl.ExecuteWriter(e.context(ctx), w); err != nil {
 		return fmt.Errorf("templates: render %q: %w", name, err)
 	}
 	return nil
@@ -80,7 +100,7 @@ func (e *Engine) RenderString(src string, ctx map[string]any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("templates: parse string: %w", err)
 	}
-	out, err := tpl.Execute(pongo2.Context(ctx))
+	out, err := tpl.Execute(e.context(ctx))
 	if err != nil {
 		return "", fmt.Errorf("templates: render string: %w", err)
 	}

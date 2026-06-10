@@ -87,6 +87,69 @@ func TestURLTagResolverErrorSurfaces(t *testing.T) {
 	}
 }
 
+func TestURLTagPrefersEngineResolver(t *testing.T) {
+	// The global resolver would error; the per-engine resolver must win.
+	prev := URLResolver
+	t.Cleanup(func() { URLResolver = prev })
+	URLResolver = func(_ string, _ ...any) (string, error) {
+		return "", errors.New("global resolver should not be called")
+	}
+
+	eng := newStringEngine(t)
+	eng.SetResolver(func(name string, args ...any) (string, error) {
+		if name == "post-detail" && len(args) == 1 && fmt.Sprint(args[0]) == "7" {
+			return "/blog/7/", nil
+		}
+		return "", fmt.Errorf("unexpected reverse: %s %v", name, args)
+	})
+
+	got, err := eng.RenderString(`{% url "post-detail" 7 %}`, nil)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if want := "/blog/7/"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestURLTagFallsBackToGlobalResolver(t *testing.T) {
+	prev := URLResolver
+	t.Cleanup(func() { URLResolver = prev })
+	URLResolver = func(name string, _ ...any) (string, error) {
+		if name == "home" {
+			return "/", nil
+		}
+		return "", fmt.Errorf("unexpected reverse: %s", name)
+	}
+
+	// No SetResolver call, so the engine falls back to the global resolver.
+	eng := newStringEngine(t)
+	got, err := eng.RenderString(`{% url "home" %}`, nil)
+	if err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	if want := "/"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestSetResolverDoesNotMutateContext(t *testing.T) {
+	eng := newStringEngine(t)
+	eng.SetResolver(func(_ string, _ ...any) (string, error) { return "/x/", nil })
+
+	ctx := map[string]any{"name": "World"}
+	if _, err := eng.RenderString(`{% url "anything" %}{{ name }}`, ctx); err != nil {
+		t.Fatalf("RenderString: %v", err)
+	}
+	// The injected resolver key must not leak into the caller's map.
+	if _, ok := ctx[resolverContextKey]; ok {
+		t.Errorf("render mutated the caller's context with %q", resolverContextKey)
+	}
+	if len(ctx) != 1 {
+		t.Errorf("context grew to %d keys, want 1: %v", len(ctx), ctx)
+	}
+}
+
 func TestCSRFTokenTag(t *testing.T) {
 	eng := newStringEngine(t)
 	got, err := eng.RenderString(`{% csrf_token %}`, map[string]any{"csrf_token": "abc123"})

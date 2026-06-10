@@ -156,6 +156,47 @@ func TestReverseStaticPath(t *testing.T) {
 	}
 }
 
+func TestReverseEndAnchorParamlessYieldsSlash(t *testing.T) {
+	// "/{$}" is an exact-match anchor on "/", not a parameter; Reverse must yield
+	// "/" with no args.
+	router := urls.NewRouter(
+		urls.Path("GET /{$}", handlerFunc(http.StatusOK), "post-list"),
+	)
+	got, err := router.Reverse("post-list")
+	if err != nil {
+		t.Fatalf("Reverse: %v", err)
+	}
+	if want := "/"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestReverseEndAnchorStripped(t *testing.T) {
+	router := urls.NewRouter(
+		urls.Path("GET /posts/{$}", handlerFunc(http.StatusOK), "posts"),
+	)
+	got, err := router.Reverse("posts")
+	if err != nil {
+		t.Fatalf("Reverse: %v", err)
+	}
+	if want := "/posts/"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestReverseParamWithEndAnchor(t *testing.T) {
+	router := urls.NewRouter(
+		urls.Path("GET /posts/{pk}/{$}", handlerFunc(http.StatusOK), "post-detail"),
+	)
+	got, err := router.Reverse("post-detail", 5)
+	if err != nil {
+		t.Fatalf("Reverse: %v", err)
+	}
+	if want := "/posts/5/"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestReverseUnknownNameErrors(t *testing.T) {
 	router := urls.NewRouter()
 	if _, err := router.Reverse("does-not-exist"); err == nil {
