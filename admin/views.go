@@ -219,9 +219,16 @@ func (s *AdminSite) excluded(e *entry) []string {
 // populateChoices fills every foreign-key field's <select> with the related
 // model's (pk, label) rows. A load failure leaves the options empty, so a
 // submitted pk fails ChoiceField validation rather than 500-ing the request.
+// Relations whose field was excluded from the form (ExcludeFields/ReadonlyFields)
+// are skipped, so a full-table LabeledRows query is not run for a select that
+// would never be rendered.
 func (s *AdminSite) populateChoices(ctx context.Context, form *forms.Form, e *entry) {
+	present := make(map[string]bool, len(form.Fields()))
+	for _, fld := range form.Fields() {
+		present[fld.Name] = true
+	}
 	for _, mf := range e.model.Relations() {
-		if mf.Rel == nil || mf.Rel.Target == nil {
+		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Name] {
 			continue
 		}
 		opts, err := orm.LabeledRows(ctx, s.db, mf.Rel.Target)
