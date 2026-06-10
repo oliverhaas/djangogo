@@ -1,12 +1,30 @@
 package postgres_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/orm/backends/postgres"
 )
+
+// presetRow declares default= tags; the DDL must NOT emit a DEFAULT
+// clause because defaults are applied Go-side at INSERT, mirroring Django.
+type presetRow struct {
+	ID    int64
+	Count int    `orm:"default=7"`
+	Label string `orm:"default=draft;max_length=20"`
+}
+
+func TestCreateTableSQL_NoDefaultClause(t *testing.T) {
+	r := orm.NewRegistry()
+	m := mustRegister(t, r, &presetRow{})
+	got := postgres.New().CreateTableSQL(m)
+	if strings.Contains(strings.ToUpper(got), "DEFAULT") {
+		t.Errorf("CreateTableSQL emitted a DEFAULT clause (defaults are Go-side, not DDL):\n%s", got)
+	}
+}
 
 // -- test models --
 

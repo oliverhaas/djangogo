@@ -108,6 +108,9 @@ func (r *Registry) Register(model any) (*Model, error) {
 	if pkField.Kind == KindInt {
 		pkField.Kind = KindAuto
 	}
+	if pkField.HasDefault {
+		return nil, fmt.Errorf("orm: model %s: primary key %s cannot have a default", name, pkField.Name)
+	}
 
 	// Step 7: build lookup maps and check for duplicate column names.
 	byName := make(map[string]*Field, len(fields))
@@ -118,6 +121,22 @@ func (r *Registry) Register(model any) (*Model, error) {
 			return nil, fmt.Errorf("orm: model %s has duplicate column %s", name, f.Column)
 		}
 		byColumn[f.Column] = f
+	}
+
+	// Apply model-declared field choices (Django's choices=). Each named field
+	// must exist and be a string field; a typo or unsupported type is an error at
+	// registration, mirroring Django's class-build-time validation.
+	if wc, ok := model.(withChoices); ok {
+		for fieldName, choices := range wc.Choices() {
+			f, found := byName[fieldName]
+			if !found {
+				return nil, fmt.Errorf("orm: model %s: Choices() names unknown field %q", name, fieldName)
+			}
+			if f.Kind != KindChar {
+				return nil, fmt.Errorf("orm: model %s: choices on field %q require a string field", name, fieldName)
+			}
+			f.Choices = choices
+		}
 	}
 
 	// Step 8: construct and store the Model.

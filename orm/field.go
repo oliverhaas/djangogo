@@ -68,6 +68,20 @@ type Field struct {
 	// Rel describes the relation when this field is a relation field (e.g. FK[T]);
 	// it is nil for scalar fields.
 	Rel *Relation
+	// HasDefault reports whether a default= tag was given. It distinguishes a
+	// zero-valued default (e.g. default=0) from "no default at all".
+	HasDefault bool
+	// Default is the parsed default value, typed by Kind: int64 for KindInt, bool
+	// for KindBool, string for KindChar/KindText. It is nil when HasDefault is false.
+	Default any
+	// AutoNowAdd stamps a KindDateTime field with the current time on Create only.
+	AutoNowAdd bool
+	// AutoNow stamps a KindDateTime field with the current time on every Create
+	// and Update.
+	AutoNow bool
+	// Choices restricts a KindChar field to a fixed (value, label) set; it is nil
+	// when the field is unconstrained.
+	Choices []Choice
 }
 
 // timeType is the reflect.Type for time.Time, used for KindDateTime inference.
@@ -147,6 +161,11 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 		}
 	}
 
+	// auto_now and auto_now_add are mutually exclusive (Django raises the same).
+	if f.AutoNow && f.AutoNowAdd {
+		return nil, false, fmt.Errorf("orm: field %s: auto_now and auto_now_add are mutually exclusive", sf.Name)
+	}
+
 	return f, true, nil
 }
 
@@ -197,10 +216,57 @@ func applyTagOption(f *Field, fieldName, token string) error {
 			return fmt.Errorf("orm: field %s: invalid max_length %q: must be a positive integer", fieldName, raw)
 		}
 		f.MaxLength = n
+	case token == "auto_now_add":
+		if f.Kind != KindDateTime {
+			return fmt.Errorf("orm: field %s: auto_now_add is only valid for time.Time fields", fieldName)
+		}
+		f.AutoNowAdd = true
+	case token == "auto_now":
+		if f.Kind != KindDateTime {
+			return fmt.Errorf("orm: field %s: auto_now is only valid for time.Time fields", fieldName)
+		}
+		f.AutoNow = true
+	case strings.HasPrefix(token, "default="):
+		val, err := parseDefault(f.Kind, token[len("default="):])
+		if err != nil {
+			return fmt.Errorf("orm: field %s: %w", fieldName, err)
+		}
+		f.HasDefault = true
+		f.Default = val
 	default:
 		return fmt.Errorf("orm: field %s: unknown tag option %q", fieldName, token)
 	}
 	return nil
+}
+
+// parseDefault parses a default= tag value into a Go value typed by the field's
+// Kind: int64 for KindInt, bool for KindBool, and the raw string verbatim for
+// KindChar/KindText (an empty string is a legal default). It rejects default= on
+// datetime fields, whose Django defaults are callables a tag cannot express.
+func parseDefault(kind Kind, raw string) (any, error) {
+	switch kind {
+	case KindInt:
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid default %q: must be an integer", raw)
+		}
+		return n, nil
+	case KindBool:
+		switch raw {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
+		default:
+			return nil, fmt.Errorf("invalid default %q: must be true or false", raw)
+		}
+	case KindChar, KindText:
+		return raw, nil
+	case KindDateTime:
+		return nil, fmt.Errorf("default= is not supported for datetime fields; use auto_now_add")
+	default:
+		return nil, fmt.Errorf("default= is not supported for this field type")
+	}
 }
 
 // applyRelationTagOption applies a single parsed tag token to a relation field.
@@ -220,7 +286,8 @@ func applyRelationTagOption(f *Field, fieldName, token string) error {
 		f.Column = name
 	case token == "pk":
 		return fmt.Errorf("orm: field %s: pk is not valid on a relation field", fieldName)
-	case token == "type=text" || strings.HasPrefix(token, "max_length="):
+	case token == "type=text" || strings.HasPrefix(token, "max_length="),
+		token == "auto_now", token == "auto_now_add", strings.HasPrefix(token, "default="):
 		return fmt.Errorf("orm: field %s: %q is not valid on a relation field", fieldName, token)
 	default:
 		return fmt.Errorf("orm: field %s: unknown tag option %q", fieldName, token)

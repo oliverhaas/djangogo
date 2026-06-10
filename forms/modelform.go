@@ -46,6 +46,19 @@ func formFieldFor(mf *orm.Field) *Field {
 	case orm.KindAuto:
 		return nil
 	case orm.KindChar:
+		// A KindChar field carrying choices renders as a <select> validated
+		// against its value set, mirroring Django's choices= ModelForm field.
+		if len(mf.Choices) > 0 {
+			choices := toFormChoices(mf.Choices)
+			return &Field{
+				Name:     mf.Name,
+				Label:    humanize(mf.Name),
+				Required: !mf.Null,
+				Kind:     ChoiceField,
+				Choices:  choices,
+				Widget:   Select{Choices: choices},
+			}
+		}
 		return &Field{
 			Name:      mf.Name,
 			Label:     humanize(mf.Name),
@@ -88,6 +101,15 @@ func formFieldFor(mf *orm.Field) *Field {
 	default:
 		return nil
 	}
+}
+
+// toFormChoices maps orm choices to the forms layer's value/label pairs.
+func toFormChoices(choices []orm.Choice) [][2]string {
+	out := make([][2]string, len(choices))
+	for i, c := range choices {
+		out[i] = [2]string{c.Value, c.Label}
+	}
+	return out
 }
 
 // FromStruct derives a Form from a model and pre-fills it with the current field

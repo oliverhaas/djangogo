@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 )
 
 // CreateTable creates the table for m using the dialect's DDL.
@@ -244,6 +245,11 @@ func (q *QuerySet[T]) Create(ctx context.Context, obj *T) error {
 	autoPK := pk != nil && pk.Kind == KindAuto
 
 	fields := q.model.Fields()
+	// Apply Go-side defaults and auto_now/auto_now_add timestamps before reading
+	// the field values, so they are both inserted and visible on *obj afterward
+	// (matching Django writing defaults onto the instance at save time).
+	applyDefaults(v, fields)
+	applyAutoNowOnCreate(v, fields, q.db.now())
 	cols := make([]string, 0, len(fields))
 	placeholders := make([]string, 0, len(fields))
 	args := make([]any, 0, len(fields))
@@ -293,6 +299,64 @@ func (q *QuerySet[T]) Create(ctx context.Context, obj *T) error {
 	return firePostSave(ctx, q.db, obj)
 }
 
+// applyDefaults sets any field carrying a default= to its default when the field
+// currently holds its zero value, mirroring Django applying a default at save
+// time. Relation fields and the auto primary key never carry a default (rejected
+// at parse/registration time), so they are skipped implicitly. The well-known
+// caveat is that an explicit zero (e.g. Active=false against default=true) is
+// indistinguishable from "unset" and is therefore overwritten by the default.
+func applyDefaults(v reflect.Value, fields []*Field) {
+	for _, f := range fields {
+		if !f.HasDefault {
+			continue
+		}
+		fv := v.Field(f.Index)
+		if fv.IsZero() {
+			setDefaultValue(fv, f.Default)
+		}
+	}
+}
+
+// setDefaultValue assigns a parsed default value onto a struct field, matching
+// the field's Go kind. Unhandled kinds leave the field untouched.
+func setDefaultValue(fv reflect.Value, def any) {
+	switch d := def.(type) {
+	case int64:
+		switch fv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			fv.SetInt(d)
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			fv.SetUint(uint64(d))
+		}
+	case bool:
+		fv.SetBool(d)
+	case string:
+		fv.SetString(d)
+	}
+}
+
+// applyAutoNowOnCreate stamps every auto_now / auto_now_add datetime field with
+// now at Create time.
+func applyAutoNowOnCreate(v reflect.Value, fields []*Field, now time.Time) {
+	for _, f := range fields {
+		if f.Kind != KindDateTime || (!f.AutoNow && !f.AutoNowAdd) {
+			continue
+		}
+		v.Field(f.Index).Set(reflect.ValueOf(now))
+	}
+}
+
+// assignsHasColumn reports whether assigns already targets column, so an explicit
+// caller assignment is not double-injected by auto_now.
+func assignsHasColumn(assigns []assignment, column string) bool {
+	for _, a := range assigns {
+		if a.column == column {
+			return true
+		}
+	}
+	return false
+}
+
 // writeBackAutoPK assigns the database-generated id into the auto primary-key
 // struct field, handling both signed and unsigned integer kinds.
 func writeBackAutoPK(pkField reflect.Value, id int64, modelName string) error {
@@ -324,6 +388,15 @@ func (q *QuerySet[T]) Update(ctx context.Context, assignments ...any) (int64, er
 			return 0, fmt.Errorf("orm: Update requires alternating string columns and values")
 		}
 		assigns = append(assigns, assignment{column: col, value: assignments[i+1]})
+	}
+
+	// auto_now fields are touched on every update. Inject one assignment per
+	// auto_now field the caller did not already set, so an explicit override wins.
+	now := q.db.now()
+	for _, f := range q.model.Fields() {
+		if f.AutoNow && !assignsHasColumn(assigns, f.Column) {
+			assigns = append(assigns, assignment{column: f.Column, value: now})
+		}
 	}
 
 	query, args, err := q.compileUpdate(assigns)
