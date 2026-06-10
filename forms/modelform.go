@@ -16,13 +16,31 @@ import (
 // orm Kind. A foreign-key column (Rel != nil) maps to a ChoiceField rendered as a
 // <select>, named after the model field; its options start empty and are filled
 // in with the related rows via Form.SetChoices, mirroring Django's ModelChoiceField.
-func FromModel(m *orm.Model) *Form {
-	var fields []*Field
+//
+// The options mirror a Django ModelForm's Meta: WithFields/WithExclude select
+// which fields appear (and, for WithFields, their order), while WithLabel,
+// WithWidget, WithHelpText, and WithRequired override individual fields.
+func FromModel(m *orm.Model, opts ...ModelFormOption) *Form {
+	cfg := newModelFormConfig(opts)
+
+	built := make(map[string]*Field)
+	var order []string
 	for _, mf := range m.Fields() {
 		ff := formFieldFor(mf)
 		if ff == nil {
 			continue
 		}
+		built[ff.Name] = ff
+		order = append(order, ff.Name)
+	}
+
+	var fields []*Field
+	for _, name := range cfg.includedNames(order) {
+		ff, ok := built[name]
+		if !ok {
+			continue // unknown name or a skipped field (the auto primary key)
+		}
+		cfg.apply(ff)
 		fields = append(fields, ff)
 	}
 	return New(fields...)
@@ -115,18 +133,19 @@ func toFormChoices(choices []orm.Choice) [][2]string {
 }
 
 // FromStruct derives a Form from a model and pre-fills it with the current field
-// values of obj (a pointer to an instance of the model's struct type).
-func FromStruct(m *orm.Model, obj any) *Form {
-	f := FromModel(m)
+// values of obj (a pointer to an instance of the model's struct type). It accepts
+// the same options as FromModel and only binds values for the included fields.
+func FromStruct(m *orm.Model, obj any, opts ...ModelFormOption) *Form {
+	f := FromModel(m, opts...)
 	rv := reflect.ValueOf(obj)
 	if rv.Kind() == reflect.Pointer {
 		rv = rv.Elem()
 	}
 	data := url.Values{}
 	if rv.Kind() == reflect.Struct {
-		for _, mf := range m.Fields() {
-			ff := formFieldFor(mf)
-			if ff == nil {
+		for _, field := range f.Fields() {
+			mf, ok := m.FieldByName(field.Name)
+			if !ok {
 				continue
 			}
 			fv := rv.Field(mf.Index)

@@ -199,12 +199,21 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request) {
 
 // formFor builds the editable form for an entry: the model form minus the
 // admin's ExcludeFields and ReadonlyFields (the auto primary key is already
-// dropped by forms.FromModel). The kept fields are reassembled into a fresh form,
-// then each foreign-key <select> is filled with the related model's rows.
+// dropped by forms.FromModel). Each foreign-key <select> is then filled with the
+// related model's rows.
 func (s *AdminSite) formFor(ctx context.Context, e *entry) *forms.Form {
-	form := forms.New(s.keptFields(forms.FromModel(e.model), e)...)
+	form := forms.FromModel(e.model, forms.WithExclude(s.excluded(e)...))
 	s.populateChoices(ctx, form, e)
 	return form
+}
+
+// excluded returns the field names the admin omits from a model's form: the
+// configured ExcludeFields plus the ReadonlyFields.
+func (s *AdminSite) excluded(e *entry) []string {
+	out := make([]string, 0, len(e.admin.ExcludeFields)+len(e.admin.ReadonlyFields))
+	out = append(out, e.admin.ExcludeFields...)
+	out = append(out, e.admin.ReadonlyFields...)
+	return out
 }
 
 // populateChoices fills every foreign-key field's <select> with the related
@@ -221,26 +230,6 @@ func (s *AdminSite) populateChoices(ctx context.Context, form *forms.Form, e *en
 		}
 		form.SetChoices(mf.Name, opts)
 	}
-}
-
-// keptFields returns f's fields with the entry's excluded and read-only field
-// names removed, preserving declaration order.
-func (s *AdminSite) keptFields(f *forms.Form, e *entry) []*forms.Field {
-	drop := make(map[string]bool, len(e.admin.ExcludeFields)+len(e.admin.ReadonlyFields))
-	for _, name := range e.admin.ExcludeFields {
-		drop[name] = true
-	}
-	for _, name := range e.admin.ReadonlyFields {
-		drop[name] = true
-	}
-	kept := make([]*forms.Field, 0, len(f.Fields()))
-	for _, field := range f.Fields() {
-		if drop[field.Name] {
-			continue
-		}
-		kept = append(kept, field)
-	}
-	return kept
 }
 
 // add handles the add form: GET renders an empty form, POST validates the
@@ -332,18 +321,9 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to load row", http.StatusInternalServerError)
 		return
 	}
-	// Pre-fill from the struct, then drop excluded fields the same way add does.
-	// Rebuild the bound data over the kept fields so the new form re-displays the
-	// existing row's values.
-	prefilled := forms.FromStruct(e.model, obj)
-	kept := s.keptFields(prefilled, e)
-	data := url.Values{}
-	for _, field := range kept {
-		if v := prefilled.BoundValue(field.Name); v != "" {
-			data.Set(field.Name, v)
-		}
-	}
-	form := forms.New(kept...).Bind(data)
+	// Pre-fill from the struct over the same field set add uses, so the form
+	// re-displays the existing row's values.
+	form := forms.FromStruct(e.model, obj, forms.WithExclude(s.excluded(e)...))
 	s.populateChoices(r.Context(), form, e)
 	s.renderForm(w, r, e, "Change "+e.model.Name(), form)
 }
