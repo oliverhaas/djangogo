@@ -14,6 +14,7 @@ import (
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/conf"
+	"github.com/oliverhaas/djangogo/migrations"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/urls"
 )
@@ -288,6 +289,64 @@ func TestMakemigrationsAndMigrate(t *testing.T) {
 	}
 	if out := buf.String(); out != "No changes detected\n" {
 		t.Errorf("rerun output = %q, want %q", out, "No changes detected\n")
+	}
+}
+
+// TestMakemigrationsWarnsOnLikelyRename verifies that when a field looks renamed
+// (a removed field and an added field of the same type), makemigrations prints a
+// data-loss warning rather than silently dropping the column. The prior state is
+// seeded from the registry's own field inference -- Title renamed to Headline --
+// so the test does not depend on the ORM's exact type mapping.
+func TestMakemigrationsWarnsOnLikelyRename(t *testing.T) {
+	app, err := New(conf.Settings{
+		SecretKey: "k",
+		Database:  conf.Database{Driver: "sqlite", DSN: "file:renamewarn?mode=memory&cache=shared"},
+	}, testApp{name: "blog"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	app.MigrationsDir = t.TempDir()
+	var buf bytes.Buffer
+	app.Out = &buf
+
+	// Find the registry model carrying the Title field and build a prior
+	// migration identical to it except Title is named Headline.
+	current := migrations.StateFromRegistry(app.Models)
+	var modelName string
+	var ms *migrations.ModelState
+	for name, m := range current.Models {
+		if _, ok := m.FieldByName("Title"); ok {
+			modelName, ms = name, m
+			break
+		}
+	}
+	if ms == nil {
+		t.Fatal("registry has no model with a Title field")
+	}
+	fields := make([]migrations.FieldState, len(ms.Fields))
+	copy(fields, ms.Fields)
+	for i := range fields {
+		if fields[i].Name == "Title" {
+			fields[i].Name = "Headline"
+			fields[i].Column = "headline"
+		}
+	}
+	app.Migrations.Add(migrations.Migration{
+		App:  app.MigrationsApp,
+		Name: "0001_initial",
+		Operations: []migrations.Operation{
+			migrations.CreateModel{Name: modelName, Table: ms.Table, Fields: fields},
+		},
+	})
+
+	if err := app.Execute([]string{"makemigrations"}); err != nil {
+		t.Fatalf("makemigrations: %v", err)
+	}
+
+	out := buf.String()
+	wantRename := modelName + ".Headline -> " + modelName + ".Title"
+	if !strings.Contains(out, "Warning:") || !strings.Contains(out, wantRename) {
+		t.Errorf("expected rename warning for %q, got:\n%s", wantRename, out)
 	}
 }
 

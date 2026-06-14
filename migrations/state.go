@@ -42,6 +42,15 @@ func (f FieldState) Equal(other FieldState) bool {
 		f.RelOnDelete == other.RelOnDelete
 }
 
+// sameType reports whether two field states share the same column type and
+// constraints, ignoring Name and Column. It is the basis for rename detection:
+// a renamed field keeps its type but changes its name (and usually its column).
+func (f FieldState) sameType(other FieldState) bool {
+	f.Name, f.Column = "", ""
+	other.Name, other.Column = "", ""
+	return f.Equal(other)
+}
+
 // fieldStateFromField builds a FieldState from an orm.Field pointer. Relation
 // metadata is captured only when f carries a relation; the target table and
 // column require the registry to have been resolved (Rel.Target set).

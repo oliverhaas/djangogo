@@ -278,3 +278,111 @@ func TestDiff_FieldOpSubOrdering(t *testing.T) {
 		"RemoveField Thing.Extra",
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Rename-detection guard
+// ---------------------------------------------------------------------------
+
+// assertRenames checks that the detected renames have exactly the expected
+// "Model.From -> Model.To" strings, in order.
+func assertRenames(t *testing.T, got []PotentialRename, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		strs := make([]string, len(got))
+		for i, r := range got {
+			strs[i] = r.String()
+		}
+		t.Fatalf("rename count: got %d %v, want %d %v", len(got), strs, len(want), want)
+	}
+	for i, r := range got {
+		if r.String() != want[i] {
+			t.Errorf("renames[%d]: got %q, want %q", i, r.String(), want[i])
+		}
+	}
+}
+
+// TestDetectPotentialRenames_SameTypeFlagged verifies a removed field and an
+// added field of the same column type are reported as a likely rename.
+func TestDetectPotentialRenames_SameTypeFlagged(t *testing.T) {
+	t.Parallel()
+	old := stateWith(personModelState())
+	// Age (int) becomes Years (int): a rename in all but name.
+	nw := stateWith(&ModelState{
+		Name:  "Person",
+		Table: "person",
+		Fields: []FieldState{
+			{Name: "ID", Column: "id", Kind: orm.KindAuto, PrimaryKey: true},
+			{Name: "Name", Column: "name", Kind: orm.KindChar, MaxLength: 100},
+			{Name: "Years", Column: "years", Kind: orm.KindInt},
+		},
+	})
+
+	renames := DetectPotentialRenames(old, nw)
+	assertRenames(t, renames, []string{"Person.Age -> Person.Years"})
+}
+
+// TestDetectPotentialRenames_DifferentTypeNotFlagged verifies a removed field
+// and an added field of different column types are not treated as a rename.
+func TestDetectPotentialRenames_DifferentTypeNotFlagged(t *testing.T) {
+	t.Parallel()
+	old := stateWith(personModelState())
+	// Age (int) removed, Bio (text) added: different types, not a rename.
+	nw := stateWith(&ModelState{
+		Name:  "Person",
+		Table: "person",
+		Fields: []FieldState{
+			{Name: "ID", Column: "id", Kind: orm.KindAuto, PrimaryKey: true},
+			{Name: "Name", Column: "name", Kind: orm.KindChar, MaxLength: 100},
+			{Name: "Bio", Column: "bio", Kind: orm.KindText, Null: true},
+		},
+	})
+
+	renames := DetectPotentialRenames(old, nw)
+	assertRenames(t, renames, nil)
+}
+
+// TestDetectPotentialRenames_PureAddOrRemove verifies that adding or removing a
+// field without a matching counterpart yields no rename.
+func TestDetectPotentialRenames_PureAddOrRemove(t *testing.T) {
+	t.Parallel()
+	// Pure add: Bio appears, nothing removed.
+	old := stateWith(personModelState())
+	added := stateWith(&ModelState{
+		Name:  "Person",
+		Table: "person",
+		Fields: []FieldState{
+			{Name: "ID", Column: "id", Kind: orm.KindAuto, PrimaryKey: true},
+			{Name: "Name", Column: "name", Kind: orm.KindChar, MaxLength: 100},
+			{Name: "Age", Column: "age", Kind: orm.KindInt},
+			{Name: "Bio", Column: "bio", Kind: orm.KindText, Null: true},
+		},
+	})
+	if got := DetectPotentialRenames(old, added); len(got) != 0 {
+		t.Errorf("pure add: got %d renames, want 0", len(got))
+	}
+
+	// Pure remove: Age disappears, nothing added.
+	removed := stateWith(&ModelState{
+		Name:  "Person",
+		Table: "person",
+		Fields: []FieldState{
+			{Name: "ID", Column: "id", Kind: orm.KindAuto, PrimaryKey: true},
+			{Name: "Name", Column: "name", Kind: orm.KindChar, MaxLength: 100},
+		},
+	})
+	if got := DetectPotentialRenames(old, removed); len(got) != 0 {
+		t.Errorf("pure remove: got %d renames, want 0", len(got))
+	}
+}
+
+// TestDetectPotentialRenames_NewModelIgnored verifies a brand-new model (absent
+// from the old state) is not scanned for renames -- all its fields are genuine
+// additions.
+func TestDetectPotentialRenames_NewModelIgnored(t *testing.T) {
+	t.Parallel()
+	old := emptyState()
+	nw := stateWith(personModelState())
+	if got := DetectPotentialRenames(old, nw); len(got) != 0 {
+		t.Errorf("new model: got %d renames, want 0", len(got))
+	}
+}

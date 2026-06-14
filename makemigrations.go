@@ -48,6 +48,19 @@ func (c *makemigrationsCommand) Run(_ []string) error {
 		msg += " -> " + path
 	}
 	_, _ = fmt.Fprintln(app.Out, msg)
+
+	// Warn on field pairs that look like renames. The generated migration drops
+	// the old column and adds a new empty one, discarding its data; Djan-Go-Go
+	// has no interactive rename prompt, so the developer must edit the migration
+	// to preserve the data if a rename was intended.
+	priorState := migrations.StateFromMigrations(prior)
+	for _, r := range migrations.DetectPotentialRenames(priorState, current) {
+		_, _ = fmt.Fprintf(app.Out,
+			"Warning: %s looks like a renamed field; the migration drops the old "+
+				"column and adds a new empty one, discarding its data. Edit the "+
+				"migration to rename the column instead if you meant to keep it.\n",
+			r)
+	}
 	return nil
 }
 
