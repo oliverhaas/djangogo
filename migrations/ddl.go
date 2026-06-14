@@ -30,7 +30,8 @@ func createTableSQL(d orm.Dialect, table string, fields []FieldState) string {
 	for _, f := range fields {
 		if f.RelKind == orm.RelFK && f.RelTargetTable != "" {
 			defs = append(defs, "FOREIGN KEY ("+d.Quote(f.Column)+") REFERENCES "+
-				d.Quote(f.RelTargetTable)+" ("+d.Quote(f.RelTargetColumn)+")")
+				d.Quote(f.RelTargetTable)+" ("+d.Quote(f.RelTargetColumn)+")"+
+				f.RelOnDelete.Clause())
 		}
 	}
 	return "CREATE TABLE " + d.Quote(table) + " (" + strings.Join(defs, ", ") + ")"

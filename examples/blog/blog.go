@@ -27,15 +27,17 @@ type Post struct {
 func (p Post) String() string { return p.Title }
 
 // Comment is a reader comment on a Post. Post is a foreign key (stored in the
-// "post_id" column); the admin renders it as a <select> of posts. CreatedAt
-// carries the auto_now_add tag, so the ORM stamps it at insert time the way
-// Django's models.DateTimeField(auto_now_add=True) does.
+// "post_id" column) with on_delete=cascade, so deleting a post removes its
+// comments, as Django's models.ForeignKey(on_delete=models.CASCADE) does. The
+// admin renders it as a <select> of posts. CreatedAt carries the auto_now_add
+// tag, so the ORM stamps it at insert time the way
+// models.DateTimeField(auto_now_add=True) does.
 type Comment struct {
 	ID        int64
-	Post      orm.FK[Post]
-	Name      string    `orm:"max_length=80"`
-	Body      string    `orm:"type=text"`
-	CreatedAt time.Time `orm:"auto_now_add"`
+	Post      orm.FK[Post] `orm:"on_delete=cascade"`
+	Name      string       `orm:"max_length=80"`
+	Body      string       `orm:"type=text"`
+	CreatedAt time.Time    `orm:"auto_now_add"`
 }
 
 // String is Django's __str__: a short label naming the comment's author.

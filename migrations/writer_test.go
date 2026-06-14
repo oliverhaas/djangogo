@@ -167,6 +167,28 @@ func TestRenderMigration_RendersFK(t *testing.T) {
 	}
 }
 
+// TestRenderMigration_RendersOnDelete confirms a FK's on_delete action survives
+// the round-trip into generated migration source as a named orm constant.
+func TestRenderMigration_RendersOnDelete(t *testing.T) {
+	t.Parallel()
+	m := fkMigration()
+	cm := m.Operations[0].(CreateModel)
+	cm.Fields[2].RelOnDelete = orm.OnDeleteCascade
+	m.Operations[0] = cm
+
+	src, err := RenderMigration("mypkg", m)
+	if err != nil {
+		t.Fatalf("RenderMigration error: %v", err)
+	}
+	if !strings.Contains(src, "RelOnDelete: orm.OnDeleteCascade") {
+		t.Errorf("rendered source missing RelOnDelete constant\n\nsource:\n%s", src)
+	}
+	fset := token.NewFileSet()
+	if _, perr := parser.ParseFile(fset, "", src, parser.AllErrors); perr != nil {
+		t.Fatalf("rendered source does not parse: %v\n\n%s", perr, src)
+	}
+}
+
 func TestWriteMigration_WritesFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

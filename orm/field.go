@@ -125,6 +125,10 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 				}
 			}
 		}
+		// ON DELETE SET NULL requires a nullable column, as Django enforces.
+		if f.Rel.OnDelete == OnDeleteSetNull && !f.Null {
+			return nil, false, fmt.Errorf("orm: field %s: on_delete=set_null requires null", sf.Name)
+		}
 		f.Rel.Column = f.Column
 		return f, true, nil
 	}
@@ -284,6 +288,12 @@ func applyRelationTagOption(f *Field, fieldName, token string) error {
 			return fmt.Errorf("orm: field %s: column name must not be empty", fieldName)
 		}
 		f.Column = name
+	case strings.HasPrefix(token, "on_delete="):
+		od, err := ParseOnDelete(token[len("on_delete="):])
+		if err != nil {
+			return fmt.Errorf("orm: field %s: %w", fieldName, err)
+		}
+		f.Rel.OnDelete = od
 	case token == "pk":
 		return fmt.Errorf("orm: field %s: pk is not valid on a relation field", fieldName)
 	case token == "type=text" || strings.HasPrefix(token, "max_length="),

@@ -94,7 +94,8 @@ func (d Dialect) CreateTableSQL(m *orm.Model) string {
 		if f.Rel != nil && f.Rel.Target != nil {
 			target := f.Rel.Target
 			defs = append(defs, "FOREIGN KEY ("+d.Quote(f.Column)+") REFERENCES "+
-				d.Quote(target.Table())+" ("+d.Quote(target.PrimaryKey().Column)+")")
+				d.Quote(target.Table())+" ("+d.Quote(target.PrimaryKey().Column)+")"+
+				f.Rel.OnDelete.Clause())
 		}
 	}
 

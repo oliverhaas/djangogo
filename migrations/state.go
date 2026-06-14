@@ -22,6 +22,9 @@ type FieldState struct {
 	RelTargetTable string
 	// RelTargetColumn is the referenced primary-key column for a FK, e.g. "id".
 	RelTargetColumn string
+	// RelOnDelete is the FK's ON DELETE action; orm.OnDeleteDoNothing for scalars
+	// and for FKs that do not set on_delete.
+	RelOnDelete orm.OnDelete
 }
 
 // Equal reports whether two field states are schema-equivalent.
@@ -35,7 +38,8 @@ func (f FieldState) Equal(other FieldState) bool {
 		f.MaxLength == other.MaxLength &&
 		f.RelKind == other.RelKind &&
 		f.RelTargetTable == other.RelTargetTable &&
-		f.RelTargetColumn == other.RelTargetColumn
+		f.RelTargetColumn == other.RelTargetColumn &&
+		f.RelOnDelete == other.RelOnDelete
 }
 
 // fieldStateFromField builds a FieldState from an orm.Field pointer. Relation
@@ -53,6 +57,7 @@ func fieldStateFromField(f *orm.Field) FieldState {
 	}
 	if f.Rel != nil {
 		fs.RelKind = f.Rel.Kind
+		fs.RelOnDelete = f.Rel.OnDelete
 		if f.Rel.Target != nil {
 			fs.RelTargetTable = f.Rel.Target.Table()
 			fs.RelTargetColumn = f.Rel.Target.PrimaryKey().Column

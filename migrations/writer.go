@@ -163,7 +163,26 @@ func fieldStateParts(f FieldState) string {
 	if f.RelTargetColumn != "" {
 		parts = append(parts, fmt.Sprintf("RelTargetColumn: %q", f.RelTargetColumn))
 	}
+	if f.RelOnDelete != orm.OnDeleteDoNothing {
+		parts = append(parts, "RelOnDelete: "+onDeleteSource(f.RelOnDelete))
+	}
 	return strings.Join(parts, ", ")
+}
+
+// onDeleteSource maps an orm.OnDelete to its Go source constant name (e.g.
+// "orm.OnDeleteCascade") so generated migrations reference the constant rather
+// than a raw integer.
+func onDeleteSource(od orm.OnDelete) string {
+	switch od {
+	case orm.OnDeleteCascade:
+		return "orm.OnDeleteCascade"
+	case orm.OnDeleteSetNull:
+		return "orm.OnDeleteSetNull"
+	case orm.OnDeleteRestrict:
+		return "orm.OnDeleteRestrict"
+	default:
+		return "orm.OnDeleteDoNothing"
+	}
 }
 
 // relKindSource maps an orm.RelKind to its Go source constant name (e.g.

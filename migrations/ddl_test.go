@@ -43,6 +43,18 @@ func TestCreateTableSQL_PostgresEmitsForeignKey(t *testing.T) {
 	}
 }
 
+// TestCreateTableSQL_EmitsOnDelete confirms a FK FieldState carrying an
+// on_delete action renders the ON DELETE clause.
+func TestCreateTableSQL_EmitsOnDelete(t *testing.T) {
+	t.Parallel()
+	fields := articleFields()
+	fields[2].RelOnDelete = orm.OnDeleteCascade
+	got := createTableSQL(sqlite.New(), "article", fields)
+	if !strings.Contains(got, `REFERENCES "author" ("id") ON DELETE CASCADE`) {
+		t.Errorf("createTableSQL missing ON DELETE CASCADE:\n%s", got)
+	}
+}
+
 // TestCreateTableSQL_NoForeignKeyForScalars confirms a scalar-only model emits
 // no FOREIGN KEY clause.
 func TestCreateTableSQL_NoForeignKeyForScalars(t *testing.T) {

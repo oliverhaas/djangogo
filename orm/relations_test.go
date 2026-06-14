@@ -24,6 +24,96 @@ type relArticle struct {
 	Author orm.FK[relAuthor]
 }
 
+// odCascadeArticle and odSetNullArticle exercise the on_delete tag.
+type odCascadeArticle struct {
+	ID     int64
+	Author orm.FK[relAuthor] `orm:"on_delete=cascade"`
+}
+
+type odSetNullArticle struct {
+	ID     int64
+	Author orm.FK[relAuthor] `orm:"on_delete=set_null;null"`
+}
+
+// onDeleteDDL registers relAuthor plus model (which must carry a FK to it),
+// resolves, and returns model's CreateTableSQL for the sqlite and postgres
+// dialects.
+func onDeleteDDL(t *testing.T, model any, name string) (sqliteDDL, postgresDDL string) {
+	t.Helper()
+	reg := orm.NewRegistry()
+	if _, err := reg.Register(&relAuthor{}); err != nil {
+		t.Fatalf("Register(relAuthor): %v", err)
+	}
+	if _, err := reg.Register(model); err != nil {
+		t.Fatalf("Register(%s): %v", name, err)
+	}
+	if err := reg.Resolve(); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	reg.Freeze()
+	m, ok := reg.Get(name)
+	if !ok {
+		t.Fatalf("model %s not found in registry", name)
+	}
+	return sqlite.New().CreateTableSQL(m), postgres.New().CreateTableSQL(m)
+}
+
+func TestFKOnDeleteCascadeDDL(t *testing.T) {
+	t.Parallel()
+	s, p := onDeleteDDL(t, &odCascadeArticle{}, "odCascadeArticle")
+	for _, ddl := range []string{s, p} {
+		if !strings.Contains(ddl, `REFERENCES "relauthor" ("id") ON DELETE CASCADE`) {
+			t.Fatalf("DDL missing ON DELETE CASCADE:\n%s", ddl)
+		}
+	}
+}
+
+func TestFKOnDeleteSetNullDDL(t *testing.T) {
+	t.Parallel()
+	s, p := onDeleteDDL(t, &odSetNullArticle{}, "odSetNullArticle")
+	for _, ddl := range []string{s, p} {
+		if !strings.Contains(ddl, `REFERENCES "relauthor" ("id") ON DELETE SET NULL`) {
+			t.Fatalf("DDL missing ON DELETE SET NULL:\n%s", ddl)
+		}
+	}
+}
+
+func TestFKOnDeleteDefaultEmitsNoClause(t *testing.T) {
+	t.Parallel()
+	// A FK that does not set on_delete keeps the prior behavior (SQL NO ACTION),
+	// so no ON DELETE clause is emitted.
+	_, _, article := newRelRegistry(t)
+	for _, ddl := range []string{sqlite.New().CreateTableSQL(article), postgres.New().CreateTableSQL(article)} {
+		if strings.Contains(ddl, "ON DELETE") {
+			t.Fatalf("default FK should emit no ON DELETE clause:\n%s", ddl)
+		}
+	}
+}
+
+func TestFKOnDeleteInvalidRejected(t *testing.T) {
+	t.Parallel()
+	type badOnDelete struct {
+		ID     int64
+		Author orm.FK[relAuthor] `orm:"on_delete=bogus"`
+	}
+	reg := orm.NewRegistry()
+	if _, err := reg.Register(&badOnDelete{}); err == nil {
+		t.Fatal("Register(badOnDelete): expected error for invalid on_delete, got nil")
+	}
+}
+
+func TestFKOnDeleteSetNullRequiresNull(t *testing.T) {
+	t.Parallel()
+	type setNullNotNull struct {
+		ID     int64
+		Author orm.FK[relAuthor] `orm:"on_delete=set_null"`
+	}
+	reg := orm.NewRegistry()
+	if _, err := reg.Register(&setNullNotNull{}); err == nil {
+		t.Fatal("Register(setNullNotNull): expected error (set_null requires null), got nil")
+	}
+}
+
 // newRelRegistry registers relAuthor and relArticle, resolves relations, and
 // returns the frozen registry along with both models.
 func newRelRegistry(t *testing.T) (*orm.Registry, *orm.Model, *orm.Model) {

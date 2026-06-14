@@ -24,10 +24,81 @@ type Relation struct {
 	Kind RelKind
 	// Column is the FK column on this model (e.g. "author_id").
 	Column string
+	// OnDelete is the referential action when the referenced row is deleted. It
+	// defaults to OnDeleteDoNothing (SQL NO ACTION) when on_delete is unset.
+	OnDelete OnDelete
 	// targetType is the related struct type (e.g. Author).
 	targetType reflect.Type
 	// Target is the resolved related model, set by Registry.Resolve.
 	Target *Model
+}
+
+// OnDelete is the referential action applied when the row a foreign key points
+// to is deleted; it maps to the SQL ON DELETE clause. djangogo has no app-level
+// cascade collector, so the action is enforced entirely by the database.
+type OnDelete uint8
+
+const (
+	// OnDeleteDoNothing emits no ON DELETE clause (SQL NO ACTION): a delete of a
+	// referenced row is left to the database, which rejects it when foreign-key
+	// constraints are enforced. It is the default when on_delete is unset and
+	// matches Django's DO_NOTHING.
+	OnDeleteDoNothing OnDelete = iota
+	// OnDeleteCascade deletes the rows that reference the deleted row
+	// (ON DELETE CASCADE), matching Django's CASCADE.
+	OnDeleteCascade
+	// OnDeleteSetNull sets the foreign key to NULL (ON DELETE SET NULL); the
+	// column must be nullable. It matches Django's SET_NULL.
+	OnDeleteSetNull
+	// OnDeleteRestrict rejects the delete while referencing rows exist
+	// (ON DELETE RESTRICT), matching Django's RESTRICT.
+	OnDeleteRestrict
+)
+
+// Clause returns the SQL ON DELETE fragment for od with a leading space, or ""
+// for OnDeleteDoNothing (NO ACTION is the SQL default, so no clause is emitted).
+func (od OnDelete) Clause() string {
+	switch od {
+	case OnDeleteCascade:
+		return " ON DELETE CASCADE"
+	case OnDeleteSetNull:
+		return " ON DELETE SET NULL"
+	case OnDeleteRestrict:
+		return " ON DELETE RESTRICT"
+	default:
+		return ""
+	}
+}
+
+// String returns the on_delete tag name for od (e.g. "cascade").
+func (od OnDelete) String() string {
+	switch od {
+	case OnDeleteCascade:
+		return "cascade"
+	case OnDeleteSetNull:
+		return "set_null"
+	case OnDeleteRestrict:
+		return "restrict"
+	default:
+		return "do_nothing"
+	}
+}
+
+// ParseOnDelete maps an on_delete tag value to an OnDelete, erroring on an
+// unknown value.
+func ParseOnDelete(raw string) (OnDelete, error) {
+	switch raw {
+	case "cascade":
+		return OnDeleteCascade, nil
+	case "set_null":
+		return OnDeleteSetNull, nil
+	case "restrict":
+		return OnDeleteRestrict, nil
+	case "do_nothing":
+		return OnDeleteDoNothing, nil
+	default:
+		return OnDeleteDoNothing, fmt.Errorf("invalid on_delete %q: must be cascade, set_null, restrict, or do_nothing", raw)
+	}
 }
 
 // FK is a forward foreign key to T. It stores the related primary key and an

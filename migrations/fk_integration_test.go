@@ -223,3 +223,87 @@ func TestFKIntegration_Postgres(t *testing.T) {
 		t.Logf("foreign key violation SQLState = %s (want 23503)", pgErr.SQLState())
 	}
 }
+
+// cascadeParent and cascadeChild model an ON DELETE CASCADE relation used to
+// confirm the action is enforced end to end on a live database.
+type cascadeParent struct {
+	ID   int64
+	Name string `orm:"max_length=50"`
+}
+
+type cascadeChild struct {
+	ID     int64
+	Parent orm.FK[cascadeParent] `orm:"on_delete=cascade"`
+}
+
+// TestFKOnDeleteCascade_Postgres confirms that deleting a parent row cascades to
+// its children when the FK declares on_delete=cascade. Skipped without a DSN.
+func TestFKOnDeleteCascade_Postgres(t *testing.T) {
+	dsn := os.Getenv("DJANGOGO_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("DJANGOGO_TEST_POSTGRES_DSN not set; skipping PostgreSQL on_delete cascade test")
+	}
+
+	sdb, err := postgres.Open(dsn)
+	if err != nil {
+		t.Fatalf("postgres.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = sdb.Close() })
+
+	ctx := context.Background()
+	drops := []string{`DROP TABLE IF EXISTS "cascadechild"`, `DROP TABLE IF EXISTS "cascadeparent"`}
+	for _, s := range drops {
+		if _, err := sdb.ExecContext(ctx, s); err != nil {
+			t.Fatalf("cleanup %q: %v", s, err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, s := range drops {
+			_, _ = sdb.ExecContext(context.Background(), s)
+		}
+	})
+
+	reg := orm.NewRegistry()
+	if _, err := reg.Register(&cascadeParent{}); err != nil {
+		t.Fatalf("Register(cascadeParent): %v", err)
+	}
+	if _, err := reg.Register(&cascadeChild{}); err != nil {
+		t.Fatalf("Register(cascadeChild): %v", err)
+	}
+	if err := reg.Resolve(); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	reg.Freeze()
+
+	d := postgres.New()
+	parent, _ := reg.Get("cascadeParent")
+	child, _ := reg.Get("cascadeChild")
+	for _, m := range []*orm.Model{parent, child} {
+		if _, err := sdb.ExecContext(ctx, d.CreateTableSQL(m)); err != nil {
+			t.Fatalf("create table %s: %v", m.Name(), err)
+		}
+	}
+
+	db := orm.NewDB(sdb, d, reg)
+	p := &cascadeParent{Name: "p"}
+	if err := orm.Query[cascadeParent](db).Create(ctx, p); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	c := &cascadeChild{}
+	c.Parent.SetPK(p.ID)
+	if err := orm.Query[cascadeChild](db).Create(ctx, c); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	if _, err := orm.Query[cascadeParent](db).Filter("id", p.ID).Delete(ctx); err != nil {
+		t.Fatalf("delete parent: %v", err)
+	}
+
+	n, err := orm.Query[cascadeChild](db).Count(ctx)
+	if err != nil {
+		t.Fatalf("count children: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("after cascade delete, child count = %d, want 0", n)
+	}
+}
