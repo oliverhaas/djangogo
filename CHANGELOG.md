@@ -39,8 +39,24 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   project, and the blog example gains a `Comment` model with a working comment
   form.
 
+- FK `on_delete` actions: `orm:"on_delete=cascade|set_null|restrict"` (default no
+  action) parsed from the struct tag and emitted into the FK DDL on both the
+  SQLite and PostgreSQL backends and through the migrations state/DDL/writer.
+  `set_null` requires a nullable column, as Django enforces. Enforced on
+  PostgreSQL; SQLite does not check foreign keys without the `foreign_keys` pragma.
+- `makemigrations` warns on a likely field rename (a removed field and an added
+  field of the same type), which the autodetector would otherwise emit as a
+  drop + add that discards the column's data without notice.
+
 ### Fixed
 
+- `is_active` is now enforced across authentication, mirroring Django's
+  `ModelBackend`: an inactive user is rejected at admin login, holds no
+  permissions (even a superuser), and is treated as anonymous when resolved from
+  the session, rather than staying authenticated until the session expires.
+- CSRF protection now verifies the request origin on unsafe methods before the
+  token, like Django: an `Origin` header must match the host, falling back to a
+  strict `Referer` check over HTTPS.
 - ModelForm foreign-key `<select>` now offers Django's empty `---------` option,
   so a nullable relation can be cleared and an unset relation is no longer
   silently saved as the first related row.

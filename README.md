@@ -125,18 +125,40 @@ skipped with a reason; divergences are catalogued in `fidelity/divergences.md`.
 
 ## Known limitations
 
-This is a proof of concept. The notable slimmed or deferred areas are:
+This is a proof of concept: it implements a vertical slice of Django's developer
+experience, not its full surface area. The notable slimmed or deferred areas are
+below. Where a Django behaviour is matched closely the parity is called out so the
+boundary is clear.
 
-- **Relations:** only forward `FK[T]` is built. One-to-one and many-to-many are
-  represented with explicit link models, not dedicated `O2O[T]`/`M2M[T]` types.
+- **Relations:** only forward `FK[T]` is built, now carrying an `on_delete` action
+  (`orm:"on_delete=cascade|set_null|restrict"`, default no action) that is emitted
+  into the FK DDL on both dialects. One-to-one and many-to-many are still modelled
+  with explicit link models, not dedicated `O2O[T]`/`M2M[T]` types. Note that
+  `modernc.org/sqlite` does not enable the `foreign_keys` pragma, so `ON DELETE`
+  (and FK constraints generally) are enforced on PostgreSQL but not on SQLite.
+- **Querying:** `Filter`/`Exclude` support the `exact`, `gt`, `gte`, `lt`, `lte`,
+  `contains`, `icontains`, `startswith`, `endswith`, `in`, and `isnull` lookups,
+  plus `OrderBy`, `Limit`/`Offset`, `Count`, `SelectRelated` (FK join), and
+  `Atomic` transactions with savepoints. Not implemented: aggregation/annotation,
+  `Q`-object `OR` (predicates are combined with `AND`), `prefetch_related` for
+  reverse/M2M sets, and `values()`/`values_list()` projection. `icontains` folds
+  case via SQLite's ASCII-insensitive `LIKE`; on PostgreSQL it renders as a plain
+  case-sensitive `LIKE` rather than `ILIKE`.
+- **Pagination:** the query layer exposes `Limit`/`Offset`, but `ListView` and the
+  admin changelist render every row -- there is no page-number paginator or UI.
 - **Migrations:** generated migration files register via `init()`, so a separate
   `migrate` process only sees migrations compiled into the binary (rebuild after
-  `makemigrations`). An in-process flow works without a rebuild.
-- **Admin:** `SearchFields`/`ListFilter`/pagination/inlines are not implemented.
-  Foreign keys render as a `<select>` of the related rows (with Django's empty
-  `---------` option), but there is no raw-id/autocomplete widget, so the select
-  loads the whole related table. `ReadonlyFields` are omitted from the change form
-  rather than rendered as disabled inputs.
+  `makemigrations`); an in-process flow works without a rebuild. The autodetector
+  has no `RenameField` operation: a renamed field is emitted as drop + add, which
+  discards the column's data. `makemigrations` now prints a warning when it spots
+  a likely rename (a removed field and an added field of the same type) so you can
+  edit the migration to preserve the data. There are no data/`RunPython`-style
+  migrations and no interactive prompts.
+- **Admin:** `SearchFields`/`ListFilter`/inlines are not implemented (pagination is
+  covered above). Foreign keys render as a `<select>` of the related rows (with
+  Django's empty `---------` option), but there is no raw-id/autocomplete widget,
+  so the select loads the whole related table. `ReadonlyFields` are omitted from
+  the change form rather than rendered as disabled inputs.
 - **Forms:** a field's `required` is derived from the database `null`, not a
   separate Django `blank` flag (the two are independent in Django). Rendered HTML
   input names use the Go struct field name (e.g. `name="Title"`), not Django's
@@ -149,11 +171,17 @@ This is a proof of concept. The notable slimmed or deferred areas are:
 - **ORM fields:** a declared `default=` overrides an explicitly-set Go zero value
   (Django keeps an explicit zero), and `Update` stamps `auto_now` fields whereas
   Django's `QuerySet.update()` does not (this ORM has no separate `save()` path).
-- **Auth:** `createsuperuser` prompts once (no interactive re-prompt on an empty or
-  duplicate username) and does not run password-strength validation; input is
+- **Auth:** users, groups, and group/user permissions are modelled, and `is_active`
+  is enforced the way Django's `ModelBackend` does -- a deactivated account holds
+  no permissions (not even a superuser) and is treated as anonymous when resolved
+  from the session. Not covered: per-object permissions and automatic permission
+  creation from models. `createsuperuser` prompts once (no re-prompt on an empty or
+  duplicate username), runs no password-strength validation, and reads input
   line-based (unmasked).
-- **Sessions/CSRF:** the session cookie sets `HttpOnly` and `SameSite=Lax` but not
-  `Secure`; enable `Secure` behind TLS in a real deployment.
+- **Sessions/CSRF:** unsafe requests are checked for a valid CSRF token and, like
+  Django, for an `Origin` header matching the host (falling back to a strict
+  `Referer` check over HTTPS). The session cookie sets `HttpOnly` and
+  `SameSite=Lax` but not `Secure`; enable `Secure` behind TLS in a real deployment.
 - **Fidelity:** the differential harness covers template rendering only. Query-SQL
   and migration-SQL differential comparison are future work.
 
