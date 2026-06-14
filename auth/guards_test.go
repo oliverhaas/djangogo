@@ -134,7 +134,7 @@ func TestHasPerm(t *testing.T) {
 	ctx := context.Background()
 
 	// Superuser: always granted, even with no permission rows.
-	super := &auth.User{Username: "root", IsSuperuser: true}
+	super := &auth.User{Username: "root", IsActive: true, IsSuperuser: true}
 	if err := orm.Query[auth.User](db).Create(ctx, super); err != nil {
 		t.Fatalf("Create(super): %v", err)
 	}
@@ -164,6 +164,32 @@ func TestHasPerm(t *testing.T) {
 	// A user who has a different permission still lacks this one.
 	if ok, err := auth.HasPerm(ctx, db, direct, "delete_thing"); err != nil || ok {
 		t.Fatalf("HasPerm(direct, delete_thing) = %v, %v; want false, nil", ok, err)
+	}
+}
+
+func TestHasPermDeniesInactiveUser(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// An inactive user is denied every permission, even one granted directly:
+	// Django's ModelBackend.has_perm returns user_obj.is_active and ... .
+	inactive := &auth.User{Username: "frozen", IsActive: false}
+	if err := orm.Query[auth.User](db).Create(ctx, inactive); err != nil {
+		t.Fatalf("Create(inactive): %v", err)
+	}
+	grantUserPermission(t, db, inactive, "edit_thing")
+	if ok, err := auth.HasPerm(ctx, db, inactive, "edit_thing"); err != nil || ok {
+		t.Fatalf("HasPerm(inactive, edit_thing) = %v, %v; want false, nil", ok, err)
+	}
+
+	// Even an inactive superuser is denied: PermissionsMixin.has_perm only
+	// short-circuits when self.is_active and self.is_superuser.
+	frozenSuper := &auth.User{Username: "frozenroot", IsActive: false, IsSuperuser: true}
+	if err := orm.Query[auth.User](db).Create(ctx, frozenSuper); err != nil {
+		t.Fatalf("Create(frozenSuper): %v", err)
+	}
+	if ok, err := auth.HasPerm(ctx, db, frozenSuper, "anything"); err != nil || ok {
+		t.Fatalf("HasPerm(frozenSuper) = %v, %v; want false, nil", ok, err)
 	}
 }
 

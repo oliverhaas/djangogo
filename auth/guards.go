@@ -36,6 +36,12 @@ func redirectToLogin(w http.ResponseWriter, r *http.Request, loginURL string) {
 // directly (via UserPermission) or through any of u's groups (via UserGroup then
 // GroupPermission).
 func HasPerm(ctx context.Context, db *orm.DB, u *User, codename string) (bool, error) {
+	// An inactive user holds no permissions, even a superuser. This matches
+	// Django, where ModelBackend.has_perm is "user_obj.is_active and ..." and
+	// PermissionsMixin.has_perm only short-circuits when is_active and is_superuser.
+	if !u.IsActive {
+		return false, nil
+	}
 	if u.IsSuperuser {
 		return true, nil
 	}

@@ -118,6 +118,29 @@ func TestLoginRotatesAndSetsUser(t *testing.T) {
 	}
 }
 
+func TestUserFromSessionRejectsInactiveUser(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// A deactivated account with a valid session must not load as the request
+	// user: Django's ModelBackend.get_user rejects is_active=False via
+	// user_can_authenticate, so request.user becomes AnonymousUser.
+	u := &auth.User{Username: "deactivated", IsActive: false}
+	if err := u.SetPassword("pw"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	if err := orm.Query[auth.User](db).Create(ctx, u); err != nil {
+		t.Fatalf("Create(user): %v", err)
+	}
+
+	sess := &sessions.Session{}
+	sess.Set("_auth_user_id", u.ID)
+
+	if _, ok := auth.UserFromSession(ctx, db, sess); ok {
+		t.Fatal("UserFromSession loaded a deactivated user")
+	}
+}
+
 func TestUserFromSessionJSONFloat(t *testing.T) {
 	db := newTestDB(t)
 	u := createUser(t, db, "carol", "pw")

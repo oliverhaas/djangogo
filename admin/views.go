@@ -78,7 +78,7 @@ func (s *AdminSite) loginPOST(w http.ResponseWriter, r *http.Request) {
 	password := r.PostForm.Get("password")
 
 	user, err := orm.Query[auth.User](s.db).Get(r.Context(), "username", username)
-	if err != nil || !user.CheckPassword(password) || !user.IsStaff {
+	if err != nil || !user.CheckPassword(password) || !user.IsStaff || !user.IsActive {
 		s.renderLogin(w, r, next, "Please enter a correct username and password, or you are not staff.")
 		return
 	}

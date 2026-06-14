@@ -46,6 +46,13 @@ func UserFromSession(ctx context.Context, db *orm.DB, sess *sessions.Session) (*
 	if err != nil {
 		return nil, false
 	}
+	// A deactivated account is treated as anonymous, mirroring Django's
+	// ModelBackend.get_user, which returns None when user_can_authenticate
+	// (is_active) is false. Without this a user disabled mid-session would stay
+	// authenticated until the session expired.
+	if !u.IsActive {
+		return nil, false
+	}
 	return &u, true
 }
 

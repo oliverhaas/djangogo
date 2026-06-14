@@ -221,3 +221,29 @@ func TestLoginPOSTNonStaffRejected(t *testing.T) {
 		t.Errorf("non-staff login POST body missing staff error:\n%s", rec.Body.String())
 	}
 }
+
+func TestLoginPOSTInactiveStaffRejected(t *testing.T) {
+	db := newUserDB(t)
+	_, h := loginHandler(t, db)
+	// A staff user whose account has been deactivated must not be allowed in,
+	// matching Django's AdminAuthenticationForm (active and staff required).
+	u := auth.User{Username: "frozen", IsStaff: true, IsActive: false}
+	if err := u.SetPassword("secret"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	if err := orm.Query[auth.User](db).Create(context.Background(), &u); err != nil {
+		t.Fatalf("Create(frozen): %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("username", "frozen")
+	form.Set("password", "secret")
+	rec := loginPost(t, h, form)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("inactive staff login POST status = %d, want 200 (re-render)", rec.Code)
+	}
+	if rec.Header().Get("Location") != "" {
+		t.Errorf("inactive staff login POST should not redirect (got Location %q)", rec.Header().Get("Location"))
+	}
+}
