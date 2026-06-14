@@ -96,7 +96,7 @@ func TestM5LoginGatedExit(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed a user and an article.
-	user := auth.User{Username: "alice"}
+	user := auth.User{Username: "alice", IsActive: true}
 	if err := user.SetPassword("secret"); err != nil {
 		t.Fatalf("SetPassword: %v", err)
 	}

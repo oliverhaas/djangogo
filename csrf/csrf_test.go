@@ -2,6 +2,7 @@ package csrf_test
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -278,5 +279,129 @@ func TestCookieJarFlow(t *testing.T) {
 
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("POST with correct token: expected 200, got %d", resp2.StatusCode)
+	}
+}
+
+// seedTokenAndCookie does a GET through the chain to obtain a seeded CSRF token
+// and the session cookie carrying it, for use by the origin/referer tests.
+func seedTokenAndCookie(t *testing.T, store *sessions.SignedCookieStore) (string, *http.Cookie) {
+	t.Helper()
+	var token string
+	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token = csrf.Token(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	res := rec.Result()
+	defer func() { _ = res.Body.Close() }()
+	var cookie *http.Cookie
+	for _, c := range res.Cookies() {
+		if c.Name == "sessionid" {
+			cookie = c
+		}
+	}
+	if token == "" || cookie == nil {
+		t.Fatal("GET did not seed a token and session cookie")
+	}
+	return token, cookie
+}
+
+// TestPOSTCrossOriginRejected verifies that a POST carrying a valid token but a
+// cross-site Origin header is rejected, mirroring Django's origin check.
+func TestPOSTCrossOriginRejected(t *testing.T) {
+	store := sessions.NewSignedCookieStore([]byte("test-secret"))
+	token, cookie := seedTokenAndCookie(t, store)
+
+	reached := false
+	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for _, origin := range []string{"http://evil.example.com", "https://example.com", "null"} {
+		rec := httptest.NewRecorder()
+		body := url.Values{csrf.FormField: {token}}.Encode()
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", origin)
+		req.AddCookie(cookie)
+		h.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("Origin %q: expected 403, got %d", origin, rec.Code)
+		}
+	}
+	if reached {
+		t.Fatal("handler reached despite a cross-origin POST")
+	}
+}
+
+// TestPOSTSameOriginAccepted verifies that a POST whose Origin matches the
+// request scheme and host is accepted (httptest defaults the host to example.com).
+func TestPOSTSameOriginAccepted(t *testing.T) {
+	store := sessions.NewSignedCookieStore([]byte("test-secret"))
+	token, cookie := seedTokenAndCookie(t, store)
+
+	reached := false
+	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	body := url.Values{csrf.FormField: {token}}.Encode()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://example.com")
+	req.AddCookie(cookie)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("same-origin POST: expected 200, got %d", rec.Code)
+	}
+	if !reached {
+		t.Fatal("handler not reached despite a same-origin POST with a valid token")
+	}
+}
+
+// TestPOSTSecureRefererChecked verifies the strict-referer check applied to
+// HTTPS requests that omit an Origin header: a same-host https Referer passes,
+// while a missing or cross-host Referer is rejected.
+func TestPOSTSecureRefererChecked(t *testing.T) {
+	store := sessions.NewSignedCookieStore([]byte("test-secret"))
+	token, cookie := seedTokenAndCookie(t, store)
+
+	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	cases := []struct {
+		name    string
+		referer string
+		want    int
+	}{
+		{"same host https", "https://example.com/form", http.StatusOK},
+		{"cross host https", "https://evil.example.com/form", http.StatusForbidden},
+		{"insecure referer", "http://example.com/form", http.StatusForbidden},
+		{"missing referer", "", http.StatusForbidden},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			body := url.Values{csrf.FormField: {token}}.Encode()
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.TLS = &tls.ConnectionState{} // mark the request as arriving over HTTPS
+			if c.referer != "" {
+				req.Header.Set("Referer", c.referer)
+			}
+			req.AddCookie(cookie)
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != c.want {
+				t.Fatalf("referer %q: status %d, want %d", c.referer, rec.Code, c.want)
+			}
+		})
 	}
 }

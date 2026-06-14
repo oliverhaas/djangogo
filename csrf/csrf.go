@@ -12,6 +12,8 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/oliverhaas/djangogo/sessions"
 )
@@ -77,6 +79,15 @@ func Middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Unsafe method: verify the request origin before the token. A present
+		// Origin header must match this request's scheme and host; an HTTPS
+		// request that omits Origin must carry a same-host https Referer. This
+		// blocks cross-site POSTs independently of the token (e.g. login CSRF).
+		if !originOrRefererOK(r) {
+			http.Error(w, "CSRF verification failed", http.StatusForbidden)
+			return
+		}
+
 		// Unsafe method: validate the submitted token.
 		if !validateToken(r, sessionToken) {
 			http.Error(w, "CSRF verification failed", http.StatusForbidden)
@@ -85,6 +96,48 @@ func Middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// originOrRefererOK applies Django's cross-site origin check for unsafe methods.
+// A present Origin header must equal this request's scheme://host. When no Origin
+// is sent and the request arrived over TLS, the Referer must be present, itself
+// https, and share the request host. A plain-HTTP request without an Origin
+// passes here (the token check still applies).
+func originOrRefererOK(r *http.Request) bool {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		return strings.EqualFold(origin, requestScheme(r)+"://"+r.Host)
+	}
+	if r.TLS != nil {
+		return refererOK(r)
+	}
+	return true
+}
+
+// requestScheme reports "https" when the request arrived over TLS and "http"
+// otherwise.
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+// refererOK reports whether r carries a well-formed https Referer whose host
+// matches the request host. It is the strict-referer check Django applies to
+// HTTPS requests that omit an Origin header.
+func refererOK(r *http.Request) bool {
+	referer := r.Header.Get("Referer")
+	if referer == "" {
+		return false
+	}
+	u, err := url.Parse(referer)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	if u.Scheme != "https" {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
 }
 
 // validateToken extracts the submitted CSRF token from the request and
