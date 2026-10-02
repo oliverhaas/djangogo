@@ -107,7 +107,7 @@ func attachJoined(mainElem reflect.Value, r joinedRel, holders []any) error {
 	if pkColIdx < 0 {
 		return fmt.Errorf("orm: target model %s has no primary key column", r.target.Name())
 	}
-	pkVal := *(holders[pkColIdx].(*any))
+	pkVal := *holders[pkColIdx].(*any)
 	if pkVal == nil {
 		return nil // null FK / no match: leave the FK unloaded.
 	}
@@ -119,7 +119,7 @@ func attachJoined(mainElem reflect.Value, r joinedRel, holders []any) error {
 	tgt := reflect.New(r.target.GoType())
 	tgtElem := tgt.Elem()
 	for i, f := range tf {
-		v := *(holders[i].(*any))
+		v := *holders[i].(*any)
 		if err := assignScanned(tgtElem.Field(f.Index), v); err != nil {
 			return err
 		}
