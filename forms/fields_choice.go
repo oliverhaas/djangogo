@@ -286,7 +286,9 @@ type ContextField interface {
 
 // ModelChoiceField is a field whose options are the rows of a model, the
 // counterpart of Django's ModelChoiceField. It renders as a <select> with an
-// empty first option and submits the primary key.
+// empty first option and submits the primary key. As in Django, the empty
+// option is left out for a required field with an initial value and for a
+// RadioSelect unless Blank is set.
 //
 // The cleaned value depends on the constructor: NewModelChoiceField yields the
 // selected object (*T), a foreign key of a model form yields the primary key
@@ -295,6 +297,10 @@ type ModelChoiceField struct {
 	BaseField
 	// EmptyLabel is the label of the empty option; nil leaves the option out.
 	EmptyLabel *string
+	// Blank keeps the empty option on a RadioSelect, Django's blank argument.
+	// The field of a foreign key takes it from the blank option of the model
+	// field.
+	Blank bool
 
 	rows   []modelRow
 	loaded bool
@@ -415,13 +421,23 @@ func (f *ModelChoiceField) WithContext(ctx context.Context) (Field, error) {
 // row.
 func (f *ModelChoiceField) widgetChoices() []Choice {
 	out := make([]Choice, 0, len(f.rows)+1)
-	if f.EmptyLabel != nil {
+	if f.hasEmptyOption() {
 		out = append(out, Choice{Value: "", Label: *f.EmptyLabel})
 	}
 	for _, r := range f.rows {
 		out = append(out, Choice{Value: r.pk, Label: r.label})
 	}
 	return out
+}
+
+// hasEmptyOption reports whether the field offers the empty option, the rule
+// of Django's ModelChoiceField.__init__ for empty_label.
+func (f *ModelChoiceField) hasEmptyOption() bool {
+	if f.EmptyLabel == nil || f.Required && f.Initial != nil {
+		return false
+	}
+	_, radio := f.Widget.(RadioSelect)
+	return !radio || f.Blank
 }
 
 // setChoices implements choiceField: the choices become the rows, and an

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -19,6 +20,16 @@ import (
 // validate. Check IsValid before saving.
 var ErrInvalid = errors.New("forms: the data didn't validate")
 
+// invalidSaveError is the error of Save for a form that is not valid, with
+// the message of Django's ValueError. It wraps ErrInvalid.
+type invalidSaveError string
+
+// Error returns the message.
+func (e invalidSaveError) Error() string { return string(e) }
+
+// Unwrap returns ErrInvalid.
+func (invalidSaveError) Unwrap() error { return ErrInvalid }
+
 // FromModel derives an unbound form from a model, as a Django ModelForm does.
 // Each editable model field becomes a form field named after its attribute
 // ("created_at"); the auto primary key and non-editable fields are left out.
@@ -29,7 +40,9 @@ func FromModel(m *orm.Model, opts ...ModelFormOption) *Form {
 	return buildModelForm(nil, m, newModelFormConfig(opts))
 }
 
-// buildModelForm derives the form of a model; db may be nil.
+// buildModelForm derives the form of a model; db may be nil. A WithFields
+// name that the form cannot have makes the form fail with the FieldError
+// message of Django's ModelFormMetaclass and fields_for_model.
 func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) *Form {
 	cfg.normalize(m)
 	var all []string
@@ -39,13 +52,24 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) *Form {
 		}
 	}
 	form := New()
+	var unknown []string
 	for _, name := range cfg.includedNames(all) {
-		mf, ok := m.FieldByAttr(name)
-		if !ok || !editable(mf) {
-			continue
-		}
 		field := cfg.formFields[name]
-		if field == nil {
+		mf, isModelField := m.FieldByAttr(name)
+		switch {
+		case isModelField && !editable(mf) && mf.Kind != orm.KindAuto:
+			form.fail(fmt.Errorf("forms: '%s' cannot be specified for %s model form as it is a non-editable field",
+				name, m.Name()))
+			continue
+		case field != nil:
+		case !isModelField:
+			if name != AllFields {
+				unknown = append(unknown, name)
+			}
+			continue
+		case mf.Kind == orm.KindAuto:
+			continue
+		default:
 			field = formFieldFor(db, mf, cfg.factories[name])
 		}
 		if field == nil {
@@ -53,6 +77,17 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) *Form {
 		}
 		cfg.apply(name, field)
 		form.AddField(name, field)
+	}
+	// The declared fields that WithFields leaves out or WithExclude drops are
+	// part of the form all the same, as in Django.
+	for _, name := range cfg.declared {
+		if _, ok := form.FieldDef(name); !ok {
+			cfg.apply(name, cfg.formFields[name])
+			form.AddField(name, cfg.formFields[name])
+		}
+	}
+	if len(unknown) > 0 {
+		form.fail(fmt.Errorf("forms: Unknown field(s) (%s) specified for %s", strings.Join(unknown, ", "), m.Name()))
 	}
 	return form
 }
@@ -80,12 +115,17 @@ func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory) Field {
 		opts = append(opts, Initial(mf.Default))
 	}
 	if mf.Rel != nil {
+		var field Field
 		if factory != nil {
-			if f := factory(db, opts); f != nil {
-				return f
-			}
+			field = factory(db, opts)
 		}
-		return newRelatedChoiceField(db, mf.Rel.Target, collectOptions(opts))
+		if field == nil {
+			field = newRelatedChoiceField(db, mf.Rel.Target, collectOptions(opts))
+		}
+		if choice, ok := field.(*ModelChoiceField); ok {
+			choice.Blank = mf.Blank
+		}
+		return field
 	}
 	if len(mf.Choices) > 0 {
 		choices := make([]Choice, 0, len(mf.Choices)+1)
@@ -356,9 +396,27 @@ func NewModelForm[T any](db *orm.DB, opts ...ModelFormOption) *ModelForm[T] {
 		return mf
 	}
 	mf.model = model
+	mf.instance = mf.newInstance()
 	mf.Form = buildModelForm(db, model, newModelFormConfig(opts))
 	mf.install()
 	return mf
+}
+
+// newInstance returns a new instance of T with the defaults of the model
+// fields, as Django's Model() starts with them.
+func (mf *ModelForm[T]) newInstance() *T {
+	obj := new(T)
+	if mf.model == nil {
+		return obj
+	}
+	rv := reflect.ValueOf(obj).Elem()
+	for _, field := range mf.model.Fields() {
+		if field.HasDefault {
+			// A default that does not fit the Go field is left to the ORM.
+			_ = setScalar(field, rv.Field(field.Index), field.Default)
+		}
+	}
+	return obj
 }
 
 // install makes the form run the model validation of this ModelForm.
@@ -390,7 +448,7 @@ func (mf *ModelForm[T]) Bind(data url.Values) *ModelForm[T] {
 	c := *mf
 	c.Form = mf.Form.Bind(data)
 	if !mf.own {
-		c.instance = new(T)
+		c.instance = mf.newInstance()
 	}
 	c.install()
 	return &c
@@ -403,19 +461,47 @@ func (mf *ModelForm[T]) Instance() *T { return mf.instance }
 // Model returns the model of the form.
 func (mf *ModelForm[T]) Model() *orm.Model { return mf.model }
 
-// adding reports whether the instance has no primary key yet.
+// adding reports whether the form creates a row, Django's
+// instance._state.adding: the form made its own instance, or the instance of
+// WithInstance has no primary key yet.
 func (mf *ModelForm[T]) adding() bool {
+	if !mf.own {
+		return true
+	}
 	pk := mf.model.PrimaryKey()
 	return pk == nil || reflect.ValueOf(mf.instance).Elem().Field(pk.Index).IsZero()
 }
 
+// constructData returns the cleaned data that goes into the instance, Django's
+// construct_instance: a field with a model default keeps that default when the
+// data has no value for it and its cleaned value is empty.
+func (mf *ModelForm[T]) constructData(f *Form) map[string]any {
+	data, cloned := f.cleaned, false
+	for _, field := range mf.model.Fields() {
+		value, ok := data[field.Attr]
+		if !field.HasDefault || !ok || !isEmpty(value) {
+			continue
+		}
+		def, ok := f.fields[field.Attr]
+		if !ok || !def.Base().Widget.ValueOmittedFromData(f.data, f.AddPrefix(field.Attr)) {
+			continue
+		}
+		if !cloned {
+			data, cloned = maps.Clone(f.cleaned), true
+		}
+		delete(data, field.Attr)
+	}
+	return data
+}
+
 // postClean is the model part of validation, Django's _post_clean: it fills
-// the instance from the cleaned data and validates the unique fields.
+// the instance from the cleaned data and validates the unique fields,
+// including a primary key that the form sets.
 func (mf *ModelForm[T]) postClean(f *Form) {
 	if mf.model == nil || mf.instance == nil {
 		return
 	}
-	if err := PopulateStruct(mf.model, f.cleaned, mf.instance); err != nil {
+	if err := PopulateStruct(mf.model, mf.constructData(f), mf.instance); err != nil {
 		f.fail(err)
 		return
 	}
@@ -424,7 +510,7 @@ func (mf *ModelForm[T]) postClean(f *Form) {
 	for _, field := range mf.model.Fields() {
 		// A field that failed its own validation, or is not part of the form,
 		// is not checked, as in Django.
-		if _, ok := f.cleaned[field.Attr]; !ok || !field.Unique || field.PrimaryKey {
+		if _, ok := f.cleaned[field.Attr]; !ok || !field.Unique && !field.PrimaryKey {
 			continue
 		}
 		value := fieldInitial(field, rv.Field(field.Index))
@@ -441,20 +527,33 @@ func (mf *ModelForm[T]) postClean(f *Form) {
 			continue
 		}
 		if exists {
-			f.AddError(field.Attr, NewValidationError(
-				"%(model_name)s with this %(field_label)s already exists.", "unique", map[string]any{
-					"model_name":  capfirst(modelVerboseName(mf.model)),
-					"field_label": fieldLabel(field),
-				}))
+			f.AddError(field.Attr, NewValidationError(uniqueMessage(f, field.Attr), "unique", map[string]any{
+				"model_name":  capfirst(modelVerboseName(mf.model)),
+				"field_label": fieldLabel(field),
+			}))
 		}
 	}
 }
 
+// uniqueMessage returns the message of a unique error on a field: the
+// "unique" message of the form field when it has one (WithErrorMessages), as
+// Django's ModelForm._update_errors replaces the message of a model error,
+// otherwise the default of the model field.
+func uniqueMessage(f *Form, name string) string {
+	if def, ok := f.fields[name]; ok {
+		if msg, ok := def.Base().ErrorMessages["unique"]; ok {
+			return msg
+		}
+	}
+	return "%(model_name)s with this %(field_label)s already exists."
+}
+
 // Save validates the form when that has not happened yet and writes the
-// instance to the database: an INSERT for an instance without a primary key,
-// an UPDATE of its row otherwise. It returns the saved instance. For a form
-// that is not valid it returns an error wrapping ErrInvalid and writes
-// nothing.
+// instance to the database: an INSERT when the form creates a row (it has no
+// WithInstance, or the instance has no primary key), an UPDATE of its row
+// otherwise. An UPDATE that finds no row inserts it, as Django's Model.save
+// does. It returns the saved instance. For a form that is not valid it returns
+// an error wrapping ErrInvalid and writes nothing.
 func (mf *ModelForm[T]) Save(ctx context.Context) (*T, error) {
 	if mf.model == nil {
 		return nil, mf.Err()
@@ -471,13 +570,11 @@ func (mf *ModelForm[T]) Save(ctx context.Context) (*T, error) {
 		if adding {
 			verb = "created"
 		}
-		return nil, fmt.Errorf("%w: the %s could not be %s", ErrInvalid, mf.model.Name(), verb)
+		return nil, invalidSaveError(fmt.Sprintf("forms: The %s could not be %s because the data didn't validate.",
+			mf.model.Name(), verb))
 	}
 	if adding {
-		if err := orm.Query[T](mf.db).Create(ctx, mf.instance); err != nil {
-			return nil, err
-		}
-		return mf.instance, nil
+		return mf.create(ctx)
 	}
 	rv := reflect.ValueOf(mf.instance).Elem()
 	pk := mf.model.PrimaryKey()
@@ -492,9 +589,22 @@ func (mf *ModelForm[T]) Save(ctx context.Context) (*T, error) {
 	if len(assignments) == 0 {
 		return mf.instance, nil
 	}
-	_, err := orm.Query[T](mf.db).Filter(pk.Column, rv.Field(pk.Index).Interface()).Update(ctx, assignments...)
+	n, err := orm.Query[T](mf.db).Filter(pk.Column, rv.Field(pk.Index).Interface()).Update(ctx, assignments...)
 	if err != nil {
 		return nil, err
 	}
+	if n == 0 {
+		return mf.create(ctx)
+	}
+	return mf.instance, nil
+}
+
+// create inserts the instance. From then on the form edits the saved row, as
+// a Django instance is no longer adding after its save.
+func (mf *ModelForm[T]) create(ctx context.Context) (*T, error) {
+	if err := orm.Query[T](mf.db).Create(ctx, mf.instance); err != nil {
+		return nil, err
+	}
+	mf.own = true
 	return mf.instance, nil
 }

@@ -88,7 +88,11 @@
 // is named after the attribute of its model field ("created_at"), is required
 // unless the model field allows blank, and takes label, help text, choices,
 // maximum length and default from it. A foreign key becomes a
-// ModelChoiceField over the rows of the related model.
+// ModelChoiceField over the rows of the related model. A new instance starts
+// with the defaults of the model, and a field with a default that the data
+// leaves out keeps it, as in Django's construct_instance. A name in WithFields
+// that the model does not have makes the form fail (Form.Err) with Django's
+// FieldError message.
 //
 // # Not covered
 //

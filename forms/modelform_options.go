@@ -28,6 +28,8 @@ type fieldFactory func(db *orm.DB, opts []FieldOption) Field
 // modelFormConfig accumulates the options of a model form.
 type modelFormConfig struct {
 	only          []string
+	fieldsSet     bool // WithFields was given, maybe without names
+	declared      []string
 	exclude       map[string]bool
 	labels        map[string]string
 	widgets       map[string]Widget
@@ -43,11 +45,17 @@ type modelFormConfig struct {
 const AllFields = "__all__"
 
 // WithFields restricts the form to the named fields, in the given order
-// (Meta.fields). A name that is unknown, or that belongs to a field that is
-// not editable, is ignored. AllFields selects every editable field, in the
-// order of the model.
+// (Meta.fields); without names the form has no model fields. AllFields selects
+// every editable field, in the order of the model. A name that is neither a
+// model field nor declared with WithFormField makes the form fail (see
+// Form.Err) with Django's FieldError message "Unknown field(s) (name)
+// specified for Model", and so does a field that is not editable. The auto
+// primary key is ignored.
 func WithFields(names ...string) ModelFormOption {
-	return func(c *modelFormConfig) { c.only = append(c.only, names...) }
+	return func(c *modelFormConfig) {
+		c.fieldsSet = true
+		c.only = append(c.only, names...)
+	}
 }
 
 // WithExclude drops the named fields from the form (Meta.exclude). An
@@ -94,11 +102,20 @@ func WithErrorMessages(field string, messages map[string]string) ModelFormOption
 	}
 }
 
-// WithFormField replaces the form field derived for a model field with the
-// given one, the counterpart of declaring the field on a Django ModelForm or
-// of Meta.field_classes.
+// WithFormField declares a form field, as a field declared on a Django
+// ModelForm: the form always has it, whatever WithFields and WithExclude say.
+// For a model field it takes the place of the derived field (also the
+// counterpart of Meta.field_classes); WithFields gives its position, and
+// without one it comes after the fields of the form, in the order of the
+// options. WithLabel, WithWidget and the other overrides of the same name
+// apply to it as well.
 func WithFormField(field string, f Field) ModelFormOption {
-	return func(c *modelFormConfig) { c.formFields[field] = f }
+	return func(c *modelFormConfig) {
+		if _, ok := c.formFields[field]; !ok {
+			c.declared = append(c.declared, field)
+		}
+		c.formFields[field] = f
+	}
 }
 
 // WithQuerySet restricts the options of a foreign key field to the rows of qs,
@@ -152,6 +169,9 @@ func (c *modelFormConfig) normalize(m *orm.Model) {
 	for i, n := range c.only {
 		c.only[i] = attrName(m, n)
 	}
+	for i, n := range c.declared {
+		c.declared[i] = attrName(m, n)
+	}
 	c.exclude = renamed(m, c.exclude)
 	c.labels = renamed(m, c.labels)
 	c.widgets = renamed(m, c.widgets)
@@ -176,7 +196,7 @@ func renamed[V any](m *orm.Model, in map[string]V) map[string]V {
 // the excluded names.
 func (c *modelFormConfig) includedNames(all []string) []string {
 	source := all
-	if len(c.only) > 0 && !slices.Contains(c.only, AllFields) {
+	if c.fieldsSet && !slices.Contains(c.only, AllFields) {
 		source = c.only
 	}
 	out := make([]string, 0, len(source))
