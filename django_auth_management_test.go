@@ -122,7 +122,7 @@ func newCreatesuperuser(t *testing.T, inputs mockInputs) (*createsuperuserComman
 // want.
 func assertCommandError(t *testing.T, err error, want string) {
 	t.Helper()
-	var ce *commandError
+	var ce *authCommandError
 	if !errors.As(err, &ce) {
 		t.Fatalf("error = %v (%T), want a command error %q", err, err, want)
 	}

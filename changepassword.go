@@ -42,7 +42,7 @@ func (*changepasswordCommand) Help() string {
 // Run asks for the new password of the user named in args.
 func (c *changepasswordCommand) Run(args []string) error {
 	if c.app.DB == nil {
-		return errNoDatabase
+		return errNoAuthDatabase
 	}
 	fs := flag.NewFlagSet("changepassword", flag.ContinueOnError)
 	fs.SetOutput(c.app.Out)
@@ -68,7 +68,7 @@ func (c *changepasswordCommand) Run(args []string) error {
 	ctx := context.Background()
 	u, err := orm.Query[auth.User](c.app.DB).Get(ctx, "username", username)
 	if errors.Is(err, orm.ErrDoesNotExist) {
-		return &commandError{msg: fmt.Sprintf("user '%s' does not exist", username)}
+		return &authCommandError{msg: fmt.Sprintf("user '%s' does not exist", username)}
 	}
 	if err != nil {
 		return fmt.Errorf("djangogo: load user: %w", err)
@@ -97,7 +97,7 @@ func (c *changepasswordCommand) promptPassword(u *auth.User) (string, error) {
 			return "", err
 		}
 		if p == "" {
-			return "", &commandError{msg: "aborted"}
+			return "", &authCommandError{msg: "aborted"}
 		}
 		return p, nil
 	}
@@ -125,6 +125,6 @@ func (c *changepasswordCommand) promptPassword(u *auth.User) (string, error) {
 		}
 		return p1, nil
 	}
-	return "", &commandError{msg: fmt.Sprintf(
+	return "", &authCommandError{msg: fmt.Sprintf(
 		"Aborting password change for user '%s' after %d attempts", u.Username, changepasswordMaxTries)}
 }

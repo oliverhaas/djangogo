@@ -39,13 +39,13 @@ func (c *clearsessionsCommand) Run(args []string) error {
 	store := c.store
 	if store == nil {
 		if c.app.DB == nil {
-			return errNoDatabase
+			return errNoAuthDatabase
 		}
 		store = sessions.NewDBStore(c.app.DB)
 	}
 	clearer, ok := store.(sessions.ExpiredClearer)
 	if !ok {
-		return &commandError{msg: fmt.Sprintf("Session engine '%T' doesn't support clearing expired sessions.", store)}
+		return &authCommandError{msg: fmt.Sprintf("Session engine '%T' doesn't support clearing expired sessions.", store)}
 	}
 	return clearer.ClearExpired(context.Background())
 }

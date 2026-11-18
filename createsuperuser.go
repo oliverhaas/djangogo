@@ -16,18 +16,18 @@ import (
 	"github.com/oliverhaas/djangogo/orm"
 )
 
-// commandError is an error whose message a command reports to the user as it
-// is (Django's CommandError).
-type commandError struct {
+// authCommandError is an error whose message the auth and session commands
+// report to the user as it is (Django's CommandError).
+type authCommandError struct {
 	msg string
 }
 
 // Error returns the message.
-func (e *commandError) Error() string { return e.msg }
+func (e *authCommandError) Error() string { return e.msg }
 
-// errNoDatabase is returned by the auth and session commands without a
+// errNoAuthDatabase is returned by the auth and session commands without a
 // configured database.
-var errNoDatabase = errors.New("djangogo: no database configured (set Settings.Database.DSN)")
+var errNoAuthDatabase = errors.New("djangogo: no database configured (set Settings.Database.DSN)")
 
 // commandInput reads the answers of an interactive command: lines from the
 // application's input, and passwords without echo when the input is a
@@ -116,7 +116,7 @@ func (*createsuperuserCommand) Help() string { return "Used to create a superuse
 // Run creates the superuser from args, the prompts and the environment.
 func (c *createsuperuserCommand) Run(args []string) error {
 	if c.app.DB == nil {
-		return errNoDatabase
+		return errNoAuthDatabase
 	}
 	fs := flag.NewFlagSet("createsuperuser", flag.ContinueOnError)
 	fs.SetOutput(c.app.Out)
@@ -184,14 +184,14 @@ func (c *createsuperuserCommand) collectNoInput(ctx context.Context, username, e
 		username.value, username.set = os.LookupEnv("DJANGO_SUPERUSER_USERNAME")
 	}
 	if !username.set {
-		return data, &commandError{msg: "You must use --username with --noinput."}
+		return data, &authCommandError{msg: "You must use --username with --noinput."}
 	}
 	msg, err := c.validateUsername(ctx, username.value)
 	if err != nil {
 		return data, err
 	}
 	if msg != "" {
-		return data, &commandError{msg: msg}
+		return data, &authCommandError{msg: msg}
 	}
 	data.username = username.value
 
@@ -204,10 +204,10 @@ func (c *createsuperuserCommand) collectNoInput(ctx context.Context, username, e
 		if (email.set && email.value == "") || (envSet && envEmail == "") {
 			return data, nil
 		}
-		return data, &commandError{msg: "You must use --email with --noinput."}
+		return data, &authCommandError{msg: "You must use --email with --noinput."}
 	}
 	if msgs := auth.EmailFieldErrors(value); len(msgs) > 0 {
-		return data, &commandError{msg: strings.Join(msgs, "; ")}
+		return data, &authCommandError{msg: strings.Join(msgs, "; ")}
 	}
 	data.email = value
 	return data, nil
@@ -227,7 +227,7 @@ func (c *createsuperuserCommand) collectInteractive(ctx context.Context, usernam
 	}
 	if username.set {
 		if username.value == "" {
-			return data, &commandError{msg: "Username cannot be blank."}
+			return data, &authCommandError{msg: "Username cannot be blank."}
 		}
 		msg, err := c.validateUsername(ctx, username.value)
 		if err != nil {
@@ -264,7 +264,7 @@ func (c *createsuperuserCommand) collectInteractive(ctx context.Context, usernam
 
 	if email.set {
 		if msgs := auth.EmailFieldErrors(email.value); len(msgs) > 0 {
-			return data, &commandError{msg: strings.Join(msgs, "; ")}
+			return data, &authCommandError{msg: strings.Join(msgs, "; ")}
 		}
 	}
 	for !email.set {

@@ -164,8 +164,8 @@ func TestCreatesuperuserRequiresDB(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	c := &createsuperuserCommand{app: app}
-	if err := c.Run([]string{"--username", "x", "--noinput"}); !errors.Is(err, errNoDatabase) {
-		t.Errorf("Run = %v, want errNoDatabase", err)
+	if err := c.Run([]string{"--username", "x", "--noinput"}); !errors.Is(err, errNoAuthDatabase) {
+		t.Errorf("Run = %v, want errNoAuthDatabase", err)
 	}
 }
 
@@ -237,7 +237,7 @@ func TestClearsessionsUnsupportedStore(t *testing.T) {
 	app := newSuperuserApp(t)
 	err := (&clearsessionsCommand{app: app, store: noClearStore{}}).Run(nil)
 	want := "Session engine 'djangogo.noClearStore' doesn't support clearing expired sessions."
-	var ce *commandError
+	var ce *authCommandError
 	if !errors.As(err, &ce) || ce.Error() != want {
 		t.Errorf("Run = %v, want the command error %q", err, want)
 	}
