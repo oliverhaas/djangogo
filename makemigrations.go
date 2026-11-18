@@ -168,7 +168,9 @@ func (c *makemigrationsCommand) checkHistory(ctx context.Context, loader *migrat
 }
 
 // write prints the migrations in Django's format and, unless dryRun is set,
-// writes their files and adds them to the registry of the application.
+// writes their files and adds them to the registry of the application. An
+// app without migrations in the registry gets a new Go package, which the
+// user must import; the hint follows Django's output.
 func (c *makemigrationsCommand) write(changes map[string][]*migrations.Migration, dryRun bool) error {
 	app := c.app
 	labels := make([]string, 0, len(changes))
@@ -176,9 +178,13 @@ func (c *makemigrationsCommand) write(changes map[string][]*migrations.Migration
 		labels = append(labels, label)
 	}
 	sort.Strings(labels)
+	var newPackages []string
 	for _, label := range labels {
 		_, _ = fmt.Fprintf(app.Out, "Migrations for '%s':\n", label)
 		dir := filepath.Join(app.MigrationsDir, label)
+		if !dryRun && len(app.Migrations.ForApp(label)) == 0 {
+			newPackages = append(newPackages, dir)
+		}
 		for _, m := range changes[label] {
 			path := filepath.Join(dir, migrations.FileName(m.Name))
 			_, _ = fmt.Fprintf(app.Out, "  %s\n", displayPath(path))
@@ -194,7 +200,72 @@ func (c *makemigrationsCommand) write(changes map[string][]*migrations.Migration
 			app.Migrations.Add(*m)
 		}
 	}
+	c.importHint(newPackages)
 	return nil
+}
+
+// importHint tells the user to import the migrations packages in dirs, which
+// the binary does not contain yet. Generated files register through init(),
+// so a separate migrate process sees them only after the packages are
+// imported and the binary rebuilt; Django needs no such step because Python
+// finds the files at run time. A directory outside a Go module is skipped.
+func (c *makemigrationsCommand) importHint(dirs []string) {
+	var paths []string
+	for _, dir := range dirs {
+		if path, ok := goImportPath(dir); ok {
+			paths = append(paths, path)
+		}
+	}
+	switch len(paths) {
+	case 0:
+		return
+	case 1:
+		_, _ = fmt.Fprintln(c.app.Out, "Import the new migrations package in your main package and rebuild, "+
+			"so that migrate finds it:")
+	default:
+		_, _ = fmt.Fprintln(c.app.Out, "Import the new migrations packages in your main package and rebuild, "+
+			"so that migrate finds them:")
+	}
+	for _, path := range paths {
+		_, _ = fmt.Fprintf(c.app.Out, "  _ %q\n", path)
+	}
+}
+
+// goImportPath returns the Go import path of dir, built from the module path
+// in the nearest go.mod above it.
+func goImportPath(dir string) (string, bool) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", false
+	}
+	for root := abs; ; root = filepath.Dir(root) {
+		data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+		if err == nil {
+			module := modulePath(string(data))
+			rel, err := filepath.Rel(root, abs)
+			if module == "" || err != nil {
+				return "", false
+			}
+			if rel == "." {
+				return module, true
+			}
+			return module + "/" + filepath.ToSlash(rel), true
+		}
+		if filepath.Dir(root) == root {
+			return "", false
+		}
+	}
+}
+
+// modulePath returns the module path a go.mod file declares, or "".
+func modulePath(gomod string) string {
+	for line := range strings.Lines(gomod) {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "module" {
+			return strings.Trim(fields[1], "\"`")
+		}
+	}
+	return ""
 }
 
 // warnDeclinedRenames tells the user which removed and added pairs looked

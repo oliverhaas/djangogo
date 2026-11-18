@@ -3,6 +3,8 @@ package djangogo_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -145,6 +147,35 @@ func TestMakemigrationsSplitsMutuallyReferencingApps(t *testing.T) {
 		djangotest.AssertTableNotExists(t, db, "clubs_club")
 		djangotest.AssertTableNotExists(t, db, "members_member")
 	})
+}
+
+// TestMakemigrationsImportHint checks that makemigrations names the import
+// path of a new migrations package, which a separate migrate process needs,
+// and stays silent once the package is part of the binary or on a dry run.
+func TestMakemigrationsImportHint(t *testing.T) {
+	const hint = "Import the new migrations package in your main package and rebuild, so that migrate finds it:\n" +
+		"  _ \"example.com/site/migrations/people\"\n"
+	module := t.TempDir()
+	if err := os.WriteFile(filepath.Join(module, "go.mod"), []byte("module example.com/site\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := newCommand(t, nil, nil, djangotest.App("people", &Writer{}))
+	c.app.MigrationsDir = filepath.Join(module, "migrations")
+
+	assertNotIn(t, c.call("makemigrations", "--dry-run"), "Import the new migrations package")
+	output := c.call("makemigrations")
+	if !strings.HasSuffix(output, hint) {
+		t.Errorf("output does not end with the import hint:\n%s", output)
+	}
+
+	type Writer struct {
+		ID   int64
+		Name string `orm:"max_length=100"`
+		Bio  string `orm:"type=text;default=''"`
+	}
+	output = c.next(djangotest.App("people", &Writer{})).call("makemigrations")
+	assertIn(t, output, "Add field bio to writer")
+	assertNotIn(t, output, "Import the new migrations package")
 }
 
 // TestMakemigrationsAndMigrateModelChanges walks through the life of a model:
