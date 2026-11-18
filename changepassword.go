@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/oliverhaas/djangogo/auth"
+	"github.com/oliverhaas/djangogo/manage"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -42,7 +43,7 @@ func (*changepasswordCommand) Help() string {
 // Run asks for the new password of the user named in args.
 func (c *changepasswordCommand) Run(args []string) error {
 	if c.app.DB == nil {
-		return errNoAuthDatabase
+		return errNoDatabase
 	}
 	fs := flag.NewFlagSet("changepassword", flag.ContinueOnError)
 	fs.SetOutput(c.app.Out)
@@ -68,7 +69,7 @@ func (c *changepasswordCommand) Run(args []string) error {
 	ctx := context.Background()
 	u, err := orm.Query[auth.User](c.app.DB).Get(ctx, "username", username)
 	if errors.Is(err, orm.ErrDoesNotExist) {
-		return &authCommandError{msg: fmt.Sprintf("user '%s' does not exist", username)}
+		return &manage.CommandError{Msg: fmt.Sprintf("user '%s' does not exist", username)}
 	}
 	if err != nil {
 		return fmt.Errorf("djangogo: load user: %w", err)
@@ -97,7 +98,7 @@ func (c *changepasswordCommand) promptPassword(u *auth.User) (string, error) {
 			return "", err
 		}
 		if p == "" {
-			return "", &authCommandError{msg: "aborted"}
+			return "", &manage.CommandError{Msg: "aborted"}
 		}
 		return p, nil
 	}
@@ -125,6 +126,6 @@ func (c *changepasswordCommand) promptPassword(u *auth.User) (string, error) {
 		}
 		return p1, nil
 	}
-	return "", &authCommandError{msg: fmt.Sprintf(
+	return "", &manage.CommandError{Msg: fmt.Sprintf(
 		"Aborting password change for user '%s' after %d attempts", u.Username, changepasswordMaxTries)}
 }

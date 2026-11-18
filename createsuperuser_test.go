@@ -12,6 +12,7 @@ import (
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/conf"
 	_ "github.com/oliverhaas/djangogo/djangotest" // makes the fast MD5 hasher the preferred one
+	"github.com/oliverhaas/djangogo/manage"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/sessions"
 )
@@ -164,8 +165,8 @@ func TestCreatesuperuserRequiresDB(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	c := &createsuperuserCommand{app: app}
-	if err := c.Run([]string{"--username", "x", "--noinput"}); !errors.Is(err, errNoAuthDatabase) {
-		t.Errorf("Run = %v, want errNoAuthDatabase", err)
+	if err := c.Run([]string{"--username", "x", "--noinput"}); !errors.Is(err, errNoDatabase) {
+		t.Errorf("Run = %v, want errNoDatabase", err)
 	}
 }
 
@@ -237,7 +238,7 @@ func TestClearsessionsUnsupportedStore(t *testing.T) {
 	app := newSuperuserApp(t)
 	err := (&clearsessionsCommand{app: app, store: noClearStore{}}).Run(nil)
 	want := "Session engine 'djangogo.noClearStore' doesn't support clearing expired sessions."
-	var ce *authCommandError
+	var ce *manage.CommandError
 	if !errors.As(err, &ce) || ce.Error() != want {
 		t.Errorf("Run = %v, want the command error %q", err, want)
 	}

@@ -13,21 +13,9 @@ import (
 	"golang.org/x/term"
 
 	"github.com/oliverhaas/djangogo/auth"
+	"github.com/oliverhaas/djangogo/manage"
 	"github.com/oliverhaas/djangogo/orm"
 )
-
-// authCommandError is an error whose message the auth and session commands
-// report to the user as it is (Django's CommandError).
-type authCommandError struct {
-	msg string
-}
-
-// Error returns the message.
-func (e *authCommandError) Error() string { return e.msg }
-
-// errNoAuthDatabase is returned by the auth and session commands without a
-// configured database.
-var errNoAuthDatabase = errors.New("djangogo: no database configured (set Settings.Database.DSN)")
 
 // commandInput reads the answers of an interactive command: lines from the
 // application's input, and passwords without echo when the input is a
@@ -116,7 +104,7 @@ func (*createsuperuserCommand) Help() string { return "Used to create a superuse
 // Run creates the superuser from args, the prompts and the environment.
 func (c *createsuperuserCommand) Run(args []string) error {
 	if c.app.DB == nil {
-		return errNoAuthDatabase
+		return errNoDatabase
 	}
 	fs := flag.NewFlagSet("createsuperuser", flag.ContinueOnError)
 	fs.SetOutput(c.app.Out)
@@ -184,14 +172,14 @@ func (c *createsuperuserCommand) collectNoInput(ctx context.Context, username, e
 		username.value, username.set = os.LookupEnv("DJANGO_SUPERUSER_USERNAME")
 	}
 	if !username.set {
-		return data, &authCommandError{msg: "You must use --username with --noinput."}
+		return data, &manage.CommandError{Msg: "You must use --username with --noinput."}
 	}
 	msg, err := c.validateUsername(ctx, username.value)
 	if err != nil {
 		return data, err
 	}
 	if msg != "" {
-		return data, &authCommandError{msg: msg}
+		return data, &manage.CommandError{Msg: msg}
 	}
 	data.username = username.value
 
@@ -204,10 +192,10 @@ func (c *createsuperuserCommand) collectNoInput(ctx context.Context, username, e
 		if (email.set && email.value == "") || (envSet && envEmail == "") {
 			return data, nil
 		}
-		return data, &authCommandError{msg: "You must use --email with --noinput."}
+		return data, &manage.CommandError{Msg: "You must use --email with --noinput."}
 	}
 	if msgs := auth.EmailFieldErrors(value); len(msgs) > 0 {
-		return data, &authCommandError{msg: strings.Join(msgs, "; ")}
+		return data, &manage.CommandError{Msg: strings.Join(msgs, "; ")}
 	}
 	data.email = value
 	return data, nil
@@ -227,7 +215,7 @@ func (c *createsuperuserCommand) collectInteractive(ctx context.Context, usernam
 	}
 	if username.set {
 		if username.value == "" {
-			return data, &authCommandError{msg: "Username cannot be blank."}
+			return data, &manage.CommandError{Msg: "Username cannot be blank."}
 		}
 		msg, err := c.validateUsername(ctx, username.value)
 		if err != nil {
@@ -264,7 +252,7 @@ func (c *createsuperuserCommand) collectInteractive(ctx context.Context, usernam
 
 	if email.set {
 		if msgs := auth.EmailFieldErrors(email.value); len(msgs) > 0 {
-			return data, &authCommandError{msg: strings.Join(msgs, "; ")}
+			return data, &manage.CommandError{Msg: strings.Join(msgs, "; ")}
 		}
 	}
 	for !email.set {

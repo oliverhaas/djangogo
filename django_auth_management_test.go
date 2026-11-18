@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/oliverhaas/djangogo/auth"
+	"github.com/oliverhaas/djangogo/manage"
 )
 
 // mockInputs emulates Django's mock_inputs decorator. A key is a shortcut
@@ -122,7 +123,7 @@ func newCreatesuperuser(t *testing.T, inputs mockInputs) (*createsuperuserComman
 // want.
 func assertCommandError(t *testing.T, err error, want string) {
 	t.Helper()
-	var ce *authCommandError
+	var ce *manage.CommandError
 	if !errors.As(err, &ce) {
 		t.Fatalf("error = %v (%T), want a command error %q", err, err, want)
 	}

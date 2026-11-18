@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/oliverhaas/djangogo/manage"
 	"github.com/oliverhaas/djangogo/sessions"
 )
 
@@ -39,13 +40,13 @@ func (c *clearsessionsCommand) Run(args []string) error {
 	store := c.store
 	if store == nil {
 		if c.app.DB == nil {
-			return errNoAuthDatabase
+			return errNoDatabase
 		}
 		store = sessions.NewDBStore(c.app.DB)
 	}
 	clearer, ok := store.(sessions.ExpiredClearer)
 	if !ok {
-		return &authCommandError{msg: fmt.Sprintf("Session engine '%T' doesn't support clearing expired sessions.", store)}
+		return &manage.CommandError{Msg: fmt.Sprintf("Session engine '%T' doesn't support clearing expired sessions.", store)}
 	}
 	return clearer.ClearExpired(context.Background())
 }
