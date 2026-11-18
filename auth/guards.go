@@ -2,130 +2,222 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"net/url"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
 
-// LoginRequired returns middleware that redirects anonymous requests to loginURL
-// with a 302 and a ?next=<request path> query parameter, and otherwise calls the
-// wrapped handler. A user is considered authenticated when CurrentUser finds one
-// in the request context (so auth.Middleware must run first).
-func LoginRequired(loginURL string) func(http.Handler) http.Handler {
+// guard is the configuration of an access guard (Django's AccessMixin).
+type guard struct {
+	// loginURL is where an anonymous user is sent. Empty means
+	// Config.LoginURL.
+	loginURL string
+	// redirectField is the query parameter that carries the page to return
+	// to. Empty means that the redirect has no such parameter.
+	redirectField string
+	// raise answers 403 to anonymous users too.
+	raise bool
+	// forbidden writes the 403 response.
+	forbidden http.Handler
+	// message tells the forbidden handler why the request was denied.
+	message string
+	// db is the database of the permission check. Nil means the database
+	// of Middleware.
+	db *orm.DB
+}
+
+// GuardOption changes how a guard answers a request it does not let through.
+type GuardOption func(*guard)
+
+// WithLoginURL sends anonymous users to loginURL (Django's login_url). The
+// default is Config.LoginURL.
+func WithLoginURL(loginURL string) GuardOption {
+	return func(g *guard) { g.loginURL = loginURL }
+}
+
+// WithRedirectFieldName names the query parameter that tells the login page
+// where to return to (Django's redirect_field_name). The default is "next";
+// with an empty name the login URL gets no such parameter.
+func WithRedirectFieldName(name string) GuardOption {
+	return func(g *guard) { g.redirectField = name }
+}
+
+// WithRaiseException answers 403 to anonymous users as well (Django's
+// raise_exception). The default sends them to the login page.
+func WithRaiseException() GuardOption {
+	return func(g *guard) { g.raise = true }
+}
+
+// WithForbiddenHandler makes h write the response for a user that is denied.
+// h is responsible for the status code. The default is a bare 403 page.
+func WithForbiddenHandler(h http.Handler) GuardOption {
+	return func(g *guard) { g.forbidden = h }
+}
+
+// WithPermissionDeniedMessage attaches msg to a request the guard answers with
+// 403 (Django's permission_denied_message). The default 403 page does not
+// show it; a handler of WithForbiddenHandler reads it with
+// PermissionDeniedMessage.
+func WithPermissionDeniedMessage(msg string) GuardOption {
+	return func(g *guard) { g.message = msg }
+}
+
+// permissionDeniedKey is the context key of the message of a denied request.
+type permissionDeniedKey struct{}
+
+// PermissionDeniedMessage returns the message of the guard that denied the
+// request, or "" when the guard has none. It is meant for the handler that
+// writes the 403 page.
+func PermissionDeniedMessage(ctx context.Context) string {
+	msg, _ := ctx.Value(permissionDeniedKey{}).(string)
+	return msg
+}
+
+// WithGuardDB makes a permission guard check permissions in db. Without it the
+// guard uses the database of Middleware.
+func WithGuardDB(db *orm.DB) GuardOption {
+	return func(g *guard) { g.db = db }
+}
+
+// newGuard applies opts to the defaults.
+func newGuard(opts []GuardOption) *guard {
+	g := &guard{redirectField: DefaultRedirectFieldName, forbidden: http.HandlerFunc(forbidden)}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
+}
+
+// forbidden writes the 403 page Django shows without a 403.html template.
+func forbidden(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte("<h1>403 Forbidden</h1>"))
+}
+
+// deny answers a request that did not pass (Django's handle_no_permission): a
+// logged-in user gets 403, because a second login would not change the
+// outcome; an anonymous user is sent to the login page.
+func (g *guard) deny(w http.ResponseWriter, r *http.Request, u *User) {
+	if g.raise || u.IsAuthenticated() {
+		if g.message != "" {
+			r = r.WithContext(context.WithValue(r.Context(), permissionDeniedKey{}, g.message))
+		}
+		g.forbidden.ServeHTTP(w, r)
+		return
+	}
+	loginURL := g.loginURL
+	if loginURL == "" {
+		loginURL = configuredLoginURL()
+	}
+	redirect(w, RedirectToLoginURL(nextFor(r, loginURL), loginURL, g.redirectField))
+}
+
+// nextFor returns the address of the request for the login page to return to:
+// the path and query when the login page is on the same scheme and host, and
+// the absolute URL otherwise.
+func nextFor(r *http.Request, loginURL string) string {
+	scheme := "http"
+	if requestIsSecure(r) {
+		scheme = "https"
+	}
+	full := r.URL.RequestURI()
+	loginScheme, loginHost, err := splitURL(loginURL)
+	if err == nil && (loginScheme == "" || loginScheme == scheme) && (loginHost == "" || loginHost == r.Host) {
+		return full
+	}
+	return scheme + "://" + r.Host + full
+}
+
+// wrap returns middleware that lets a request through when test passes for
+// its user. An error of test is a 500: the guard cannot tell whether the user
+// may pass.
+func (g *guard) wrap(test func(r *http.Request, u *User) (bool, error)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if _, ok := CurrentUser(r.Context()); !ok {
-				redirectToLogin(w, r, loginURL)
-				return
+			u, err := GetUser(r)
+			if err == nil {
+				var ok bool
+				if ok, err = test(r, u); err == nil && ok {
+					next.ServeHTTP(w, r)
+					return
+				}
 			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// redirectToLogin issues a 302 to loginURL carrying the current request path in a
-// next query parameter so the login flow can return the user afterwards.
-func redirectToLogin(w http.ResponseWriter, r *http.Request, loginURL string) {
-	target := loginURL + "?next=" + url.QueryEscape(r.URL.Path)
-	http.Redirect(w, r, target, http.StatusFound)
-}
-
-// HasPerm reports whether u holds the permission identified by codename.
-// Superusers always pass. Otherwise the permission is granted when u has it
-// directly (via UserPermission) or through any of u's groups (via UserGroup then
-// GroupPermission).
-func HasPerm(ctx context.Context, db *orm.DB, u *User, codename string) (bool, error) {
-	// An inactive user holds no permissions, even a superuser. This matches
-	// Django, where ModelBackend.has_perm is "user_obj.is_active and ..." and
-	// PermissionsMixin.has_perm only short-circuits when is_active and is_superuser.
-	if !u.IsActive {
-		return false, nil
-	}
-	if u.IsSuperuser {
-		return true, nil
-	}
-
-	permIDs, err := permissionIDs(ctx, db, codename)
-	if err != nil {
-		return false, err
-	}
-	if len(permIDs) == 0 {
-		return false, nil
-	}
-
-	// Direct user permissions.
-	direct, err := orm.Query[UserPermission](db).
-		Filter("user_id", u.ID, "permission_id__in", permIDs).
-		Exists(ctx)
-	if err != nil {
-		return false, err
-	}
-	if direct {
-		return true, nil
-	}
-
-	// Group permissions: collect the user's groups, then look for a grant.
-	groupIDs, err := userGroupIDs(ctx, db, u.ID)
-	if err != nil {
-		return false, err
-	}
-	if len(groupIDs) == 0 {
-		return false, nil
-	}
-	return orm.Query[GroupPermission](db).
-		Filter("group_id__in", groupIDs, "permission_id__in", permIDs).
-		Exists(ctx)
-}
-
-// permissionIDs returns the ids of every Permission whose codename matches.
-func permissionIDs(ctx context.Context, db *orm.DB, codename string) ([]int64, error) {
-	perms, err := orm.Query[Permission](db).Filter("codename", codename).All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]int64, len(perms))
-	for i := range perms {
-		ids[i] = perms[i].ID
-	}
-	return ids, nil
-}
-
-// userGroupIDs returns the ids of every Group the user belongs to.
-func userGroupIDs(ctx context.Context, db *orm.DB, userID int64) ([]int64, error) {
-	links, err := orm.Query[UserGroup](db).Filter("user_id", userID).All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]int64, len(links))
-	for i := range links {
-		ids[i] = links[i].Group.PK()
-	}
-	return ids, nil
-}
-
-// PermissionRequired returns middleware that guards the wrapped handler by
-// codename: anonymous requests are redirected to loginURL, an authenticated user
-// lacking the permission gets a 403, and a user holding it proceeds.
-func PermissionRequired(db *orm.DB, codename, loginURL string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			u, ok := CurrentUser(ctx)
-			if !ok {
-				redirectToLogin(w, r, loginURL)
-				return
-			}
-			allowed, err := HasPerm(ctx, db, u, codename)
 			if err != nil {
-				http.Error(w, "permission check failed", http.StatusInternalServerError)
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 				return
 			}
-			if !allowed {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
-			next.ServeHTTP(w, r)
+			g.deny(w, r, u)
 		})
 	}
+}
+
+// LoginRequired returns middleware that lets logged-in users through and
+// sends everyone else to the login page, with the address of the request in
+// the next parameter (Django's login_required and LoginRequiredMixin). An
+// empty loginURL means Config.LoginURL. Middleware must run first.
+func LoginRequired(loginURL string, opts ...GuardOption) func(http.Handler) http.Handler {
+	g := newGuard(append([]GuardOption{WithLoginURL(loginURL)}, opts...))
+	return g.wrap(func(_ *http.Request, u *User) (bool, error) {
+		return u.IsAuthenticated(), nil
+	})
+}
+
+// UserPassesTest returns middleware that lets a request through when test
+// returns true for its user (Django's user_passes_test and
+// UserPassesTestMixin). For an anonymous request test gets the zero User. A
+// logged-in user that fails gets 403; an anonymous one is sent to the login
+// page, or gets 403 too under WithRaiseException.
+//
+// Django's decorator sends a logged-in user that fails to the login page as
+// well. The guards follow the mixins, which answer 403: logging in again does
+// not help that user.
+func UserPassesTest(test func(u *User) bool, opts ...GuardOption) func(http.Handler) http.Handler {
+	return newGuard(opts).wrap(func(_ *http.Request, u *User) (bool, error) {
+		return test(u), nil
+	})
+}
+
+// StaffRequired returns middleware that lets active staff users through
+// (Django's staff_member_required).
+func StaffRequired(opts ...GuardOption) func(http.Handler) http.Handler {
+	return UserPassesTest(func(u *User) bool { return u.IsActive && u.IsStaff }, opts...)
+}
+
+// PermissionRequired returns middleware that lets a user through that holds
+// the permission perm, written "<app_label>.<codename>" (Django's
+// permission_required and PermissionRequiredMixin). It answers like
+// UserPassesTest. The permission is checked in the database of Middleware, or
+// in the one of WithGuardDB.
+func PermissionRequired(perm string, opts ...GuardOption) func(http.Handler) http.Handler {
+	return PermissionsRequired([]string{perm}, opts...)
+}
+
+// PermissionsRequired is PermissionRequired for a user that has to hold every
+// permission of perms.
+func PermissionsRequired(perms []string, opts ...GuardOption) func(http.Handler) http.Handler {
+	g := newGuard(opts)
+	return g.wrap(func(r *http.Request, u *User) (bool, error) {
+		db := g.db
+		if db == nil {
+			db = requestDB(r.Context())
+		}
+		if db == nil {
+			return false, errNoDatabase
+		}
+		return HasPerms(r.Context(), db, u, perms...)
+	})
+}
+
+// errNoDatabase reports a permission guard that has no database to ask:
+// Middleware did not run and WithGuardDB was not given.
+var errNoDatabase = errors.New("auth: permission guard has no database; run Middleware first or pass WithGuardDB")
+
+// requestDB returns the database Middleware was built with, or nil.
+func requestDB(ctx context.Context) *orm.DB {
+	if st := stateFrom(ctx); st != nil {
+		return st.db
+	}
+	return nil
 }

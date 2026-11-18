@@ -7,17 +7,8 @@ import (
 	"testing"
 
 	"github.com/oliverhaas/djangogo/auth"
-	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/sessions"
 )
-
-// okHandler writes 200 and records whether it ran.
-func okHandler(ran *bool) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		*ran = true
-		w.WriteHeader(http.StatusOK)
-	})
-}
 
 func TestMiddlewareExposesCurrentUser(t *testing.T) {
 	db := newTestDB(t)
@@ -34,7 +25,7 @@ func TestMiddlewareExposesCurrentUser(t *testing.T) {
 
 	// Authenticated request: a session carrying the user id is in context.
 	sess := &sessions.Session{}
-	sess.Set("_auth_user_id", u.ID)
+	auth.Login(sess, u)
 	ctx := sessions.NewContext(context.Background(), sess)
 	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
 	mw(handler).ServeHTTP(httptest.NewRecorder(), req)
@@ -64,8 +55,8 @@ func TestLoginRequired(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("anonymous status = %d, want %d", rec.Code, http.StatusFound)
 	}
-	if loc := rec.Header().Get("Location"); loc != "/login/?next=%2Fsecret%2F" {
-		t.Fatalf("Location = %q, want /login/?next=%%2Fsecret%%2F", loc)
+	if loc := rec.Header().Get("Location"); loc != "/login/?next=/secret/" {
+		t.Fatalf("Location = %q, want /login/?next=/secret/", loc)
 	}
 	if ran {
 		t.Fatal("wrapped handler ran for an anonymous request")
@@ -85,123 +76,15 @@ func TestLoginRequired(t *testing.T) {
 	}
 }
 
-// grantUserPermission inserts a Permission with the codename and links it directly
-// to the user, returning the permission.
-func grantUserPermission(t *testing.T, db *orm.DB, u *auth.User, codename string) {
-	t.Helper()
-	ctx := context.Background()
-	p := &auth.Permission{Codename: codename, Name: codename, ContentType: "thing"}
-	if err := orm.Query[auth.Permission](db).Create(ctx, p); err != nil {
-		t.Fatalf("Create(permission): %v", err)
-	}
-	link := &auth.UserPermission{}
-	link.User.SetPK(u.ID)
-	link.Permission.SetPK(p.ID)
-	if err := orm.Query[auth.UserPermission](db).Create(ctx, link); err != nil {
-		t.Fatalf("Create(user permission): %v", err)
-	}
-}
-
-// grantGroupPermission creates a group, adds the user to it, creates a permission
-// with the codename, and grants it to the group.
-func grantGroupPermission(t *testing.T, db *orm.DB, u *auth.User, codename string) {
-	t.Helper()
-	ctx := context.Background()
-	g := &auth.Group{Name: codename + "-group"}
-	if err := orm.Query[auth.Group](db).Create(ctx, g); err != nil {
-		t.Fatalf("Create(group): %v", err)
-	}
-	ug := &auth.UserGroup{}
-	ug.User.SetPK(u.ID)
-	ug.Group.SetPK(g.ID)
-	if err := orm.Query[auth.UserGroup](db).Create(ctx, ug); err != nil {
-		t.Fatalf("Create(user group): %v", err)
-	}
-	p := &auth.Permission{Codename: codename, Name: codename, ContentType: "thing"}
-	if err := orm.Query[auth.Permission](db).Create(ctx, p); err != nil {
-		t.Fatalf("Create(permission): %v", err)
-	}
-	gp := &auth.GroupPermission{}
-	gp.Group.SetPK(g.ID)
-	gp.Permission.SetPK(p.ID)
-	if err := orm.Query[auth.GroupPermission](db).Create(ctx, gp); err != nil {
-		t.Fatalf("Create(group permission): %v", err)
-	}
-}
-
-func TestHasPerm(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	// Superuser: always granted, even with no permission rows.
-	super := &auth.User{Username: "root", IsActive: true, IsSuperuser: true}
-	if err := orm.Query[auth.User](db).Create(ctx, super); err != nil {
-		t.Fatalf("Create(super): %v", err)
-	}
-	if ok, err := auth.HasPerm(ctx, db, super, "anything"); err != nil || !ok {
-		t.Fatalf("HasPerm(super) = %v, %v; want true, nil", ok, err)
-	}
-
-	// Direct user permission.
-	direct := createUser(t, db, "directu", "pw")
-	grantUserPermission(t, db, direct, "edit_thing")
-	if ok, err := auth.HasPerm(ctx, db, direct, "edit_thing"); err != nil || !ok {
-		t.Fatalf("HasPerm(direct, edit_thing) = %v, %v; want true, nil", ok, err)
-	}
-
-	// Group-based permission.
-	grouped := createUser(t, db, "groupu", "pw")
-	grantGroupPermission(t, db, grouped, "view_thing")
-	if ok, err := auth.HasPerm(ctx, db, grouped, "view_thing"); err != nil || !ok {
-		t.Fatalf("HasPerm(grouped, view_thing) = %v, %v; want true, nil", ok, err)
-	}
-
-	// Missing permission: a user with neither direct nor group grant.
-	plain := createUser(t, db, "plainu", "pw")
-	if ok, err := auth.HasPerm(ctx, db, plain, "delete_thing"); err != nil || ok {
-		t.Fatalf("HasPerm(plain, delete_thing) = %v, %v; want false, nil", ok, err)
-	}
-	// A user who has a different permission still lacks this one.
-	if ok, err := auth.HasPerm(ctx, db, direct, "delete_thing"); err != nil || ok {
-		t.Fatalf("HasPerm(direct, delete_thing) = %v, %v; want false, nil", ok, err)
-	}
-}
-
-func TestHasPermDeniesInactiveUser(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	// An inactive user is denied every permission, even one granted directly:
-	// Django's ModelBackend.has_perm returns user_obj.is_active and ... .
-	inactive := &auth.User{Username: "frozen", IsActive: false}
-	if err := orm.Query[auth.User](db).Create(ctx, inactive); err != nil {
-		t.Fatalf("Create(inactive): %v", err)
-	}
-	grantUserPermission(t, db, inactive, "edit_thing")
-	if ok, err := auth.HasPerm(ctx, db, inactive, "edit_thing"); err != nil || ok {
-		t.Fatalf("HasPerm(inactive, edit_thing) = %v, %v; want false, nil", ok, err)
-	}
-
-	// Even an inactive superuser is denied: PermissionsMixin.has_perm only
-	// short-circuits when self.is_active and self.is_superuser.
-	frozenSuper := &auth.User{Username: "frozenroot", IsActive: false, IsSuperuser: true}
-	if err := orm.Query[auth.User](db).Create(ctx, frozenSuper); err != nil {
-		t.Fatalf("Create(frozenSuper): %v", err)
-	}
-	if ok, err := auth.HasPerm(ctx, db, frozenSuper, "anything"); err != nil || ok {
-		t.Fatalf("HasPerm(frozenSuper) = %v, %v; want false, nil", ok, err)
-	}
-}
-
 func TestPermissionRequired(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 
 	granted := createUser(t, db, "permu", "pw")
-	grantUserPermission(t, db, granted, "do_it")
+	must(t, granted.AddPermissions(ctx, db, groupPerm(t, db, "Can do it", "do_it")))
 	denied := createUser(t, db, "noperm", "pw")
 
-	guard := auth.PermissionRequired(db, "do_it", "/login/")
+	guard := auth.PermissionRequired("auth.do_it", auth.WithLoginURL("/login/"), auth.WithGuardDB(db))
 
 	// Granted: 200.
 	var ran bool

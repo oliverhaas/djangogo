@@ -2,439 +2,353 @@ package csrf_test
 
 import (
 	"context"
-	"crypto/tls"
+	"fmt"
+	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/oliverhaas/djangogo/csrf"
-	"github.com/oliverhaas/djangogo/sessions"
+	"github.com/oliverhaas/djangogo/templates"
 )
 
-// chain builds sessions.Middleware(store, "sessionid")(csrf.Middleware(h)).
-func chain(store *sessions.SignedCookieStore, h http.Handler) http.Handler {
-	return sessions.Middleware(store, "sessionid")(csrf.Middleware(h))
+// serveDefault sends req through csrf.Middleware to view.
+func serveDefault(req *http.Request, view http.Handler) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	csrf.Middleware(view).ServeHTTP(rec, req)
+	return rec
 }
 
-// TestGETSeedsToken verifies that a GET request causes a CSRF token to be
-// bootstrapped, visible to the handler via csrf.Token, and persisted in the
-// session cookie.
-func TestGETSeedsToken(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
+func TestMiddlewareUsesDjangoCookieDefaults(t *testing.T) {
+	rec := serveDefault(httptest.NewRequest(http.MethodGet, "/", http.NoBody), tokenView)
 
-	var gotToken string
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotToken = csrf.Token(r.Context())
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	h.ServeHTTP(rec, req)
-
-	if gotToken == "" {
-		t.Fatal("Token(ctx) returned empty string on GET")
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("got %d cookies, want 1", len(cookies))
 	}
-
-	// A Set-Cookie header must be present carrying the session.
-	res := rec.Result()
-	defer func() { _ = res.Body.Close() }()
-	var sessionCookie *http.Cookie
-	for _, c := range res.Cookies() {
-		if c.Name == "sessionid" {
-			sessionCookie = c
-		}
+	c := cookies[0]
+	if c.Name != "csrftoken" || c.Path != "/" || c.SameSite != http.SameSiteLaxMode {
+		t.Errorf("cookie = %s, want csrftoken with Path=/ and SameSite=Lax", c)
 	}
-	if sessionCookie == nil {
-		t.Fatal("GET did not set a session cookie")
+	if c.MaxAge != 31449600 || c.Expires.IsZero() {
+		t.Errorf("Max-Age = %d, Expires = %v, want 52 weeks", c.MaxAge, c.Expires)
+	}
+	if c.Secure || c.HttpOnly || c.Domain != "" {
+		t.Errorf("cookie = %s, want no Secure, HttpOnly or Domain", c)
+	}
+	if got := rec.Header().Get("Vary"); got != "Cookie" {
+		t.Errorf("Vary = %q, want Cookie", got)
 	}
 }
 
-// TestPOSTNoToken verifies that a POST with no token is rejected with 403 and
-// the downstream handler is not reached.
-func TestPOSTNoToken(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
-
-	reached := false
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	h.ServeHTTP(rec, req)
+func TestDefaultFailureResponseHidesReason(t *testing.T) {
+	rec := serveDefault(httptest.NewRequest(http.MethodPost, "/", http.NoBody), postFormView)
 
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d", rec.Code)
+		t.Errorf("status = %d, want 403", rec.Code)
 	}
-	if reached {
-		t.Fatal("handler was reached despite missing CSRF token")
+	body := rec.Body.String()
+	if !strings.Contains(body, "CSRF verification failed. Request aborted.") {
+		t.Errorf("body = %q, want Django's headline", body)
 	}
-}
-
-// TestPOSTWrongToken verifies that a POST with an incorrect token is rejected
-// with 403 and the downstream handler is not reached.
-func TestPOSTWrongToken(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
-
-	// Seed a session with a known token.
-	sess := store.New()
-	sess.Set(csrf.SessionKey, "correct-token")
-	cookieVal, err := store.Encode(context.Background(), sess)
-	if err != nil {
-		t.Fatalf("Encode: %v", err)
-	}
-
-	reached := false
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec := httptest.NewRecorder()
-	body := url.Values{csrf.FormField: {"wrong-token"}}.Encode()
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: "sessionid", Value: cookieVal})
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d", rec.Code)
-	}
-	if reached {
-		t.Fatal("handler was reached despite wrong CSRF token")
+	if strings.Contains(body, csrf.ReasonNoCSRFCookie) {
+		t.Errorf("body = %q, want the reason left out", body)
 	}
 }
 
-// TestPOSTCorrectToken verifies that a POST carrying the correct token in the
-// form field is accepted (200) and the handler is reached.
-func TestPOSTCorrectToken(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
-
-	// Step 1: GET to obtain a session cookie and the seeded token.
-	var seedToken string
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seedToken = csrf.Token(r.Context())
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec1 := httptest.NewRecorder()
-	req1 := httptest.NewRequest(http.MethodGet, "/", nil)
-	h.ServeHTTP(rec1, req1)
-
-	if seedToken == "" {
-		t.Fatal("GET did not seed a token")
-	}
-	res1 := rec1.Result()
-	defer func() { _ = res1.Body.Close() }()
-	var sessionCookie *http.Cookie
-	for _, c := range res1.Cookies() {
-		if c.Name == "sessionid" {
-			sessionCookie = c
-		}
-	}
-	if sessionCookie == nil {
-		t.Fatal("GET did not set a session cookie")
-	}
-
-	// Step 2: POST with the correct token and the session cookie.
-	reached := false
-	h2 := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec2 := httptest.NewRecorder()
-	body := url.Values{csrf.FormField: {seedToken}}.Encode()
-	req2 := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req2.AddCookie(sessionCookie)
-	h2.ServeHTTP(rec2, req2)
-
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec2.Code)
-	}
-	if !reached {
-		t.Fatal("handler was not reached despite correct CSRF token")
-	}
-}
-
-// TestHeaderTokenPath verifies that the X-CSRFToken header is accepted as an
-// alternative to the form field.
-func TestHeaderTokenPath(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
-
-	// GET to seed a token and obtain the session cookie.
-	var seedToken string
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seedToken = csrf.Token(r.Context())
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec1 := httptest.NewRecorder()
-	req1 := httptest.NewRequest(http.MethodGet, "/", nil)
-	h.ServeHTTP(rec1, req1)
-
-	res1 := rec1.Result()
-	defer func() { _ = res1.Body.Close() }()
-	var sessionCookie *http.Cookie
-	for _, c := range res1.Cookies() {
-		if c.Name == "sessionid" {
-			sessionCookie = c
-		}
-	}
-	if sessionCookie == nil || seedToken == "" {
-		t.Fatal("GET setup failed")
-	}
-
-	// POST with token in header, no form body.
-	reached := false
-	h2 := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodPost, "/", nil)
-	req2.Header.Set(csrf.HeaderName, seedToken)
-	req2.AddCookie(sessionCookie)
-	h2.ServeHTTP(rec2, req2)
-
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("expected 200 via header path, got %d", rec2.Code)
-	}
-	if !reached {
-		t.Fatal("handler not reached via header token path")
-	}
-}
-
-// TestSafeMethodsBypass verifies that HEAD and OPTIONS are never challenged.
-func TestSafeMethodsBypass(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
-
-	for _, method := range []string{http.MethodHead, http.MethodOptions} {
-		reached := false
-		h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			reached = true
-			w.WriteHeader(http.StatusOK)
-		}))
-
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(method, "/", nil)
-		h.ServeHTTP(rec, req)
-
-		if rec.Code == http.StatusForbidden {
-			t.Errorf("method %s got 403; safe methods must bypass CSRF", method)
-		}
-		if !reached {
-			t.Errorf("method %s: handler not reached", method)
+func TestSafeMethodsPassWithoutSecret(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace} {
+		rec := serveDefault(httptest.NewRequest(method, "/", http.NoBody), postFormView)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, want 200", method, rec.Code)
 		}
 	}
 }
 
-// TestCookieJarFlow runs a full GET-then-POST cycle via an httptest.Server and
-// a cookie jar to exercise realistic cookie handling.
-func TestCookieJarFlow(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("jar-secret"))
-
-	var capturedToken string
-	handler := chain(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			capturedToken = csrf.Token(r.Context())
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		t.Fatalf("cookiejar.New: %v", err)
-	}
-	client := &http.Client{Jar: jar}
-
-	// GET: seeds the token.
-	resp, err := client.Get(srv.URL + "/")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	_ = resp.Body.Close()
-
-	if capturedToken == "" {
-		t.Fatal("GET did not capture a token")
-	}
-
-	// POST: submit the correct token via the form field.
-	body := url.Values{csrf.FormField: {capturedToken}}.Encode()
-	resp2, err := client.Post(srv.URL+"/", "application/x-www-form-urlencoded", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST: %v", err)
-	}
-	_ = resp2.Body.Close()
-
-	if resp2.StatusCode != http.StatusOK {
-		t.Fatalf("POST with correct token: expected 200, got %d", resp2.StatusCode)
-	}
-}
-
-// seedTokenAndCookie does a GET through the chain to obtain a seeded CSRF token
-// and the session cookie carrying it, for use by the origin/referer tests.
-func seedTokenAndCookie(t *testing.T, store *sessions.SignedCookieStore) (string, *http.Cookie) {
-	t.Helper()
-	var token string
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token = csrf.Token(r.Context())
-		w.WriteHeader(http.StatusOK)
-	}))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	res := rec.Result()
-	defer func() { _ = res.Body.Close() }()
-	var cookie *http.Cookie
-	for _, c := range res.Cookies() {
-		if c.Name == "sessionid" {
-			cookie = c
-		}
-	}
-	if token == "" || cookie == nil {
-		t.Fatal("GET did not seed a token and session cookie")
-	}
-	return token, cookie
-}
-
-// TestPOSTCrossOriginRejected verifies that a POST carrying a valid token but a
-// cross-site Origin header is rejected, mirroring Django's origin check.
-func TestPOSTCrossOriginRejected(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
-	token, cookie := seedTokenAndCookie(t, store)
-
-	reached := false
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	for _, origin := range []string{"http://evil.example.com", "https://example.com", "null"} {
-		rec := httptest.NewRecorder()
-		body := url.Values{csrf.FormField: {token}}.Encode()
-		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("Origin", origin)
-		req.AddCookie(cookie)
-		h.ServeHTTP(rec, req)
-
+func TestUnsafeMethodsAreChecked(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, "PURGE"} {
+		rec := serveDefault(httptest.NewRequest(method, "/", http.NoBody), postFormView)
 		if rec.Code != http.StatusForbidden {
-			t.Errorf("Origin %q: expected 403, got %d", origin, rec.Code)
+			t.Errorf("%s: status = %d, want 403", method, rec.Code)
 		}
 	}
-	if reached {
-		t.Fatal("handler reached despite a cross-origin POST")
-	}
 }
 
-// TestPOSTSameOriginAccepted verifies that a POST whose Origin matches the
-// request scheme and host is accepted (httptest defaults the host to example.com).
-func TestPOSTSameOriginAccepted(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
-	token, cookie := seedTokenAndCookie(t, store)
-
-	reached := false
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec := httptest.NewRecorder()
-	body := url.Values{csrf.FormField: {token}}.Encode()
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Origin", "http://example.com")
-	req.AddCookie(cookie)
-	h.ServeHTTP(rec, req)
+func TestWithoutEnforcementSkipsChecksButKeepsTokens(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", http.NoBody)
+	req.Header.Set("Origin", "https://www.evil.org")
+	req = req.WithContext(csrf.WithoutEnforcement(req.Context()))
+	rec := serveDefault(req, tokenView)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("same-origin POST: expected 200, got %d", rec.Code)
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if !reached {
-		t.Fatal("handler not reached despite a same-origin POST with a valid token")
-	}
-}
-
-// TestPOSTSecureRefererChecked verifies the strict-referer check applied to
-// HTTPS requests that omit an Origin header: a same-host https Referer passes,
-// while a missing or cross-host Referer is rejected.
-func TestPOSTSecureRefererChecked(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
-	token, cookie := seedTokenAndCookie(t, store)
-
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	cases := []struct {
-		name    string
-		referer string
-		want    int
-	}{
-		{"same host https", "https://example.com/form", http.StatusOK},
-		{"cross host https", "https://evil.example.com/form", http.StatusForbidden},
-		{"insecure referer", "http://example.com/form", http.StatusForbidden},
-		{"missing referer", "", http.StatusForbidden},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			body := url.Values{csrf.FormField: {token}}.Encode()
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req.TLS = &tls.ConnectionState{} // mark the request as arriving over HTTPS
-			if c.referer != "" {
-				req.Header.Set("Referer", c.referer)
-			}
-			req.AddCookie(cookie)
-			h.ServeHTTP(rec, req)
-
-			if rec.Code != c.want {
-				t.Fatalf("referer %q: status %d, want %d", c.referer, rec.Code, c.want)
-			}
-		})
+	if !tokenPattern.MatchString(rec.Body.String()) || len(rec.Result().Cookies()) != 1 {
+		t.Errorf("body = %q with %d cookies, want a token and its cookie", rec.Body.String(), len(rec.Result().Cookies()))
 	}
 }
 
-// TestWithoutEnforcementSkipsChecks verifies that a request whose context was
-// marked with csrf.WithoutEnforcement passes an unsafe method without a token
-// (the test client's default), still sees a seeded token, and that an unmarked
-// request is still rejected.
-func TestWithoutEnforcementSkipsChecks(t *testing.T) {
-	store := sessions.NewSignedCookieStore([]byte("test-secret"))
-
-	var gotToken string
-	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotToken = csrf.Token(r.Context())
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("a=b"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	h.ServeHTTP(rec, req.WithContext(csrf.WithoutEnforcement(req.Context())))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("marked POST status = %d, want 200", rec.Code)
-	}
-	if gotToken == "" {
-		t.Error("marked POST did not see a seeded token")
-	}
-
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/", strings.NewReader("a=b"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	h.ServeHTTP(rec, req)
+func TestExemptWithoutResolveIsChecked(t *testing.T) {
+	rec := serveDefault(httptest.NewRequest(http.MethodPost, "/", http.NoBody), csrf.Exempt(postFormView))
 	if rec.Code != http.StatusForbidden {
-		t.Errorf("unmarked POST status = %d, want 403", rec.Code)
+		t.Errorf("status = %d, want 403: the middleware cannot see the mark without Options.Resolve", rec.Code)
+	}
+}
+
+func TestExemptFollowsTheResolvedHandler(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.Handle("/hook/", csrf.Exempt(postFormView))
+	mux.Handle("/form/", postFormView)
+	handler := csrf.MiddlewareWithOptions(csrf.Options{
+		Resolve: func(r *http.Request) http.Handler {
+			h, _ := mux.Handler(r)
+			return h
+		},
+	})(mux)
+
+	for path, want := range map[string]int{"/hook/": http.StatusOK, "/form/": http.StatusForbidden} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, http.NoBody))
+		if rec.Code != want {
+			t.Errorf("POST %s: status = %d, want %d", path, rec.Code, want)
+		}
+	}
+}
+
+func TestIsExempt(t *testing.T) {
+	if csrf.IsExempt(postFormView) {
+		t.Error("IsExempt(plain handler) = true")
+	}
+	if !csrf.IsExempt(csrf.Exempt(postFormView)) {
+		t.Error("IsExempt(Exempt(handler)) = false")
+	}
+	if csrf.IsExempt(nil) {
+		t.Error("IsExempt(nil) = true")
+	}
+	// A wrapper around the mark hides it, so the request is checked.
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { csrf.Exempt(postFormView).ServeHTTP(w, r) })
+	if csrf.IsExempt(wrapped) {
+		t.Error("IsExempt(wrapper around Exempt) = true")
+	}
+}
+
+func TestIsSecureOptionDecidesTheScheme(t *testing.T) {
+	behindProxy := func(r *http.Request) bool { return r.Header.Get("X-Forwarded-Proto") == "https" }
+	post := func(opts csrf.Options) int {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(csrf.FormField+"="+maskedTestSecret2))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Cookie", "csrftoken="+testSecret)
+		req.Header.Set("Origin", "https://example.com")
+		req.Header.Set("X-Forwarded-Proto", "https")
+		rec := httptest.NewRecorder()
+		csrf.MiddlewareWithOptions(opts)(postFormView).ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if got := post(csrf.Options{}); got != http.StatusForbidden {
+		t.Errorf("without IsSecure: status = %d, want 403 for an https origin on a plain connection", got)
+	}
+	if got := post(csrf.Options{IsSecure: behindProxy}); got != http.StatusOK {
+		t.Errorf("with IsSecure: status = %d, want 200", got)
+	}
+}
+
+func TestTrustedOriginWithoutSchemeIsIgnored(t *testing.T) {
+	h := cookieMode(t)
+	h.opts.TrustedOrigins = []string{"www.evil.org", "*.evil.org"}
+	q := postWithToken()
+	q.origin = str("https://www.evil.org")
+	assertForbiddenReason(t, h.do(q, postFormView),
+		"Origin checking failed - https://www.evil.org does not match any trusted origins.")
+}
+
+func TestWildcardDoesNotTrustLookalikeDomains(t *testing.T) {
+	h := cookieMode(t)
+	h.opts.TrustedOrigins = []string{"https://*.example.com"}
+	for _, origin := range []string{
+		"https://evilexample.com",
+		"https://example.com.evil.org",
+		"https://foo.example.com.evil.org",
+		"https://foo.example.com@evil.org",
+	} {
+		q := securePost()
+		q.host, q.origin = "www.example.com", &origin
+		if res := h.do(q, postFormView); res.called {
+			t.Errorf("origin %q was accepted", origin)
+		}
+	}
+}
+
+func TestRefererWithUserInfoIsRejected(t *testing.T) {
+	h := cookieMode(t)
+	q := securePost()
+	q.host, q.referer = "www.example.com", str("https://www.example.com@www.evil.org/")
+	if res := h.do(q, postFormView); res.called {
+		t.Error("a referer with user information was accepted")
+	}
+	q.referer = str("https://www.evil.org@www.example.com/")
+	if res := h.do(q, postFormView); res.called {
+		t.Error("a referer with user information was accepted")
+	}
+}
+
+func TestRejectedRequestStillReplacesInvalidCookie(t *testing.T) {
+	h := cookieMode(t)
+	res := h.do(request{method: http.MethodPost, secret: str("badvalue")}, postFormView)
+	assertForbiddenReason(t, res, "CSRF cookie has incorrect length.")
+	if !res.sent || len(res.secret) != csrf.SecretLength {
+		t.Errorf("cookie after the response = %q (sent = %v), want a new secret", res.secret, res.sent)
+	}
+}
+
+func TestTokenWithoutMiddlewareIsEmpty(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	if got := csrf.Token(context.Background()); got != "" {
+		t.Errorf("Token = %q, want empty", got)
+	}
+	if got := csrf.GetToken(req); got != "" {
+		t.Errorf("GetToken = %q, want empty", got)
+	}
+	csrf.RotateToken(req)
+}
+
+func TestTokenDiffersPerCallForOneSecret(t *testing.T) {
+	var first, second string
+	serveDefault(httptest.NewRequest(http.MethodGet, "/", http.NoBody),
+		http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			first, second = csrf.GetToken(r), csrf.Token(r.Context())
+		}))
+	if first == second {
+		t.Errorf("both tokens are %q, want a fresh mask per call", first)
+	}
+	if csrf.UnmaskToken(first) != csrf.UnmaskToken(second) {
+		t.Error("the two tokens belong to different secrets")
+	}
+}
+
+func TestNewSecretsAreRandomAndWellFormed(t *testing.T) {
+	seen := make(map[string]bool)
+	for range 50 {
+		rec := serveDefault(httptest.NewRequest(http.MethodGet, "/", http.NoBody), tokenView)
+		secret := rec.Result().Cookies()[0].Value
+		if len(secret) != csrf.SecretLength || strings.Trim(secret, csrf.AllowedChars) != "" {
+			t.Fatalf("secret %q is not %d characters of the alphabet", secret, csrf.SecretLength)
+		}
+		if seen[secret] {
+			t.Fatalf("secret %q was issued twice", secret)
+		}
+		seen[secret] = true
+	}
+}
+
+func TestVaryIsNotRepeated(t *testing.T) {
+	rec := serveDefault(httptest.NewRequest(http.MethodGet, "/", http.NoBody),
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Vary", "Accept-Encoding, cookie")
+			_, _ = io.WriteString(w, csrf.GetToken(r))
+		}))
+	if got := rec.Header().Values("Vary"); len(got) != 1 || got[0] != "Accept-Encoding, cookie" {
+		t.Errorf("Vary = %q, want the header of the view unchanged", got)
+	}
+}
+
+func TestCookieIsSentBeforeAnExplicitStatusAndOnFlush(t *testing.T) {
+	views := map[string]http.HandlerFunc{
+		"WriteHeader": func(w http.ResponseWriter, r *http.Request) {
+			_ = csrf.GetToken(r)
+			w.WriteHeader(http.StatusCreated)
+		},
+		"Flush": func(w http.ResponseWriter, r *http.Request) {
+			_ = csrf.GetToken(r)
+			_ = http.NewResponseController(w).Flush()
+		},
+		"NoWrite": func(_ http.ResponseWriter, r *http.Request) {
+			_ = csrf.GetToken(r)
+		},
+	}
+	for name, view := range views {
+		rec := serveDefault(httptest.NewRequest(http.MethodGet, "/", http.NoBody), view)
+		if len(rec.Result().Cookies()) != 1 {
+			t.Errorf("%s: got %d cookies, want 1", name, len(rec.Result().Cookies()))
+		}
+	}
+}
+
+func TestSameSiteDefaultModeOmitsTheAttribute(t *testing.T) {
+	h := cookieMode(t)
+	h.opts.CookieSameSite = http.SameSiteDefaultMode
+	res := h.do(get(), tokenView)
+	if raw := res.rec.Header().Get("Set-Cookie"); raw == "" || strings.Contains(raw, "SameSite") {
+		t.Errorf("Set-Cookie = %q, want a cookie without SameSite", raw)
+	}
+}
+
+func TestFailureHandlerMayAskForAToken(t *testing.T) {
+	handler := csrf.MiddlewareWithOptions(csrf.Options{
+		FailureHandler: func(w http.ResponseWriter, r *http.Request, reason string) {
+			token := csrf.GetToken(r)
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = fmt.Fprintf(w, "%s token=%s", reason, token)
+		},
+	})(postFormView)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", http.NoBody))
+
+	if rec.Code != http.StatusForbidden || !strings.HasPrefix(rec.Body.String(), csrf.ReasonNoCSRFCookie+" token=") {
+		t.Fatalf("status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	token := strings.TrimPrefix(rec.Body.String(), csrf.ReasonNoCSRFCookie+" token=")
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("got %d cookies, want 1", len(cookies))
+	}
+	assertMaskedSecretCorrect(t, token, cookies[0].Value)
+}
+
+// renderPage renders src for a request under the middleware with the CSRF
+// context processor installed.
+func renderPage(t *testing.T, src string) *httptest.ResponseRecorder {
+	t.Helper()
+	engine, err := templates.NewEngineFS(fstest.MapFS{"page.html": {Data: []byte(src)}})
+	if err != nil {
+		t.Fatalf("NewEngineFS: %v", err)
+	}
+	engine.AddContextProcessor(csrf.ContextProcessor)
+	return serveDefault(httptest.NewRequest(http.MethodGet, "/", http.NoBody),
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			out, err := engine.RenderRequest(r, "page.html", nil)
+			if err != nil {
+				t.Errorf("RenderRequest: %v", err)
+			}
+			_, _ = io.WriteString(w, out)
+		}))
+}
+
+func TestContextProcessorFeedsTheTemplateTag(t *testing.T) {
+	rec := renderPage(t, `<form>{% csrf_token %}</form> js:{{ csrf_token }}`)
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("got %d cookies, want 1; body = %q", len(cookies), rec.Body.String())
+	}
+	m := tokenPattern.FindStringSubmatch(rec.Body.String())
+	if m == nil {
+		t.Fatalf("no token field in %q", rec.Body.String())
+	}
+	assertMaskedSecretCorrect(t, m[1], cookies[0].Value)
+	if !strings.HasSuffix(rec.Body.String(), "js:"+m[1]) {
+		t.Errorf("body = %q, want the variable to print the token of the tag", rec.Body.String())
+	}
+}
+
+func TestContextProcessorIsLazy(t *testing.T) {
+	rec := renderPage(t, `<p>no form here</p>`)
+	if n := len(rec.Result().Cookies()); n != 0 {
+		t.Errorf("got %d cookies, want none for a page without a token", n)
+	}
+	if got := rec.Header().Get("Vary"); got != "" {
+		t.Errorf("Vary = %q, want none", got)
 	}
 }

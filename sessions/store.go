@@ -3,38 +3,73 @@ package sessions
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
+	"errors"
 )
 
-// Store serializes sessions to/from an opaque cookie value.
+// ErrUpdate reports that a session to be updated is no longer in the store
+// (Django's UpdateError). It happens when a concurrent request deleted the
+// session, for example by logging out. The session is not created again,
+// which would undo the logout.
+var ErrUpdate = errors.New("sessions: session was deleted before it could be saved")
+
+// Store loads and saves sessions. The value it exchanges with the middleware
+// is the content of the session cookie.
 type Store interface {
-	// New returns a fresh, empty session.
+	// New returns an empty session.
 	New() *Session
-	// Decode turns a cookie value into a Session. An invalid value yields a fresh
-	// empty session with a nil error, so a tampered or stale cookie simply logs the
-	// user out rather than failing the request.
+	// Decode returns the session for a cookie value. An unknown, expired or
+	// forged value yields an empty session and a nil error: the request goes
+	// on without a session instead of failing.
 	Decode(ctx context.Context, cookieValue string) (*Session, error)
-	// Encode persists/serializes s and returns the cookie value to store.
+	// Encode saves s and returns the cookie value. It returns ErrUpdate when
+	// the session was deleted in the meantime.
 	Encode(ctx context.Context, s *Session) (string, error)
-	// Delete removes server-side state for s (a no-op for the cookie store).
+	// Delete removes what the store holds for s, including the keys the
+	// session had before CycleKey and Flush.
 	Delete(ctx context.Context, s *Session) error
 }
 
-// Rotate gives s a brand-new key as a session-fixation defense; call it on login.
-// The session data is preserved and the session is marked modified.
-func Rotate(s *Session) {
-	s.key = newKey()
-	s.modified = true
+// ExpiredClearer is implemented by a store that can remove expired sessions
+// (Django's clear_expired). The clearsessions command needs it.
+type ExpiredClearer interface {
+	// ClearExpired removes the sessions whose expiry date has passed.
+	ClearExpired(ctx context.Context) error
 }
 
-// newKey returns a cryptographically random session key as 32 random bytes encoded
-// with URL-safe base64 (no padding).
+// Rotate gives s a new key and keeps its values. It is CycleKey under the
+// name earlier releases used.
+func Rotate(s *Session) {
+	s.CycleKey()
+}
+
+// Alphabet and length of a session key, as in Django.
+const (
+	keyAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	keyLength   = 32
+)
+
+// newKey returns a random session key: 32 characters of [a-z0-9], about 165
+// bits from crypto/rand.
 func newKey() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		// crypto/rand.Read never returns an error on supported platforms; panicking
-		// here is preferable to silently issuing a predictable session key.
-		panic("sessions: crypto/rand failed: " + err.Error())
+	return randomString(keyLength, keyAlphabet)
+}
+
+// randomString returns n characters drawn uniformly from alphabet with
+// crypto/rand. Bytes that would favor the first characters of the alphabet are
+// thrown away.
+func randomString(n int, alphabet string) string {
+	limit := 256 - 256%len(alphabet)
+	out := make([]byte, 0, n)
+	buf := make([]byte, n+n/4)
+	for len(out) < n {
+		// rand.Read cannot fail: it aborts the program instead of returning
+		// a predictable value.
+		_, _ = rand.Read(buf)
+		for _, b := range buf {
+			if int(b) < limit && len(out) < n {
+				out = append(out, alphabet[int(b)%len(alphabet)])
+			}
+		}
 	}
-	return base64.RawURLEncoding.EncodeToString(b)
+	return string(out)
 }
