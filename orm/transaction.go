@@ -3,6 +3,7 @@ package orm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -62,6 +63,22 @@ func (db *DB) Atomic(ctx context.Context, fn func(ctx context.Context) error) er
 	return db.atomicBegin(ctx, fn)
 }
 
+// ErrDurableNested is returned by AtomicDurable when it is called inside
+// another atomic block.
+var ErrDurableNested = errors.New("orm: a durable atomic block cannot be nested within another atomic block")
+
+// AtomicDurable is Atomic for a block that must be the outermost one, like
+// Django's atomic(durable=True): when it returns nil, the writes of fn are
+// committed and not merely released to an enclosing transaction. Called
+// inside another atomic block it does not run fn and returns
+// ErrDurableNested. Atomic blocks nested in fn work as usual.
+func (db *DB) AtomicDurable(ctx context.Context, fn func(ctx context.Context) error) error {
+	if _, ok := txFromContext(ctx); ok {
+		return ErrDurableNested
+	}
+	return db.atomicBegin(ctx, fn)
+}
+
 // atomicBegin runs fn inside a fresh transaction begun on the underlying pool.
 func (db *DB) atomicBegin(ctx context.Context, fn func(ctx context.Context) error) error {
 	tx, err := db.sqlDB.BeginTx(ctx, nil)
@@ -103,13 +120,19 @@ func (db *DB) atomicSavepoint(ctx context.Context, tx *sql.Tx, fn func(ctx conte
 		return fmt.Errorf("orm: savepoint %s: %w", name, err)
 	}
 	released := false
+	// rollback undoes the block and then releases the savepoint, which is not
+	// used again, as Django does.
+	rollback := func() {
+		_, _ = q.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+name)
+		_, _ = q.ExecContext(ctx, "RELEASE SAVEPOINT "+name)
+	}
 	defer func() {
 		if r := recover(); r != nil {
-			_, _ = q.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+name)
+			rollback()
 			panic(r)
 		}
 		if !released {
-			_, _ = q.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+name)
+			rollback()
 		}
 	}()
 
