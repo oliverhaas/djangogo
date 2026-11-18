@@ -2,11 +2,9 @@ package orm
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
-	"strings"
-	"time"
 )
 
 // CreateTable creates the table for m using the dialect's DDL.
@@ -18,162 +16,81 @@ func (db *DB) CreateTable(ctx context.Context, m *Model) error {
 	return nil
 }
 
-// scanRows scans every row (whose columns are m.Columns() in field order) into a
-// []T. Each scan target is the address of the corresponding struct field so the
-// driver writes directly into a freshly allocated value of T.
-func scanRows[T any](rows *sql.Rows, m *Model) ([]T, error) {
-	fields := m.Fields()
-	var out []T
-	for rows.Next() {
-		dest := reflect.New(m.GoType())
-		elem := dest.Elem()
-		targets := make([]any, len(fields))
-		for i, f := range fields {
-			targets[i] = elem.Field(f.Index).Addr().Interface()
-		}
-		if err := rows.Scan(targets...); err != nil {
-			return nil, fmt.Errorf("orm: scan %s: %w", m.Name(), err)
-		}
-		out = append(out, elem.Interface().(T))
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("orm: scan %s: %w", m.Name(), err)
-	}
-	return out, nil
+// Annotated is a model row together with the values of the queryset's
+// annotations, as returned by AllAnnotated.
+type Annotated[T any] struct {
+	// Object is the model row.
+	Object T
+	// Annotations maps each annotation name to its value; see Aggregate for
+	// the Go types.
+	Annotations map[string]any
 }
 
-// scanRowsJoined scans the result of a select_related LEFT JOIN. Each row holds
-// the main model's columns followed, for each joined FK, by the target's
-// columns. The main columns scan into a fresh T; each target's columns scan into
-// NULL-tolerant holders. When the target primary key is non-null the holders are
-// materialised into a target struct and attached to the FK field via SetObject;
-// a null target (no match / null FK) leaves the FK unloaded but keeps the row.
-func scanRowsJoined[T any](rows *sql.Rows, m *Model, rels []joinedRel) ([]T, error) {
-	fields := m.Fields()
-	var out []T
-	for rows.Next() {
-		dest := reflect.New(m.GoType())
-		mainElem := dest.Elem()
-
-		ncols := len(fields)
-		for _, r := range rels {
-			ncols += len(r.target.Fields())
-		}
-		targets := make([]any, 0, ncols)
-		for _, f := range fields {
-			targets = append(targets, mainElem.Field(f.Index).Addr().Interface())
-		}
-		// One *any holder per target column, NULL-tolerant for the LEFT JOIN.
-		holders := make([][]any, len(rels))
-		for ri, r := range rels {
-			tf := r.target.Fields()
-			holders[ri] = make([]any, len(tf))
-			for ci := range tf {
-				holders[ri][ci] = new(any)
-				targets = append(targets, holders[ri][ci])
-			}
-		}
-
-		if err := rows.Scan(targets...); err != nil {
-			return nil, fmt.Errorf("orm: scan %s: %w", m.Name(), err)
-		}
-
-		for ri, r := range rels {
-			if err := attachJoined(mainElem, r, holders[ri]); err != nil {
-				return nil, fmt.Errorf("orm: scan %s: %w", m.Name(), err)
-			}
-		}
-		out = append(out, mainElem.Interface().(T))
+// fetch runs the SELECT of model rows and calls each with every row and its
+// annotation values.
+func (q *query) fetch(ctx context.Context, each func(row reflect.Value, plan *rowPlan, annots []any)) error {
+	query, args, plan, err := q.selectSQL()
+	if errors.Is(err, errEmptyResultSet) {
+		return nil
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("orm: scan %s: %w", m.Name(), err)
-	}
-	return out, nil
-}
-
-// attachJoined materialises one joined FK's scanned holders into a target struct
-// and attaches it to the FK field via SetObject. When the target primary key is
-// null (no match or null FK) the FK is left unloaded.
-func attachJoined(mainElem reflect.Value, r joinedRel, holders []any) error {
-	tf := r.target.Fields()
-	pk := r.target.PrimaryKey()
-	pkColIdx := -1
-	for i, f := range tf {
-		if f == pk {
-			pkColIdx = i
-			break
-		}
-	}
-	if pkColIdx < 0 {
-		return fmt.Errorf("orm: target model %s has no primary key column", r.target.Name())
-	}
-	pkVal := *holders[pkColIdx].(*any)
-	if pkVal == nil {
-		return nil // null FK / no match: leave the FK unloaded.
-	}
-	pkInt, err := asInt64(pkVal)
 	if err != nil {
 		return err
 	}
-
-	tgt := reflect.New(r.target.GoType())
-	tgtElem := tgt.Elem()
-	for i, f := range tf {
-		v := *holders[i].(*any)
-		if err := assignScanned(tgtElem.Field(f.Index), v); err != nil {
-			return err
+	rows, err := q.db.conn(ctx).QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("orm: query %s: %w", q.model.Name(), err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		row, annots, err := plan.scan(rows)
+		if err != nil {
+			return fmt.Errorf("orm: scan %s: %w", q.model.Name(), err)
 		}
+		each(row, plan, annots)
 	}
-
-	fkVal := mainElem.Field(r.field.Index).Addr()
-	method := fkVal.MethodByName("SetObject")
-	if !method.IsValid() {
-		return fmt.Errorf("orm: field %s does not expose SetObject", r.field.Name)
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("orm: scan %s: %w", q.model.Name(), err)
 	}
-	method.Call([]reflect.Value{tgt, reflect.ValueOf(pkInt)})
 	return nil
 }
 
-// All runs the compiled SELECT and returns every matching row scanned into []T.
-// When select_related fields are requested it uses the joined scan path so the
-// related objects are loaded in the same query.
-func (q *QuerySet[T]) All(ctx context.Context) ([]T, error) {
-	if q.err != nil {
-		return nil, q.err
-	}
-	var rels []joinedRel
-	if len(q.selectRelated) > 0 {
-		var err error
-		rels, err = q.resolveSelectRelated()
-		if err != nil {
-			return nil, err
-		}
-	}
-	query, args, err := q.compileSelect()
+// All runs the query and returns every matching row. The objects named by
+// SelectRelated are loaded in the same query.
+func (qs *QuerySet[T]) All(ctx context.Context) ([]T, error) {
+	var out []T
+	err := qs.q.fetch(ctx, func(row reflect.Value, _ *rowPlan, _ []any) {
+		out = append(out, row.Interface().(T))
+	})
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.db.conn(ctx).QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("orm: query %s: %w", q.model.Name(), err)
-	}
-	defer func() { _ = rows.Close() }()
-	if len(rels) > 0 {
-		return scanRowsJoined[T](rows, q.model, rels)
-	}
-	return scanRows[T](rows, q.model)
+	return out, nil
 }
 
-// Get returns the single row matching the queryset (with any pairs applied as
-// additional filters). It returns ErrDoesNotExist when no row matches and
-// ErrMultipleObjectsReturned when more than one does.
-func (q *QuerySet[T]) Get(ctx context.Context, pairs ...any) (T, error) {
-	var zero T
-	if q.err != nil {
-		return zero, q.err
+// AllAnnotated runs the query and returns every matching row with the values
+// of its annotations.
+func (qs *QuerySet[T]) AllAnnotated(ctx context.Context) ([]Annotated[T], error) {
+	var out []Annotated[T]
+	err := qs.q.fetch(ctx, func(row reflect.Value, plan *rowPlan, annots []any) {
+		values := make(map[string]any, len(annots))
+		for i, name := range plan.annots {
+			values[name] = annots[i]
+		}
+		out = append(out, Annotated[T]{Object: row.Interface().(T), Annotations: values})
+	})
+	if err != nil {
+		return nil, err
 	}
-	// Limit to 2 rows: enough to detect "multiple" without fetching everything.
-	rows, err := q.Filter(pairs...).Limit(2).All(ctx)
+	return out, nil
+}
+
+// Get returns the single row matching the queryset, with any arguments
+// applied as additional Filter conditions. It returns ErrDoesNotExist when no
+// row matches and ErrMultipleObjectsReturned when more than one does.
+func (qs *QuerySet[T]) Get(ctx context.Context, args ...any) (T, error) {
+	var zero T
+	// Two rows are enough to tell "several" from "one".
+	rows, err := qs.Filter(args...).Limit(2).All(ctx)
 	if err != nil {
 		return zero, err
 	}
@@ -187,285 +104,165 @@ func (q *QuerySet[T]) Get(ctx context.Context, pairs ...any) (T, error) {
 	}
 }
 
-// Count runs COUNT(*) for the queryset and returns the number of matching rows.
-func (q *QuerySet[T]) Count(ctx context.Context) (int64, error) {
-	if q.err != nil {
-		return 0, q.err
+// First returns the first row of the queryset, ordered by primary key when
+// the queryset has no ordering. It returns ErrDoesNotExist when the queryset
+// is empty, where Django's first() returns None.
+func (qs *QuerySet[T]) First(ctx context.Context) (T, error) {
+	q := qs.q
+	if len(q.orders) == 0 {
+		q = q.orderBy([]string{"pk"})
 	}
-	query, args, err := q.compileCount()
-	if err != nil {
-		return 0, err
-	}
-	var n int64
-	if err := q.db.conn(ctx).QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
-		return 0, fmt.Errorf("orm: count %s: %w", q.model.Name(), err)
-	}
-	return n, nil
+	return first[T](ctx, q)
 }
 
-// Exists reports whether any row matches the queryset, using a cheap
-// SELECT EXISTS(...) rather than a full count.
-func (q *QuerySet[T]) Exists(ctx context.Context) (bool, error) {
-	if q.err != nil {
-		return false, q.err
+// Last returns the last row of the queryset: the first row of the reversed
+// ordering, with a queryset without an ordering ordered by primary key. It
+// returns ErrDoesNotExist when the queryset is empty.
+func (qs *QuerySet[T]) Last(ctx context.Context) (T, error) {
+	return first[T](ctx, qs.q.reversed())
+}
+
+// first returns the first row of q.
+func first[T any](ctx context.Context, q *query) (T, error) {
+	var zero T
+	cp := q.clone()
+	cp.limit = 1
+	rows, err := (&QuerySet[T]{q: cp}).All(ctx)
+	if err != nil {
+		return zero, err
 	}
-	d := q.db.Dialect()
-	n := 0
-	next := func() string {
-		n++
-		return d.Placeholder(n)
+	if len(rows) == 0 {
+		return zero, ErrDoesNotExist
 	}
-	where, args, err := q.compileWhere(next, "")
+	return rows[0], nil
+}
+
+// Count returns the number of rows matching the queryset, with one COUNT(*)
+// query.
+func (qs *QuerySet[T]) Count(ctx context.Context) (int64, error) {
+	if qs.q.err != nil {
+		return 0, qs.q.err
+	}
+	return qs.q.count(ctx)
+}
+
+// Exists reports whether any row matches the queryset, with a SELECT
+// EXISTS(...) that stops at the first match.
+func (qs *QuerySet[T]) Exists(ctx context.Context) (bool, error) {
+	query, args, err := qs.q.existsSQL()
+	if errors.Is(err, errEmptyResultSet) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	query := "SELECT EXISTS(SELECT 1 FROM " + d.Quote(q.model.Table()) + where + ")"
+	rows, err := qs.q.db.conn(ctx).QueryContext(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("orm: exists %s: %w", qs.q.model.Name(), err)
+	}
+	defer func() { _ = rows.Close() }()
 	var exists bool
-	if err := q.db.conn(ctx).QueryRowContext(ctx, query, args...).Scan(&exists); err != nil {
-		return false, fmt.Errorf("orm: exists %s: %w", q.model.Name(), err)
+	if rows.Next() {
+		if err := rows.Scan(&exists); err != nil {
+			return false, fmt.Errorf("orm: exists %s: %w", qs.q.model.Name(), err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("orm: exists %s: %w", qs.q.model.Name(), err)
 	}
 	return exists, nil
 }
 
-// Create inserts obj as a new row. Any filters on the queryset are ignored. For
-// a model with a KindAuto primary key the column is omitted from the INSERT and
-// the database-assigned id is written back into obj.
-func (q *QuerySet[T]) Create(ctx context.Context, obj *T) error {
-	if q.err != nil {
-		return q.err
+// Update sets the given fields on every row matching the queryset, in one
+// UPDATE statement, and returns the number of rows matched. The arguments are
+// alternating field keys and values:
+//
+//	Update(ctx, "age", 30)
+//	Update(ctx, "views", orm.F("views").Add(1))
+//	Update(ctx, "author", author)
+//
+// It is the counterpart of Django's QuerySet.update(): it writes exactly the
+// fields it is given, so it does not stamp auto_now fields, and it fires no
+// save signals. To save one object with those, use Save. A value may be an
+// Expr over the fields of the row; an expression that spans a relation is an
+// error. Update on a queryset with a Limit or Offset is an error.
+func (qs *QuerySet[T]) Update(ctx context.Context, assignments ...any) (int64, error) {
+	query, args, err := qs.q.updateSQL(assignments)
+	if errors.Is(err, errEmptyResultSet) {
+		return 0, nil
 	}
-	// PreSave fires before the INSERT so a handler may mutate *obj (e.g. normalise
-	// fields). An error aborts the create and no row is written.
-	if err := firePreSave(ctx, q.db, obj); err != nil {
-		return err
-	}
-	d := q.db.Dialect()
-	v := reflect.ValueOf(obj).Elem()
-	pk := q.model.PrimaryKey()
-	autoPK := pk != nil && pk.Kind == KindAuto
-
-	fields := q.model.Fields()
-	// Apply Go-side defaults and auto_now/auto_now_add timestamps before reading
-	// the field values, so they are both inserted and visible on *obj afterward
-	// (matching Django writing defaults onto the instance at save time).
-	applyDefaults(v, fields)
-	applyAutoNowOnCreate(v, fields, q.db.now())
-	cols := make([]string, 0, len(fields))
-	placeholders := make([]string, 0, len(fields))
-	args := make([]any, 0, len(fields))
-	n := 0
-	for _, f := range fields {
-		if autoPK && f == pk {
-			continue
-		}
-		n++
-		cols = append(cols, d.Quote(f.Column))
-		placeholders = append(placeholders, d.Placeholder(n))
-		args = append(args, v.Field(f.Index).Interface())
-	}
-
-	query := "INSERT INTO " + d.Quote(q.model.Table()) +
-		" (" + strings.Join(cols, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
-
-	// Auto PK with a RETURNING-capable backend: read the assigned id straight back.
-	if autoPK && d.SupportsReturning() {
-		query += " RETURNING " + d.Quote(pk.Column)
-		var id int64
-		if err := q.db.conn(ctx).QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
-			return fmt.Errorf("orm: insert %s: %w", q.model.Name(), err)
-		}
-		if err := writeBackAutoPK(v.Field(pk.Index), id, q.model.Name()); err != nil {
-			return err
-		}
-		return firePostSave(ctx, q.db, obj)
-	}
-
-	result, err := q.db.conn(ctx).ExecContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("orm: insert %s: %w", q.model.Name(), err)
-	}
-
-	// Auto PK without RETURNING (e.g. SQLite): fall back to LastInsertId.
-	if autoPK {
-		id, err := result.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("orm: insert %s: last insert id: %w", q.model.Name(), err)
-		}
-		if err := writeBackAutoPK(v.Field(pk.Index), id, q.model.Name()); err != nil {
-			return err
-		}
-	}
-	// PostSave fires after the row exists and the PK has been written back.
-	return firePostSave(ctx, q.db, obj)
-}
-
-// applyDefaults sets any field carrying a default= to its default when the field
-// currently holds its zero value, mirroring Django applying a default at save
-// time. Relation fields and the auto primary key never carry a default (rejected
-// at parse/registration time), so they are skipped implicitly. The well-known
-// caveat is that an explicit zero (e.g. Active=false against default=true) is
-// indistinguishable from "unset" and is therefore overwritten by the default.
-func applyDefaults(v reflect.Value, fields []*Field) {
-	for _, f := range fields {
-		if !f.HasDefault {
-			continue
-		}
-		fv := v.Field(f.Index)
-		if fv.IsZero() {
-			setDefaultValue(fv, f.Default)
-		}
-	}
-}
-
-// setDefaultValue assigns a parsed default value onto a struct field, matching
-// the field's Go kind. Unhandled kinds leave the field untouched.
-func setDefaultValue(fv reflect.Value, def any) {
-	switch d := def.(type) {
-	case int64:
-		switch fv.Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			fv.SetInt(d)
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			fv.SetUint(uint64(d))
-		}
-	case bool:
-		fv.SetBool(d)
-	case string:
-		fv.SetString(d)
-	}
-}
-
-// applyAutoNowOnCreate stamps every auto_now / auto_now_add datetime field with
-// now at Create time.
-func applyAutoNowOnCreate(v reflect.Value, fields []*Field, now time.Time) {
-	for _, f := range fields {
-		if f.Kind != KindDateTime || (!f.AutoNow && !f.AutoNowAdd) {
-			continue
-		}
-		v.Field(f.Index).Set(reflect.ValueOf(now))
-	}
-}
-
-// assignsHasColumn reports whether assigns already targets column, so an explicit
-// caller assignment is not double-injected by auto_now.
-func assignsHasColumn(assigns []assignment, column string) bool {
-	for _, a := range assigns {
-		if a.column == column {
-			return true
-		}
-	}
-	return false
-}
-
-// writeBackAutoPK assigns the database-generated id into the auto primary-key
-// struct field, handling both signed and unsigned integer kinds.
-func writeBackAutoPK(pkField reflect.Value, id int64, modelName string) error {
-	switch pkField.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		pkField.SetInt(id)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		pkField.SetUint(uint64(id))
-	default:
-		return fmt.Errorf("orm: insert %s: cannot assign auto pk to %s field", modelName, pkField.Kind())
-	}
-	return nil
-}
-
-// Update applies the given column/value assignments to every matching row and
-// returns the number of rows affected. assignments must be even-arity pairs of a
-// string column name followed by its value, e.g. Update(ctx, "age", 30).
-func (q *QuerySet[T]) Update(ctx context.Context, assignments ...any) (int64, error) {
-	if q.err != nil {
-		return 0, q.err
-	}
-	if len(assignments)%2 != 0 {
-		return 0, fmt.Errorf("orm: Update requires alternating string columns and values")
-	}
-	assigns := make([]assignment, 0, len(assignments)/2)
-	for i := 0; i < len(assignments); i += 2 {
-		col, ok := assignments[i].(string)
-		if !ok {
-			return 0, fmt.Errorf("orm: Update requires alternating string columns and values")
-		}
-		assigns = append(assigns, assignment{column: col, value: assignments[i+1]})
-	}
-
-	// auto_now fields are touched on every update. Inject one assignment per
-	// auto_now field the caller did not already set, so an explicit override wins.
-	now := q.db.now()
-	for _, f := range q.model.Fields() {
-		if f.AutoNow && !assignsHasColumn(assigns, f.Column) {
-			assigns = append(assigns, assignment{column: f.Column, value: now})
-		}
-	}
-
-	query, args, err := q.compileUpdate(assigns)
 	if err != nil {
 		return 0, err
 	}
-	result, err := q.db.conn(ctx).ExecContext(ctx, query, args...)
+	result, err := qs.q.db.conn(ctx).ExecContext(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("orm: update %s: %w", q.model.Name(), err)
+		return 0, fmt.Errorf("orm: update %s: %w", qs.q.model.Name(), err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("orm: update %s: rows affected: %w", q.model.Name(), err)
+		return 0, fmt.Errorf("orm: update %s: rows affected: %w", qs.q.model.Name(), err)
 	}
 	return affected, nil
 }
 
-// Delete removes every matching row and returns the number of rows deleted.
+// Delete removes every row matching the queryset, in one DELETE statement,
+// and returns the number of rows deleted. Delete on a queryset with a Limit
+// or Offset is an error.
 //
-// When any PreDelete or PostDelete signal handler is registered for T, Delete
-// first fetches the matching rows so it can fire those signals per object: it
-// runs PreDelete for each row, performs the DELETE, then runs PostDelete for
-// each row. This per-object firing is the reason delete signals require an extra
-// fetch; when no delete handlers are registered the fast path skips it.
-func (q *QuerySet[T]) Delete(ctx context.Context) (int64, error) {
-	if q.err != nil {
-		return 0, q.err
+// When a PreDelete or PostDelete handler is registered for T, Delete first
+// fetches the matching rows, so that it can fire PreDelete for each before
+// the DELETE and PostDelete for each after it.
+func (qs *QuerySet[T]) Delete(ctx context.Context) (int64, error) {
+	if qs.q.err != nil {
+		return 0, qs.q.err
 	}
 	if hasDeleteHandlers[T]() {
-		return q.deleteWithSignals(ctx)
+		return qs.deleteWithSignals(ctx)
 	}
-	return q.deleteRows(ctx)
+	return qs.deleteRows(ctx)
 }
 
-// deleteRows runs the compiled DELETE and returns the number of rows affected.
-func (q *QuerySet[T]) deleteRows(ctx context.Context) (int64, error) {
-	query, args, err := q.compileDelete()
+// deleteRows runs the DELETE and returns the number of rows affected.
+func (qs *QuerySet[T]) deleteRows(ctx context.Context) (int64, error) {
+	query, args, err := qs.q.deleteSQL()
+	if errors.Is(err, errEmptyResultSet) {
+		return 0, nil
+	}
 	if err != nil {
 		return 0, err
 	}
-	result, err := q.db.conn(ctx).ExecContext(ctx, query, args...)
+	result, err := qs.q.db.conn(ctx).ExecContext(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("orm: delete %s: %w", q.model.Name(), err)
+		return 0, fmt.Errorf("orm: delete %s: %w", qs.q.model.Name(), err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("orm: delete %s: rows affected: %w", q.model.Name(), err)
+		return 0, fmt.Errorf("orm: delete %s: rows affected: %w", qs.q.model.Name(), err)
 	}
 	return affected, nil
 }
 
-// deleteWithSignals fetches the matching rows, fires PreDelete for each, performs
-// the DELETE, then fires PostDelete for each, returning the rows affected.
-func (q *QuerySet[T]) deleteWithSignals(ctx context.Context) (int64, error) {
-	rows, err := q.All(ctx)
+// deleteWithSignals fetches the matching rows, fires PreDelete for each, runs
+// the DELETE, then fires PostDelete for each.
+func (qs *QuerySet[T]) deleteWithSignals(ctx context.Context) (int64, error) {
+	if qs.q.sliced() {
+		return 0, errDeleteSliced
+	}
+	rows, err := qs.All(ctx)
 	if err != nil {
 		return 0, err
 	}
 	for i := range rows {
-		if err := firePreDelete(ctx, q.db, &rows[i]); err != nil {
+		if err := firePreDelete(ctx, qs.q.db, &rows[i]); err != nil {
 			return 0, err
 		}
 	}
-	affected, err := q.deleteRows(ctx)
+	affected, err := qs.deleteRows(ctx)
 	if err != nil {
 		return 0, err
 	}
 	for i := range rows {
-		if err := firePostDelete(ctx, q.db, &rows[i]); err != nil {
+		if err := firePostDelete(ctx, qs.q.db, &rows[i]); err != nil {
 			return 0, err
 		}
 	}

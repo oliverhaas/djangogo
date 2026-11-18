@@ -1,0 +1,344 @@
+package orm
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+	"time"
+)
+
+// createdKey is the context key under which a save reports whether it
+// inserted a new row.
+type createdKey struct{}
+
+// Created reports, inside a PostSave handler, whether the save inserted a new
+// row, like the created argument of Django's post_save signal. It is false
+// when the row was updated, and outside a PostSave handler.
+func Created(ctx context.Context) bool {
+	created, _ := ctx.Value(createdKey{}).(bool)
+	return created
+}
+
+// Create inserts obj as a new row. Any filters on the queryset are ignored.
+// Fields with a default= that hold their zero value get the default, and
+// auto_now and auto_now_add fields are stamped. An auto primary key that is
+// zero is assigned by the database and written back into obj; a non-zero one
+// is inserted as given. PreSave and PostSave handlers are fired.
+func (qs *QuerySet[T]) Create(ctx context.Context, obj *T) error {
+	if qs.q.err != nil {
+		return qs.q.err
+	}
+	// PreSave runs first, so that a handler can still change the object.
+	if err := firePreSave(ctx, qs.q.db, obj); err != nil {
+		return err
+	}
+	return qs.insertOne(ctx, obj)
+}
+
+// insertOne inserts obj and fires PostSave with Created set.
+func (qs *QuerySet[T]) insertOne(ctx context.Context, obj *T) error {
+	db, m := qs.q.db, qs.q.model
+	v := reflect.ValueOf(obj).Elem()
+	applyDefaults(v, m.fields)
+	applyAutoNowOnCreate(v, m.fields, db.now())
+	if err := db.insert(ctx, m, []reflect.Value{v}, false); err != nil {
+		return err
+	}
+	return firePostSave(context.WithValue(ctx, createdKey{}, true), db, obj)
+}
+
+// saveConfig collects the options of Save.
+type saveConfig struct {
+	updateFields []string
+}
+
+// SaveOption is an optional argument of Save.
+type SaveOption func(*saveConfig)
+
+// UpdateFields restricts Save to an UPDATE of the named fields, like Django's
+// save(update_fields=[...]). An auto_now field is only stamped when it is
+// named. The object must already exist: saving nothing is an error that wraps
+// ErrDoesNotExist.
+func UpdateFields(keys ...string) SaveOption {
+	return func(c *saveConfig) { c.updateFields = append(c.updateFields, keys...) }
+}
+
+// Save writes obj to the database, like Django's Model.save(). An object
+// whose primary key is zero is inserted, exactly as by Create. Otherwise its
+// row is updated: auto_now fields are stamped and every field but the primary
+// key is written. When no row has that primary key, the object is inserted
+// with it. PreSave and PostSave handlers are fired either way; Created tells a
+// PostSave handler which of the two happened.
+//
+// Save is the per-object path. Update on a queryset writes only the fields it
+// is given, to every matching row, without stamps or signals.
+func (qs *QuerySet[T]) Save(ctx context.Context, obj *T, opts ...SaveOption) error {
+	if qs.q.err != nil {
+		return qs.q.err
+	}
+	cfg := &saveConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	db, m := qs.q.db, qs.q.model
+	pk := m.PrimaryKey()
+	v := reflect.ValueOf(obj).Elem()
+	if pk == nil || v.Field(pk.Index).IsZero() {
+		if len(cfg.updateFields) > 0 {
+			return fmt.Errorf("orm: save %s: cannot force an update in save() with no primary key", m.Name())
+		}
+		return qs.Create(ctx, obj)
+	}
+	fields, err := saveFields(m, cfg.updateFields)
+	if err != nil {
+		return err
+	}
+	if err := firePreSave(ctx, db, obj); err != nil {
+		return err
+	}
+	now := db.now()
+	for _, f := range fields {
+		if f.AutoNow && f.Kind == KindDateTime {
+			v.Field(f.Index).Set(reflect.ValueOf(now))
+		}
+	}
+	updated := true
+	if len(fields) > 0 {
+		updated, err = db.updateRow(ctx, m, v, fields)
+		if err != nil {
+			return err
+		}
+	}
+	if !updated {
+		if len(cfg.updateFields) > 0 {
+			return fmt.Errorf("orm: save %s: save with update_fields did not affect any rows: %w",
+				m.Name(), ErrDoesNotExist)
+		}
+		return qs.insertOne(ctx, obj)
+	}
+	return firePostSave(context.WithValue(ctx, createdKey{}, false), db, obj)
+}
+
+// saveFields returns the fields Save writes: every field but the primary key,
+// or the ones named by UpdateFields.
+func saveFields(m *Model, keys []string) ([]*Field, error) {
+	if len(keys) == 0 {
+		fields := make([]*Field, 0, len(m.fields))
+		for _, f := range m.fields {
+			if f != m.pk {
+				fields = append(fields, f)
+			}
+		}
+		return fields, nil
+	}
+	fields := make([]*Field, 0, len(keys))
+	for _, key := range keys {
+		f, ok := lookupField(m, key)
+		if !ok || f == m.pk {
+			return nil, &FieldError{
+				Model: m.Name(),
+				Message: "the following fields do not exist in this model, are m2m fields, " +
+					"primary keys, or are non-concrete fields: " + key,
+			}
+		}
+		fields = append(fields, f)
+	}
+	return fields, nil
+}
+
+// updateRow writes the given fields of the struct v to the row with v's
+// primary key. It reports whether such a row exists.
+func (db *DB) updateRow(ctx context.Context, m *Model, v reflect.Value, fields []*Field) (bool, error) {
+	w := newSQLWriter(db.dialect)
+	w.write("UPDATE ")
+	w.ident(m.Table())
+	w.write(" SET ")
+	for i, f := range fields {
+		if i > 0 {
+			w.write(", ")
+		}
+		w.ident(f.Column)
+		w.write(" = ")
+		w.param(v.Field(f.Index).Interface())
+	}
+	w.write(" WHERE ")
+	w.ident(m.pk.Column)
+	w.write(" = ")
+	w.param(v.Field(m.pk.Index).Interface())
+	result, err := db.conn(ctx).ExecContext(ctx, w.String(), w.args...)
+	if err != nil {
+		return false, fmt.Errorf("orm: update %s: %w", m.Name(), err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("orm: update %s: rows affected: %w", m.Name(), err)
+	}
+	return affected > 0, nil
+}
+
+// insert writes the structs in objs as one INSERT statement. All objects must
+// agree on whether their auto primary key is set: when it is zero the column
+// is left to the database and the generated keys are written back into the
+// structs, where the dialect can return them. With ignoreConflicts a row that
+// violates a constraint is skipped and no key is written back.
+func (db *DB) insert(ctx context.Context, m *Model, objs []reflect.Value, ignoreConflicts bool) error {
+	if len(objs) == 0 {
+		return nil
+	}
+	d := db.dialect
+	pk := m.PrimaryKey()
+	generated := pk != nil && pk.Kind == KindAuto && objs[0].Field(pk.Index).IsZero()
+
+	fields := make([]*Field, 0, len(m.fields))
+	for _, f := range m.fields {
+		if generated && f == pk {
+			continue
+		}
+		fields = append(fields, f)
+	}
+
+	w := newSQLWriter(d)
+	w.write("INSERT INTO ")
+	w.ident(m.Table())
+	if len(fields) == 0 {
+		if len(objs) != 1 {
+			return fmt.Errorf("orm: insert %s: a model without columns to insert is created one row at a time", m.Name())
+		}
+		w.write(" DEFAULT VALUES")
+	} else {
+		w.write(" (")
+		for i, f := range fields {
+			if i > 0 {
+				w.write(", ")
+			}
+			w.ident(f.Column)
+		}
+		w.write(") VALUES ")
+		for r, obj := range objs {
+			if r > 0 {
+				w.write(", ")
+			}
+			w.write("(")
+			for i, f := range fields {
+				if i > 0 {
+					w.write(", ")
+				}
+				w.param(obj.Field(f.Index).Interface())
+			}
+			w.write(")")
+		}
+	}
+	if ignoreConflicts {
+		w.write(" ON CONFLICT DO NOTHING")
+	}
+
+	if generated && !ignoreConflicts && d.SupportsReturning() {
+		w.write(" RETURNING ")
+		w.ident(pk.Column)
+		return db.insertReturning(ctx, m, objs, w)
+	}
+	result, err := db.conn(ctx).ExecContext(ctx, w.String(), w.args...)
+	if err != nil {
+		return fmt.Errorf("orm: insert %s: %w", m.Name(), err)
+	}
+	// Without RETURNING only the key of a single row is known.
+	if generated && !ignoreConflicts && len(objs) == 1 {
+		id, err := result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("orm: insert %s: last insert id: %w", m.Name(), err)
+		}
+		return writeBackAutoPK(objs[0].Field(pk.Index), id, m.Name())
+	}
+	return nil
+}
+
+// insertReturning runs an INSERT ... RETURNING pk and writes the keys back
+// into objs, which the database returns in insertion order.
+func (db *DB) insertReturning(ctx context.Context, m *Model, objs []reflect.Value, w *sqlWriter) error {
+	rows, err := db.conn(ctx).QueryContext(ctx, w.String(), w.args...)
+	if err != nil {
+		return fmt.Errorf("orm: insert %s: %w", m.Name(), err)
+	}
+	defer func() { _ = rows.Close() }()
+	i := 0
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("orm: insert %s: %w", m.Name(), err)
+		}
+		if i < len(objs) {
+			if err := writeBackAutoPK(objs[i].Field(m.pk.Index), id, m.Name()); err != nil {
+				return err
+			}
+		}
+		i++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("orm: insert %s: %w", m.Name(), db.classify(err))
+	}
+	if i != len(objs) {
+		return fmt.Errorf("orm: insert %s: %d rows inserted, %d expected", m.Name(), i, len(objs))
+	}
+	return nil
+}
+
+// applyDefaults sets every field that carries a default= and holds its zero
+// value to the default, as Django applies a default when the object is
+// created. A relation or an auto primary key never carries a default.
+//
+// A Go zero value cannot be told apart from "not set": an explicit zero, such
+// as Active=false against default=true, is replaced by the default.
+func applyDefaults(v reflect.Value, fields []*Field) {
+	for _, f := range fields {
+		if !f.HasDefault {
+			continue
+		}
+		fv := v.Field(f.Index)
+		if fv.IsZero() {
+			setDefaultValue(fv, f.Default)
+		}
+	}
+}
+
+// setDefaultValue assigns a parsed default value onto a struct field, matching
+// the field's Go kind. Unhandled kinds leave the field untouched.
+func setDefaultValue(fv reflect.Value, def any) {
+	switch d := def.(type) {
+	case int64:
+		switch fv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			fv.SetInt(d)
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			fv.SetUint(uint64(d))
+		}
+	case bool:
+		fv.SetBool(d)
+	case string:
+		fv.SetString(d)
+	}
+}
+
+// applyAutoNowOnCreate stamps every auto_now and auto_now_add field with now,
+// for a row that is being inserted.
+func applyAutoNowOnCreate(v reflect.Value, fields []*Field, now time.Time) {
+	for _, f := range fields {
+		if f.Kind != KindDateTime || (!f.AutoNow && !f.AutoNowAdd) {
+			continue
+		}
+		v.Field(f.Index).Set(reflect.ValueOf(now))
+	}
+}
+
+// writeBackAutoPK assigns the database-generated id into the auto primary-key
+// struct field, handling both signed and unsigned integer kinds.
+func writeBackAutoPK(pkField reflect.Value, id int64, modelName string) error {
+	switch pkField.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		pkField.SetInt(id)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		pkField.SetUint(uint64(id))
+	default:
+		return fmt.Errorf("orm: insert %s: cannot assign auto pk to %s field", modelName, pkField.Kind())
+	}
+	return nil
+}

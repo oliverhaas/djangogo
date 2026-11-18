@@ -58,8 +58,8 @@ func TestDialectBasics(t *testing.T) {
 		t.Errorf("Quote(%q) = %q, want %q", "title", got, `"title"`)
 	}
 
-	if d.SupportsReturning() {
-		t.Error("SupportsReturning() must be false for SQLite")
+	if !d.SupportsReturning() {
+		t.Error("SupportsReturning() must be true for SQLite")
 	}
 }
 

@@ -67,7 +67,7 @@ func TestCompileSelect_plain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `SELECT "id", "name", "age", "bio" FROM "person"`
+	want := personSelect
 	if sql != want {
 		t.Errorf("sql: got %q, want %q", sql, want)
 	}
@@ -84,7 +84,7 @@ func TestCompileSelect_filter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `SELECT "id", "name", "age", "bio" FROM "person" WHERE "age" > $1`
+	want := personSelect + ` WHERE "person"."age" > $1`
 	if sql != want {
 		t.Errorf("sql: got %q, want %q", sql, want)
 	}
@@ -102,7 +102,7 @@ func TestCompileSelect_multiFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `SELECT "id", "name", "age", "bio" FROM "person" WHERE "age" > $1 AND "name" = $2`
+	want := personSelect + ` WHERE ("person"."age" > $1 AND "person"."name" = $2)`
 	if sql != want {
 		t.Errorf("sql: got %q, want %q", sql, want)
 	}
@@ -117,7 +117,7 @@ func TestCompileSelect_exclude(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `SELECT "id", "name", "age", "bio" FROM "person" WHERE NOT ("name" = $1)`
+	want := personSelect + ` WHERE NOT ("person"."name" = $1)`
 	if sql != want {
 		t.Errorf("sql: got %q, want %q", sql, want)
 	}
@@ -132,7 +132,7 @@ func TestCompileSelect_orderBy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `SELECT "id", "name", "age", "bio" FROM "person" ORDER BY "name", "age" DESC`
+	want := personSelect + ` ORDER BY "person"."name" ASC, "person"."age" DESC`
 	if sql != want {
 		t.Errorf("sql: got %q, want %q", sql, want)
 	}
@@ -151,14 +151,31 @@ func TestCompileSelect_limitOffset(t *testing.T) {
 		t.Errorf("limit+offset sql: got %q, want suffix %q", sql, want)
 	}
 
+	// OFFSET stands alone in standard SQL; a dialect that needs a LIMIT with it
+	// declares the stand-in value through Features.
 	sql, _, err = Query[Person](db).Offset(5).compileSelect()
 	if err != nil {
 		t.Fatalf("offset-only: unexpected error: %v", err)
 	}
-	if want := ` LIMIT -1 OFFSET 5`; !endsWith(sql, want) {
+	if want := `"person" OFFSET 5`; !endsWith(sql, want) {
 		t.Errorf("offset-only sql: got %q, want suffix %q", sql, want)
 	}
+
+	lite := NewDB(nil, noLimitDialect{}, db.Registry())
+	sql, _, err = Query[Person](lite).Offset(5).compileSelect()
+	if err != nil {
+		t.Fatalf("offset-only with stand-in limit: unexpected error: %v", err)
+	}
+	if want := ` LIMIT -1 OFFSET 5`; !endsWith(sql, want) {
+		t.Errorf("offset-only sql with stand-in limit: got %q, want suffix %q", sql, want)
+	}
 }
+
+// noLimitDialect is a dialect that cannot write OFFSET without LIMIT.
+type noLimitDialect struct{ numberedDialect }
+
+// Features declares the stand-in LIMIT.
+func (noLimitDialect) Features() Features { return Features{NoLimitValue: "-1"} }
 
 // endsWith reports whether s ends with suffix.
 func endsWith(s, suffix string) bool {
@@ -173,7 +190,7 @@ func TestCompileCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `SELECT COUNT(*) FROM "person" WHERE "age" > $1`
+	want := `SELECT COUNT(*) AS "__count" FROM "person" WHERE "person"."age" > $1`
 	if sql != want {
 		t.Errorf("sql: got %q, want %q", sql, want)
 	}
@@ -188,11 +205,28 @@ func TestCompileDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `DELETE FROM "person" WHERE "name" = $1`
+	want := `DELETE FROM "person" WHERE "person"."name" = $1`
 	if sql != want {
 		t.Errorf("sql: got %q, want %q", sql, want)
 	}
 	assertArgs(t, "delete", args, []any{"bob"})
+}
+
+// TestCompileUpdate checks update compilation: a plain value and an F
+// expression are bound in the order they are written, before the filter.
+func TestCompileUpdate(t *testing.T) {
+	t.Parallel()
+	db := newPersonDB(t)
+	sql, args, err := Query[Person](db).Filter("name", "bob").
+		compileUpdate("bio", "new", "age", F("age").Add(1))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := `UPDATE "person" SET "bio" = $1, "age" = ("person"."age" + $2) WHERE "person"."name" = $3`
+	if sql != want {
+		t.Errorf("sql: got %q, want %q", sql, want)
+	}
+	assertArgs(t, "update", args, []any{"new", 1, "bob"})
 }
 
 // TestQuerySet_immutable checks that chained methods never mutate the receiver.
@@ -208,7 +242,7 @@ func TestQuerySet_immutable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("base: unexpected error: %v", err)
 	}
-	if want := `SELECT "id", "name", "age", "bio" FROM "person"`; sql != want {
+	if want := personSelect; sql != want {
 		t.Errorf("base sql after sibling chain: got %q, want %q", sql, want)
 	}
 	if len(args) != 0 {
@@ -221,7 +255,7 @@ func TestQuerySet_immutable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other: unexpected error: %v", err)
 	}
-	wantOther := `SELECT "id", "name", "age", "bio" FROM "person" WHERE "age" > $1`
+	wantOther := personSelect + ` WHERE "person"."age" > $1`
 	if osql != wantOther {
 		t.Errorf("other sql: got %q, want %q", osql, wantOther)
 	}

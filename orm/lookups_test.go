@@ -1,10 +1,13 @@
 package orm
 
 import (
+	"errors"
+	"strings"
 	"testing"
 )
 
-// stubDialect is a minimal sqlite-like Dialect for lookup tests.
+// stubDialect is a minimal sqlite-like Dialect for lookup tests. It has no
+// optional capability, so the pattern lookups use the portable LIKE form.
 type stubDialect struct{}
 
 func (stubDialect) Name() string                 { return "stub" }
@@ -22,20 +25,34 @@ type Person struct {
 	Bio  string `orm:"type=text"`
 }
 
-// alwaysNext returns a next() function that always returns "?".
-func alwaysNext() func() string {
-	return func() string { return "?" }
-}
+// personSelect is the SELECT every Person query starts with.
+const personSelect = `SELECT "person"."id", "person"."name", "person"."age", "person"."bio" FROM "person"`
 
-// mustPersonModel registers Person in a fresh registry and returns the Model.
-func mustPersonModel(t *testing.T) *Model {
+// newStubDB registers Person in a fresh registry and returns a DB handle on
+// stubDialect. The *sql.DB is nil because compiling never touches it.
+func newStubDB(t *testing.T) *DB {
 	t.Helper()
 	r := NewRegistry()
-	m, err := r.Register(&Person{})
-	if err != nil {
+	if _, err := r.Register(&Person{}); err != nil {
 		t.Fatalf("Register(Person) unexpected error: %v", err)
 	}
-	return m
+	r.Freeze()
+	return NewDB(nil, stubDialect{}, r)
+}
+
+// wherePredicate compiles Person.Filter(key, value) and returns the WHERE
+// clause and its arguments.
+func wherePredicate(t *testing.T, key string, value any) (string, []any, error) {
+	t.Helper()
+	sql, args, err := Query[Person](newStubDB(t)).Filter(key, value).compileSelect()
+	if err != nil {
+		return "", nil, err
+	}
+	where, ok := strings.CutPrefix(sql, personSelect+" WHERE ")
+	if !ok {
+		t.Fatalf("%s: unexpected statement %q", key, sql)
+	}
+	return where, args, nil
 }
 
 // TestParseLookup checks parseLookup unit cases.
@@ -50,7 +67,11 @@ func TestParseLookup(t *testing.T) {
 		{"age__gt", "age", "gt"},
 		{"name__contains", "name", "contains"},
 		{"name__icontains", "name", "icontains"},
+		{"name__iexact", "name", "iexact"},
+		{"age__range", "age", "range"},
+		{"name__iregex", "name", "iregex"},
 		{"some__column__gte", "some__column", "gte"},
+		{"author__name", "author__name", "exact"},
 	}
 	for _, tc := range cases {
 		col, lk := parseLookup(tc.key)
@@ -64,51 +85,55 @@ func TestParseLookup(t *testing.T) {
 // TestBuildPredicate_exact checks exact lookups with a value and with nil.
 func TestBuildPredicate_exact(t *testing.T) {
 	t.Parallel()
-	d := stubDialect{}
-	m := mustPersonModel(t)
 
-	// exact with value
-	sql, args, err := buildPredicate(d, m, "name", "bob", alwaysNext(), "")
+	sql, args, err := wherePredicate(t, "name", "bob")
 	if err != nil {
 		t.Fatalf("exact value: unexpected error: %v", err)
 	}
-	if sql != `"name" = ?` {
-		t.Errorf("exact value sql: got %q, want %q", sql, `"name" = ?`)
+	if sql != `"person"."name" = ?` {
+		t.Errorf("exact value sql: got %q, want %q", sql, `"person"."name" = ?`)
 	}
 	if len(args) != 1 || args[0] != "bob" {
 		t.Errorf("exact value args: got %v, want [bob]", args)
 	}
 
-	// exact nil -> IS NULL
-	sql, args, err = buildPredicate(d, m, "name", nil, alwaysNext(), "")
-	if err != nil {
-		t.Fatalf("exact nil: unexpected error: %v", err)
+	// A nil value means IS NULL, since "= NULL" is never true.
+	for _, key := range []string{"name", "name__exact", "name__iexact"} {
+		sql, args, err = wherePredicate(t, key, nil)
+		if err != nil {
+			t.Fatalf("%s nil: unexpected error: %v", key, err)
+		}
+		if sql != `"person"."name" IS NULL` {
+			t.Errorf("%s nil sql: got %q, want %q", key, sql, `"person"."name" IS NULL`)
+		}
+		if len(args) != 0 {
+			t.Errorf("%s nil args: got %v, want []", key, args)
+		}
 	}
-	if sql != `"name" IS NULL` {
-		t.Errorf("exact nil sql: got %q, want %q", sql, `"name" IS NULL`)
-	}
-	if len(args) != 0 {
-		t.Errorf("exact nil args: got %v, want []", args)
+
+	if _, _, err = wherePredicate(t, "age__gt", nil); err == nil {
+		t.Error("gt nil: expected an error, got nil")
 	}
 }
 
 // TestBuildPredicate_comparisons checks gt/gte/lt/lte.
 func TestBuildPredicate_comparisons(t *testing.T) {
 	t.Parallel()
-	d := stubDialect{}
-	m := mustPersonModel(t)
 
 	cases := []struct {
 		key     string
 		wantSQL string
 	}{
-		{"age__gt", `"age" > ?`},
-		{"age__gte", `"age" >= ?`},
-		{"age__lt", `"age" < ?`},
-		{"age__lte", `"age" <= ?`},
+		{"age__gt", `"person"."age" > ?`},
+		{"age__gte", `"person"."age" >= ?`},
+		{"age__lt", `"person"."age" < ?`},
+		{"age__lte", `"person"."age" <= ?`},
+		{"age__exact", `"person"."age" = ?`},
+		{"pk", `"person"."id" = ?`},
+		{"pk__gt", `"person"."id" > ?`},
 	}
 	for _, tc := range cases {
-		sql, args, err := buildPredicate(d, m, tc.key, int64(18), alwaysNext(), "")
+		sql, args, err := wherePredicate(t, tc.key, int64(18))
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", tc.key, err)
 			continue
@@ -122,31 +147,33 @@ func TestBuildPredicate_comparisons(t *testing.T) {
 	}
 }
 
-// TestBuildPredicate_like checks contains/icontains/startswith/endswith.
+// TestBuildPredicate_like checks the LIKE based lookups on a dialect without
+// its own lookup SQL.
 func TestBuildPredicate_like(t *testing.T) {
 	t.Parallel()
-	d := stubDialect{}
-	m := mustPersonModel(t)
 
+	const like = `"person"."name" LIKE ? ESCAPE '\'`
 	cases := []struct {
 		key     string
 		value   string
-		wantSQL string
 		wantArg string
 	}{
-		{"name__contains", "ob", `"name" LIKE ? ESCAPE '\'`, "%ob%"},
-		{"name__icontains", "ob", `"name" LIKE ? ESCAPE '\'`, "%ob%"},
-		{"name__startswith", "ob", `"name" LIKE ? ESCAPE '\'`, "ob%"},
-		{"name__endswith", "ob", `"name" LIKE ? ESCAPE '\'`, "%ob"},
+		{"name__contains", "ob", "%ob%"},
+		{"name__icontains", "ob", "%ob%"},
+		{"name__startswith", "ob", "ob%"},
+		{"name__istartswith", "ob", "ob%"},
+		{"name__endswith", "ob", "%ob"},
+		{"name__iendswith", "ob", "%ob"},
+		{"name__iexact", "ob", "ob"},
 	}
 	for _, tc := range cases {
-		sql, args, err := buildPredicate(d, m, tc.key, tc.value, alwaysNext(), "")
+		sql, args, err := wherePredicate(t, tc.key, tc.value)
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", tc.key, err)
 			continue
 		}
-		if sql != tc.wantSQL {
-			t.Errorf("%s sql: got %q, want %q", tc.key, sql, tc.wantSQL)
+		if sql != like {
+			t.Errorf("%s sql: got %q, want %q", tc.key, sql, like)
 		}
 		if len(args) != 1 || args[0] != tc.wantArg {
 			t.Errorf("%s args: got %v, want [%s]", tc.key, args, tc.wantArg)
@@ -157,50 +184,47 @@ func TestBuildPredicate_like(t *testing.T) {
 // TestBuildPredicate_like_escape checks that %, _, and \ in the value are escaped.
 func TestBuildPredicate_like_escape(t *testing.T) {
 	t.Parallel()
-	d := stubDialect{}
-	m := mustPersonModel(t)
 
-	// "a%b" in contains -> "%a\%b%"
-	_, args, err := buildPredicate(d, m, "name__contains", "a%b", alwaysNext(), "")
-	if err != nil {
-		t.Fatalf("contains escape: unexpected error: %v", err)
+	cases := []struct {
+		key, value, wantArg string
+	}{
+		{"name__contains", "a%b", `%a\%b%`},
+		{"name__startswith", "a_b", `a\_b%`},
+		{"name__endswith", `a\b`, `%a\\b`},
+		{"name__iexact", "50%_off", `50\%\_off`},
 	}
-	if len(args) != 1 || args[0] != `%a\%b%` {
-		t.Errorf("contains escape: got %v, want [%%a\\%%b%%]", args)
+	for _, tc := range cases {
+		_, args, err := wherePredicate(t, tc.key, tc.value)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.key, err)
+		}
+		if len(args) != 1 || args[0] != tc.wantArg {
+			t.Errorf("%s: got %v, want [%s]", tc.key, args, tc.wantArg)
+		}
 	}
+}
 
-	// "a_b" in startswith -> "a\_b%"
-	_, args, err = buildPredicate(d, m, "name__startswith", "a_b", alwaysNext(), "")
-	if err != nil {
-		t.Fatalf("startswith escape: unexpected error: %v", err)
-	}
-	if len(args) != 1 || args[0] != `a\_b%` {
-		t.Errorf("startswith escape: got %v, want [a\\_b%%]", args)
-	}
-
-	// "a\b" in endswith -> "%a\\b"
-	_, args, err = buildPredicate(d, m, "name__endswith", `a\b`, alwaysNext(), "")
-	if err != nil {
-		t.Fatalf("endswith escape: unexpected error: %v", err)
-	}
-	if len(args) != 1 || args[0] != `%a\\b` {
-		t.Errorf("endswith escape: got %v, want [%%a\\\\b]", args)
+// TestBuildPredicate_regexUnsupported checks that a dialect without regex SQL
+// rejects the regex lookups instead of emitting SQL that cannot run.
+func TestBuildPredicate_regexUnsupported(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"name__regex", "name__iregex"} {
+		if _, _, err := wherePredicate(t, key, "^b"); err == nil {
+			t.Errorf("%s: expected an error on a dialect without regex support", key)
+		}
 	}
 }
 
 // TestBuildPredicate_in checks in lookup: normal, empty, non-slice.
 func TestBuildPredicate_in(t *testing.T) {
 	t.Parallel()
-	d := stubDialect{}
-	m := mustPersonModel(t)
 
-	// normal in
-	sql, args, err := buildPredicate(d, m, "age__in", []int64{1, 2, 3}, alwaysNext(), "")
+	sql, args, err := wherePredicate(t, "age__in", []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("in: unexpected error: %v", err)
 	}
-	if sql != `"age" IN (?, ?, ?)` {
-		t.Errorf("in sql: got %q, want %q", sql, `"age" IN (?, ?, ?)`)
+	if sql != `"person"."age" IN (?, ?, ?)` {
+		t.Errorf("in sql: got %q, want %q", sql, `"person"."age" IN (?, ?, ?)`)
 	}
 	if len(args) != 3 {
 		t.Errorf("in args len: got %d, want 3", len(args))
@@ -212,82 +236,108 @@ func TestBuildPredicate_in(t *testing.T) {
 		}
 	}
 
-	// empty slice -> 0 = 1
-	sql, args, err = buildPredicate(d, m, "age__in", []int64{}, alwaysNext(), "")
-	if err != nil {
-		t.Fatalf("in empty: unexpected error: %v", err)
-	}
-	if sql != "0 = 1" {
-		t.Errorf("in empty sql: got %q, want %q", sql, "0 = 1")
-	}
-	if len(args) != 0 {
-		t.Errorf("in empty args: got %v, want []", args)
+	// An empty list matches nothing: no statement is built, so "IN ()" is never
+	// rendered.
+	if _, _, err = wherePredicate(t, "age__in", []int64{}); !errors.Is(err, errEmptyResultSet) {
+		t.Errorf("in empty: got error %v, want errEmptyResultSet", err)
 	}
 
-	// non-slice -> error
-	_, _, err = buildPredicate(d, m, "age__in", 42, alwaysNext(), "")
-	if err == nil {
+	// NULL is equal to nothing, so nil elements are dropped.
+	sql, args, err = wherePredicate(t, "age__in", []any{int64(1), nil})
+	if err != nil {
+		t.Fatalf("in with nil: unexpected error: %v", err)
+	}
+	if sql != `"person"."age" IN (?)` || len(args) != 1 {
+		t.Errorf("in with nil: got %q %v, want one placeholder", sql, args)
+	}
+
+	if _, _, err = wherePredicate(t, "age__in", 42); err == nil {
 		t.Error("in non-slice: expected error, got nil")
+	}
+}
+
+// TestBuildPredicate_range checks the range lookup.
+func TestBuildPredicate_range(t *testing.T) {
+	t.Parallel()
+
+	sql, args, err := wherePredicate(t, "age__range", []int{18, 30})
+	if err != nil {
+		t.Fatalf("range: unexpected error: %v", err)
+	}
+	if sql != `"person"."age" BETWEEN ? AND ?` {
+		t.Errorf("range sql: got %q", sql)
+	}
+	if len(args) != 2 || args[0] != 18 || args[1] != 30 {
+		t.Errorf("range args: got %v, want [18 30]", args)
+	}
+
+	for name, value := range map[string]any{"one bound": []int{1}, "scalar": 5, "nil bound": []any{1, nil}} {
+		if _, _, err := wherePredicate(t, "age__range", value); err == nil {
+			t.Errorf("range %s: expected error, got nil", name)
+		}
 	}
 }
 
 // TestBuildPredicate_isnull checks isnull lookup.
 func TestBuildPredicate_isnull(t *testing.T) {
 	t.Parallel()
-	d := stubDialect{}
-	m := mustPersonModel(t)
 
-	// true -> IS NULL
-	sql, args, err := buildPredicate(d, m, "name__isnull", true, alwaysNext(), "")
+	sql, args, err := wherePredicate(t, "name__isnull", true)
 	if err != nil {
 		t.Fatalf("isnull true: unexpected error: %v", err)
 	}
-	if sql != `"name" IS NULL` {
-		t.Errorf("isnull true sql: got %q, want %q", sql, `"name" IS NULL`)
+	if sql != `"person"."name" IS NULL` {
+		t.Errorf("isnull true sql: got %q, want %q", sql, `"person"."name" IS NULL`)
 	}
 	if len(args) != 0 {
 		t.Errorf("isnull true args: got %v, want []", args)
 	}
 
-	// false -> IS NOT NULL
-	sql, args, err = buildPredicate(d, m, "name__isnull", false, alwaysNext(), "")
+	sql, args, err = wherePredicate(t, "name__isnull", false)
 	if err != nil {
 		t.Fatalf("isnull false: unexpected error: %v", err)
 	}
-	if sql != `"name" IS NOT NULL` {
-		t.Errorf("isnull false sql: got %q, want %q", sql, `"name" IS NOT NULL`)
+	if sql != `"person"."name" IS NOT NULL` {
+		t.Errorf("isnull false sql: got %q, want %q", sql, `"person"."name" IS NOT NULL`)
 	}
 	if len(args) != 0 {
 		t.Errorf("isnull false args: got %v, want []", args)
 	}
 
-	// non-bool -> error
-	_, _, err = buildPredicate(d, m, "name__isnull", "yes", alwaysNext(), "")
-	if err == nil {
+	if _, _, err = wherePredicate(t, "name__isnull", "yes"); err == nil {
 		t.Error("isnull non-bool: expected error, got nil")
 	}
 }
 
-// TestBuildPredicate_unknownField checks that an unknown column yields an error.
+// TestBuildPredicate_unknownField checks that an unknown key yields a
+// FieldError that names the model and the valid choices.
 func TestBuildPredicate_unknownField(t *testing.T) {
 	t.Parallel()
-	d := stubDialect{}
-	m := mustPersonModel(t)
 
-	_, _, err := buildPredicate(d, m, "bogus", "x", alwaysNext(), "")
-	if err == nil {
-		t.Error("unknown field: expected error, got nil")
+	_, _, err := wherePredicate(t, "bogus", "x")
+	if !errors.Is(err, ErrFieldError) {
+		t.Fatalf("unknown field: got %v, want a FieldError", err)
+	}
+	var fe *FieldError
+	if !errors.As(err, &fe) || fe.Model != "Person" {
+		t.Errorf("unknown field: got %#v, want a FieldError for Person", err)
+	}
+	const want = "cannot resolve keyword 'bogus' into field. Choices are: age, bio, id, name"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("unknown field: got %q, want it to contain %q", err.Error(), want)
 	}
 }
 
 // TestBuildPredicate_unknownLookup checks that an unknown lookup yields an error.
 func TestBuildPredicate_unknownLookup(t *testing.T) {
 	t.Parallel()
-	d := stubDialect{}
-	m := mustPersonModel(t)
 
-	_, _, err := buildPredicate(d, m, "name__weird", "x", alwaysNext(), "")
-	if err == nil {
-		t.Error("unknown lookup: expected error, got nil")
+	_, _, err := wherePredicate(t, "name__weird", "x")
+	if !errors.Is(err, ErrFieldError) {
+		t.Fatalf("unknown lookup: got %v, want a FieldError", err)
+	}
+	const want = "unsupported lookup 'weird' for CharField or join on the field not permitted."
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("unknown lookup: got %q, want it to contain %q", err.Error(), want)
 	}
 }
