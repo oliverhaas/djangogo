@@ -202,7 +202,7 @@ func EmailValidator(allowlist ...string) Validator {
 		at := strings.LastIndex(s, "@")
 		user, domain := s[:at], s[at+1:]
 		if !emailUserRE.MatchString(user) {
-			return invalid(message, value)
+			return NewValidationError(message, "invalid", map[string]any{"value": value, "username": user})
 		}
 		for _, allowed := range allowlist {
 			if domain == allowed {
@@ -215,7 +215,7 @@ func EmailValidator(allowlist ...string) Validator {
 		if m := emailLiteralRE.FindStringSubmatch(domain); m != nil && (ipv4Address(m[1]) || ipv6Address(m[1])) {
 			return nil
 		}
-		return invalid(message, value)
+		return NewValidationError(message, "invalid", map[string]any{"value": value, "domain": domain})
 	}
 }
 
@@ -240,7 +240,7 @@ func URLValidator(schemes ...string) Validator {
 	const message = "Enter a valid URL."
 	return func(value any) error {
 		s, ok := value.(string)
-		if !ok || utf8.RuneCountInString(s) > 2048 || strings.ContainsAny(s, "\t\r\n") {
+		if !ok || utf8.RuneCountInString(s) > 2048 || strings.ContainsAny(s, "\t\r\n\x00") {
 			return invalid(message, value)
 		}
 		scheme, rest, found := strings.Cut(s, "://")

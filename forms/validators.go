@@ -187,29 +187,37 @@ func StepValueValidator(step any, offset ...any) Validator {
 	}
 }
 
-// isStepMultiple reports whether value - offset is a multiple of step, within
-// Django's absolute tolerance of 1e-9 for floats and exactly for integers and
-// Decimals. A value or step that is not a number passes.
+// isStepMultiple reports whether value - offset is a multiple of step as
+// Django's StepValueValidator decides it: the difference is computed in the
+// value's type, then math.remainder of the floats must be within 1e-9 of 0. A
+// value or step that is not a number passes.
 func isStepMultiple(value, step any, offset ...any) bool {
 	var off any = int64(0)
 	if len(offset) > 0 && offset[0] != nil {
 		off = offset[0]
 	}
-	_, isFloat := value.(float64)
-	rv, ok1 := toRat(value)
-	rs, ok2 := toRat(step)
-	ro, ok3 := toRat(off)
-	if !ok1 || !ok2 || !ok3 || rs.Sign() == 0 {
+	var diff float64
+	_, floatValue := value.(float64)
+	_, floatOffset := off.(float64)
+	if rv, ok := toRat(value); ok && !floatValue && !floatOffset {
+		ro, ok := toRat(off)
+		if !ok {
+			return true
+		}
+		diff, _ = new(big.Rat).Sub(rv, ro).Float64()
+	} else {
+		v, ok1 := toFloat(value)
+		o, ok2 := toFloat(off)
+		if !ok1 || !ok2 {
+			return true
+		}
+		diff = v - o
+	}
+	s, ok := toFloat(step)
+	if !ok || s == 0 {
 		return true
 	}
-	if isFloat {
-		v, _ := toFloat(value)
-		s, _ := toFloat(step)
-		o, _ := toFloat(off)
-		return math.Abs(math.Remainder(v-o, s)) <= 1e-9
-	}
-	q := new(big.Rat).Quo(new(big.Rat).Sub(rv, ro), rs)
-	return q.IsInt()
+	return math.Abs(math.Remainder(diff, s)) <= 1e-9
 }
 
 // addNumbers returns offset + n*step: an integer when both are integers, a
