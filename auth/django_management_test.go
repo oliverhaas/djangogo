@@ -151,3 +151,49 @@ func TestSyncPermissionsNamesAndIdempotence(t *testing.T) {
 		djangotest.AssertEqual(t, total, int64(20))
 	})
 }
+
+// Ported from Django: tests/auth_tests/test_management.py::GetDefaultUsernameTestCase.test_actual_implementation
+func TestGetDefaultUsernameActualImplementation(t *testing.T) {
+	// SystemUsername returns a string, "" when no user is found; there is
+	// nothing further to assert about the name of the user running the test.
+	t.Logf("system username: %q", auth.SystemUsername())
+}
+
+// Ported from Django: tests/auth_tests/test_management.py::GetDefaultUsernameTestCase.test_getuser_raises_exception
+func TestGetDefaultUsernameGetuserRaisesException(t *testing.T) {
+	t.Skip("Go has no getpass.getuser to make raise; SystemUsername returns \"\" when the lookup fails")
+}
+
+// Ported from Django: tests/auth_tests/test_management.py::GetDefaultUsernameTestCase.test_simple
+func TestGetDefaultUsernameSimple(t *testing.T) {
+	db := newTestDB(t)
+	got, err := auth.DefaultUsername(context.Background(), db, "joe")
+	must(t, err)
+	djangotest.AssertEqual(t, got, "joe")
+}
+
+// Ported from Django: tests/auth_tests/test_management.py::GetDefaultUsernameTestCase.test_existing
+func TestGetDefaultUsernameExisting(t *testing.T) {
+	db := newTestDB(t)
+	createUser(t, db, "joe", "")
+	got, err := auth.DefaultUsername(context.Background(), db, "joe")
+	must(t, err)
+	djangotest.AssertEqual(t, got, "")
+	got, err = auth.DefaultUsername(context.Background(), nil, "joe")
+	must(t, err)
+	djangotest.AssertEqual(t, got, "joe")
+}
+
+// Ported from Django: tests/auth_tests/test_management.py::GetDefaultUsernameTestCase.test_i18n
+func TestGetDefaultUsernameI18n(t *testing.T) {
+	db := newTestDB(t)
+	// 'Julia' with accented 'u':
+	got, err := auth.DefaultUsername(context.Background(), db, "Júlia")
+	must(t, err)
+	djangotest.AssertEqual(t, got, "julia")
+}
+
+// Ported from Django: tests/auth_tests/test_management.py::GetDefaultUsernameTestCase.test_with_database
+func TestGetDefaultUsernameWithDatabase(t *testing.T) {
+	t.Skip("Djan-Go-Go has one database")
+}
