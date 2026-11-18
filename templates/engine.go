@@ -57,8 +57,17 @@ func NewEngineFS(fsys fs.FS) (*Engine, error) {
 	if fsys == nil {
 		return nil, fmt.Errorf("templates: fsys must not be nil")
 	}
-	return newEngine(pongo2.NewFSLoader(fsys)), nil
+	return newEngine(rootFSLoader{pongo2.NewFSLoader(fsys)}), nil
 }
+
+// rootFSLoader resolves every template name from the root of its fs.FS, as
+// Django's loaders do: {% extends "blog/base.html" %} inside
+// "blog/post_list.html" names "blog/base.html", not "blog/blog/base.html" as
+// pongo2's FSLoader would make it.
+type rootFSLoader struct{ *pongo2.FSLoader }
+
+// Abs returns name unchanged, ignoring the template that refers to it.
+func (rootFSLoader) Abs(_, name string) string { return name }
 
 // newEngine builds an Engine from the given loaders. A string-only loader is added
 // when none are supplied so RenderString always works (FromString never consults a

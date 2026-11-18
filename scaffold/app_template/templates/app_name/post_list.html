@@ -1,0 +1,14 @@
+{% extends "[[.AppName]]/base.html" %}
+
+{% block title %}Posts{% endblock %}
+
+{% block content %}
+<h1>Posts</h1>
+<ul>
+  {% for post in posts %}
+  <li><a href="{% url '[[.AppName]]:post_detail' post.id %}">{{ post }}</a></li>
+  {% empty %}
+  <li>No posts are published yet. Add one in the <a href="/admin/">admin</a>.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

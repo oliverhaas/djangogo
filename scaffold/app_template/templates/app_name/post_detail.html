@@ -1,0 +1,9 @@
+{% extends "[[.AppName]]/base.html" %}
+
+{% block title %}{{ post.title }}{% endblock %}
+
+{% block content %}
+<h1>{{ post.title }}</h1>
+{{ post.body|linebreaks }}
+<p><a href="{% url '[[.AppName]]:post_list' %}">All posts</a></p>
+{% endblock %}

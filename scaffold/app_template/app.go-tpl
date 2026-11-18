@@ -1,0 +1,53 @@
+// Package [[.AppName]] is the [[.AppName]] app.
+package [[.AppName]]
+
+import (
+	"embed"
+	"io/fs"
+
+	"github.com/oliverhaas/djangogo/apps"
+	"github.com/oliverhaas/djangogo/orm"
+	"github.com/oliverhaas/djangogo/templates"
+)
+
+// files holds the templates and the static files of the app, compiled into
+// the binary.
+//
+//go:embed templates static
+var files embed.FS
+
+// App is the configuration of the app, Django's AppConfig. Install the app by
+// passing &[[.AppName]].App{} to djangogo.New in main.go.
+type App struct {
+	db        *orm.DB
+	templates *templates.Engine
+}
+
+// Name returns the name of the app, which is also its label.
+func (*App) Name() string { return "[[.AppName]]" }
+
+// Models returns the models of the app.
+func (*App) Models() []any { return []any{&Post{}} }
+
+// Templates returns the templates of the app: the file
+// templates/[[.AppName]]/post_list.html is the template "[[.AppName]]/post_list.html".
+func (*App) Templates() fs.FS { return subtree("templates") }
+
+// Static returns the static files of the app, served under the StaticURL of
+// the settings: static/[[.AppName]]/style.css is /static/[[.AppName]]/style.css.
+func (*App) Static() fs.FS { return subtree("static") }
+
+// Wire keeps the database and the template engine for the views. The
+// framework calls it after it registered all apps and before it collects
+// their URLs.
+func (a *App) Wire(ctx *apps.Context) error {
+	a.db, a.templates = ctx.DB, ctx.Templates
+	return nil
+}
+
+// subtree returns the directory dir of files. dir is a valid path, so fs.Sub
+// cannot fail.
+func subtree(dir string) fs.FS {
+	tree, _ := fs.Sub(files, dir)
+	return tree
+}

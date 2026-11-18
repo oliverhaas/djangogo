@@ -1,0 +1,12 @@
+package [[.AppName]]
+
+import "github.com/oliverhaas/djangogo/admin"
+
+// RegisterAdmin registers the models of the app with the admin site, Django's
+// admin.py. djangogo.New calls it and serves the admin at /admin/.
+func (*App) RegisterAdmin(site *admin.AdminSite) {
+	admin.Register[Post](site, admin.ModelAdmin{
+		ListDisplay: []string{"ID", "Title", "Published"},
+		Ordering:    []string{"-id"},
+	})
+}

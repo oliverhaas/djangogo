@@ -2,26 +2,29 @@ package scaffold
 
 import (
 	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
-// TestGeneratedProjectBuilds is the exit-criterion test: it generates a project
-// pointed at the local repo via a replace directive, runs go mod tidy, then go
-// build ./..., and asserts both succeed. This proves startproject produces a
-// runnable project. It is skipped under -short because it invokes the Go
-// toolchain and resolves modules.
+// TestGeneratedProjectBuilds generates a project pointed at the local
+// repository through a replace directive, adds a second app as startapp
+// does, and checks that go mod tidy, go build, go vet and the tests of the
+// generated project succeed. It is skipped under -short because it runs the
+// Go toolchain.
 func TestGeneratedProjectBuilds(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping generated-project build under -short")
+		t.Skip("skipping the generated-project build under -short")
 	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skipf("go toolchain not on PATH: %v", err)
 	}
 
 	dir := t.TempDir()
-	root := repoRoot(t)
-	if err := Project(dir, "myproj", root); err != nil {
+	if err := Project(dir, "myproj", Options{ReplacePath: repoRoot(t)}); err != nil {
 		t.Fatalf("Project: %v", err)
+	}
+	if err := App(filepath.Join(dir, "shop"), "shop", Options{}); err != nil {
+		t.Fatalf("App: %v", err)
 	}
 
 	run := func(name string, args ...string) {
@@ -36,6 +39,6 @@ func TestGeneratedProjectBuilds(t *testing.T) {
 
 	run("go", "mod", "tidy")
 	run("go", "build", "./...")
-	// vet catches issues a build alone may miss (e.g. printf misuse).
 	run("go", "vet", "./...")
+	run("go", "test", "./...")
 }

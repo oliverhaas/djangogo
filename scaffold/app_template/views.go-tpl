@@ -1,0 +1,31 @@
+package [[.AppName]]
+
+import (
+	"net/http"
+
+	"github.com/oliverhaas/djangogo/orm"
+	"github.com/oliverhaas/djangogo/views"
+)
+
+// postList shows the published posts, the newest first.
+func (a *App) postList() http.Handler {
+	return views.ListView[Post]{
+		DB:          a.db,
+		Engine:      a.templates,
+		Template:    "[[.AppName]]/post_list.html",
+		ContextName: "posts",
+		Query: func(db *orm.DB) *orm.QuerySet[Post] {
+			return orm.Query[Post](db).Filter("published", true).OrderBy("-id")
+		},
+	}
+}
+
+// postDetail shows the post whose primary key is in the URL.
+func (a *App) postDetail() http.Handler {
+	return views.DetailView[Post]{
+		DB:          a.db,
+		Engine:      a.templates,
+		Template:    "[[.AppName]]/post_detail.html",
+		ContextName: "post",
+	}
+}

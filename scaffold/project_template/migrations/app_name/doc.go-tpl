@@ -1,0 +1,4 @@
+// Package [[.AppName]] holds the migrations of the [[.AppName]] app:
+// makemigrations writes them here, and main.go imports the package so that
+// they register with migrate.
+package [[.AppName]]

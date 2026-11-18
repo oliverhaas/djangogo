@@ -1,0 +1,48 @@
+// Command [[.Module]] runs the management commands of the project, the
+// counterpart of Django's manage.py:
+//
+//	go run . migrate
+//	go run . createsuperuser
+//	go run . runserver
+//
+// Run "go mod tidy" once after creating the project to fetch the
+// dependencies.
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/oliverhaas/djangogo"
+	"github.com/oliverhaas/djangogo/auth"
+
+	"[[.Module]]/[[.AppName]]"
+	// Importing the migrations of an app registers them with migrate.
+	_ "[[.Module]]/migrations/[[.AppName]]"
+)
+
+func main() {
+	os.Exit(run())
+}
+
+// run builds the application and runs the command the arguments name. It
+// returns the exit code instead of calling os.Exit, so that the deferred
+// Close runs.
+func run() int {
+	s, err := settings()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	// The installed apps, Django's INSTALLED_APPS. The admin needs auth.
+	app, err := djangogo.New(s,
+		&[[.AppName]].App{},
+		auth.App{},
+	)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer func() { _ = app.Close() }()
+	return app.Run(os.Args[1:])
+}

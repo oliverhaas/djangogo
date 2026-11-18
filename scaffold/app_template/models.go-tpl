@@ -1,0 +1,14 @@
+package [[.AppName]]
+
+// Post is a sample model; replace it with the models of the app. After a
+// change, run "go run . makemigrations" and "go run . migrate".
+type Post struct {
+	ID        int64
+	Title     string `orm:"max_length=200"`
+	Body      string `orm:"type=text"`
+	Published bool
+}
+
+// String returns the label of a post in the admin and in templates, Django's
+// __str__.
+func (p Post) String() string { return p.Title }
