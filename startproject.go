@@ -3,14 +3,13 @@ package djangogo
 import (
 	"errors"
 	"fmt"
-	"io"
 
 	"github.com/oliverhaas/djangogo/scaffold"
 )
 
 // startprojectCommand generates a runnable project skeleton in a new directory.
 type startprojectCommand struct {
-	out io.Writer
+	app *Application
 }
 
 func (*startprojectCommand) Name() string { return "startproject" }
@@ -28,7 +27,7 @@ func (c *startprojectCommand) Run(args []string) error {
 	if err := scaffold.Project(dir, name, ""); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(c.out, "Created project %q in %s\n", name, dir)
-	_, _ = fmt.Fprintf(c.out, "Next: cd %s && go mod tidy && go run . runserver\n", name)
+	_, _ = fmt.Fprintf(c.app.out(), "Created project %q in %s\n", name, dir)
+	_, _ = fmt.Fprintf(c.app.out(), "Next: cd %s && go mod tidy && go run . runserver\n", name)
 	return nil
 }
