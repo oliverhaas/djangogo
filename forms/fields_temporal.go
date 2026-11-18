@@ -41,13 +41,16 @@ func goLayout(format string) string {
 }
 
 // parseLayout is goLayout for parsing: the padded numeric elements become the
-// unpadded ones, so that "1/2/2006" parses under "%m/%d/%Y" as strptime allows.
+// unpadded ones, so that "1/2/2006" parses under "%m/%d/%Y" and "2:30 PM"
+// under "%I:%M %p", as strptime allows.
 func parseLayout(format string) string {
 	layout := goLayout(format)
 	if !strings.Contains(format, "%") {
 		return layout
 	}
-	return strings.NewReplacer("01", "1", "02", "2", "15", "15", "04", "4", "05", "5", "2006", "2006").Replace(layout)
+	// ".999999" takes any number of fractional digits, as %f takes one to six.
+	return strings.NewReplacer("01", "1", "02", "2", "03", "3", "15", "15", "04", "4", "05", "5", "2006", "2006",
+		"000000", "999999").Replace(layout)
 }
 
 // Default input formats, Django's DATE_INPUT_FORMATS, TIME_INPUT_FORMATS and
@@ -58,16 +61,58 @@ var (
 		"%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%b %d %Y", "%b %d, %Y", "%d %b %Y", "%d %b, %Y",
 		"%B %d %Y", "%B %d, %Y", "%d %B %Y", "%d %B, %Y",
 	}
-	timeInputFormats     = []string{"%H:%M:%S", "%H:%M"}
-	dateTimeInputFormats = []string{
+	timeInputFormats = []string{"%H:%M:%S", "%H:%M"}
+	// A DateTimeField also accepts the date formats, as Django's
+	// DateTimeFormatsIterator yields both lists.
+	dateTimeInputFormats = append([]string{
 		"%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M",
 		"%m/%d/%y %H:%M:%S", "%m/%d/%y %H:%M",
-	}
-	isoDateTimeLayouts = []string{
-		"2006-1-2T15:4:5Z07:00", "2006-1-2T15:4Z07:00", "2006-1-2T15:4:5", "2006-1-2T15:4",
-		"2006-1-2 15:4:5Z07:00", "2006-1-2 15:4Z07:00", "2006-1-2",
-	}
+	}, dateInputFormats...)
+	// isoDateTimeRE is Django's datetime_re, extended by the date-only form
+	// that Python's datetime.fromisoformat accepts.
+	isoDateTimeRE = regexp.MustCompile(`^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{1,2})` +
+		`(?::(\d{1,2})(?:[.,](\d{1,6})\d{0,6})?)?\s*(Z|[+-]\d{2}(?::?\d{2})?)?)?$`)
 )
+
+// parseISODateTime parses an ISO 8601 date and time, Django's parse_datetime.
+// A value without an offset is read as UTC.
+func parseISODateTime(s string) (time.Time, bool) {
+	m := isoDateTimeRE.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, false
+	}
+	num := func(i int) int {
+		n, _ := strconv.Atoi(m[i])
+		return n
+	}
+	nanos := 0
+	if m[7] != "" {
+		nanos, _ = strconv.Atoi((m[7] + "00000000")[:9])
+	}
+	loc := time.UTC
+	if tz := m[8]; tz != "" && tz != "Z" {
+		digits := strings.ReplaceAll(tz[1:], ":", "")
+		hours, _ := strconv.Atoi(digits[:2])
+		minutes := 0
+		if len(digits) == 4 {
+			minutes, _ = strconv.Atoi(digits[2:])
+		}
+		offset := hours*3600 + minutes*60
+		if tz[0] == '-' {
+			offset = -offset
+		}
+		loc = time.FixedZone("", offset)
+	}
+	year, month, day, hour, minute, second := num(1), num(2), num(3), num(4), num(5), num(6)
+	t := time.Date(year, time.Month(month), day, hour, minute, second, nanos, loc)
+	// time.Date normalizes out-of-range parts (February 30 becomes March 2);
+	// Python rejects them.
+	if t.Month() != time.Month(month) || t.Day() != day || t.Hour() != hour || t.Minute() != minute ||
+		t.Second() != second {
+		return time.Time{}, false
+	}
+	return t, true
+}
 
 // parseTemporal tries each format in turn and returns the first time that
 // parses, in UTC unless the value carries an offset.
@@ -205,11 +250,8 @@ func NewDateTimeField(opts ...FieldOption) *DateTimeField {
 // datetime-local input and of an API client have that form.
 func (f *DateTimeField) ToGo(value any) (any, error) {
 	if s, ok := value.(string); ok {
-		s = strings.TrimSpace(s)
-		for _, layout := range isoDateTimeLayouts {
-			if t, err := time.Parse(layout, s); err == nil {
-				return t, nil
-			}
+		if t, ok := parseISODateTime(strings.TrimSpace(s)); ok {
+			return t, nil
 		}
 	}
 	return f.parse(value)

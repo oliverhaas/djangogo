@@ -122,12 +122,19 @@ func formatValue(value any) (string, bool) {
 
 // renderInput returns an <input> element.
 func renderInput(inputType, name string, value any, layers ...Attrs) string {
+	attrs := mergeAttrs(layers...)
+	// A "type" attribute replaces the input type, as Django's Input takes it
+	// from the attrs it is constructed with.
+	if t, ok := attrs["type"]; ok {
+		inputType = pyString(t)
+		delete(attrs, "type")
+	}
 	var b strings.Builder
-	b.WriteString(`<input type="` + inputType + `" name="` + escape(name) + `"`)
+	b.WriteString(`<input type="` + escape(inputType) + `" name="` + escape(name) + `"`)
 	if s, ok := formatValue(value); ok {
 		b.WriteString(` value="` + escape(s) + `"`)
 	}
-	b.WriteString(renderAttrs(mergeAttrs(layers...)))
+	b.WriteString(renderAttrs(attrs))
 	b.WriteString(">")
 	return b.String()
 }

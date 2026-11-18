@@ -170,16 +170,7 @@ func MinValueValidator(limit any) Validator {
 // StepValueValidator. An optional offset moves the origin of the multiples.
 func StepValueValidator(step any, offset ...any) Validator {
 	return func(value any) error {
-		v, ok1 := toFloat(value)
-		s, ok2 := toFloat(step)
-		if !ok1 || !ok2 || s == 0 {
-			return nil
-		}
-		var off float64
-		if len(offset) > 0 && offset[0] != nil {
-			off, _ = toFloat(offset[0])
-		}
-		if math.Abs(math.Remainder(v-off, s)) <= 1e-9 {
+		if isStepMultiple(value, step, offset...) {
 			return nil
 		}
 		params := map[string]any{"limit_value": step, "show_value": value, "value": value}
@@ -196,17 +187,64 @@ func StepValueValidator(step any, offset ...any) Validator {
 	}
 }
 
-// addNumbers returns offset + n*step, as an integer when both are integers and
-// as a float otherwise.
+// isStepMultiple reports whether value - offset is a multiple of step, within
+// Django's absolute tolerance of 1e-9 for floats and exactly for integers and
+// Decimals. A value or step that is not a number passes.
+func isStepMultiple(value, step any, offset ...any) bool {
+	var off any = int64(0)
+	if len(offset) > 0 && offset[0] != nil {
+		off = offset[0]
+	}
+	_, isFloat := value.(float64)
+	rv, ok1 := toRat(value)
+	rs, ok2 := toRat(step)
+	ro, ok3 := toRat(off)
+	if !ok1 || !ok2 || !ok3 || rs.Sign() == 0 {
+		return true
+	}
+	if isFloat {
+		v, _ := toFloat(value)
+		s, _ := toFloat(step)
+		o, _ := toFloat(off)
+		return math.Abs(math.Remainder(v-o, s)) <= 1e-9
+	}
+	q := new(big.Rat).Quo(new(big.Rat).Sub(rv, ro), rs)
+	return q.IsInt()
+}
+
+// addNumbers returns offset + n*step: an integer when both are integers, a
+// Decimal with the larger number of decimal places when either is a Decimal,
+// as Python's decimal arithmetic gives, and a float otherwise.
 func addNumbers(offset, step any, n int64) any {
 	oi, ok1 := toInt(offset)
 	si, ok2 := toInt(step)
 	if ok1 && ok2 {
 		return oi + n*si
 	}
+	_, decOffset := offset.(Decimal)
+	_, decStep := step.(Decimal)
+	if decOffset || decStep {
+		ro, okO := toRat(offset)
+		rs, okS := toRat(step)
+		if okO && okS {
+			sum := new(big.Rat).Add(ro, new(big.Rat).Mul(rs, new(big.Rat).SetInt64(n)))
+			if d, err := ParseDecimal(sum.FloatString(max(fractionDigits(offset), fractionDigits(step)))); err == nil {
+				return d
+			}
+		}
+	}
 	of, _ := toFloat(offset)
 	sf, _ := toFloat(step)
 	return of + float64(n)*sf
+}
+
+// fractionDigits returns the number of decimal places of a Decimal, 0 for any
+// other value.
+func fractionDigits(v any) int {
+	if d, ok := v.(Decimal); ok && d.exp < 0 {
+		return -d.exp
+	}
+	return 0
 }
 
 // toInt converts a Go integer of any width to int64.

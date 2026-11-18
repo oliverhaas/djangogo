@@ -140,9 +140,8 @@ func (f *IntegerField) ToGo(value any) (any, error) {
 	if i, ok := toInt(value); ok {
 		return i, nil
 	}
-	s := strings.TrimSpace(trailingZerosRE.ReplaceAllString(pyString(value), ""))
-	i, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
+	i, ok := pyInt(trailingZerosRE.ReplaceAllString(pyString(value), ""))
+	if !ok {
 		return nil, f.Error("invalid")
 	}
 	return i, nil
@@ -297,7 +296,7 @@ func (f *BooleanField) ToGo(value any) (any, error) {
 		lower := strings.ToLower(v)
 		return v != "" && lower != "false" && lower != "0", nil
 	}
-	return true, nil
+	return pyTruth(value), nil
 }
 
 // Validate rejects false for a required field.
@@ -439,6 +438,11 @@ type RegexField struct {
 // "invalid" with ErrorMessages.
 func NewRegexField(re *regexp.Regexp, opts ...FieldOption) *RegexField {
 	o := collectOptions(opts)
+	// Unlike CharField, RegexField keeps surrounding whitespace by default.
+	if o.strip == nil {
+		strip := false
+		o.strip = &strip
+	}
 	f := &RegexField{}
 	f.setup(f, TextInput{}, nil, o)
 	f.Validators = append(f.Validators, RegexValidator(re, "", ""))
@@ -463,8 +467,11 @@ func NewUUIDField(opts ...FieldOption) *UUIDField {
 func (f *UUIDField) ToGo(value any) (any, error) {
 	v, err := f.CharField.ToGo(value)
 	s, ok := v.(string)
-	if err != nil || !ok || s == "" {
+	if err != nil || !ok {
 		return v, err
+	}
+	if s == "" {
+		return nil, nil
 	}
 	hex := strings.NewReplacer("urn:", "", "uuid:", "", "{", "", "}", "", "-", "").Replace(s)
 	if len(hex) != 32 {

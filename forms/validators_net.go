@@ -255,8 +255,7 @@ func URLValidator(schemes ...string) Validator {
 		if !known {
 			return invalid(message, value)
 		}
-		host, ok := urlHost(rest)
-		if !ok {
+		if _, ok := urlHost(rest); !ok {
 			return invalid(message, value)
 		}
 		// The pattern only checks the characters of a bracketed host.
@@ -267,8 +266,9 @@ func URLValidator(schemes ...string) Validator {
 		if m := urlNetlocV6RE.FindStringSubmatch(netloc); m != nil && !ipv6Address(m[1]) {
 			return invalid(message, value)
 		}
-		// RFC 1034 section 3.1 limits a full host name to 253 characters.
-		if host == "" || utf8.RuneCountInString(host) > 253 {
+		// Django checks the host that urlsplit finds ("https://#@a.com" has
+		// none). RFC 1034 section 3.1 limits a host name to 253 characters.
+		if host := netlocHostname(netloc); host == "" || utf8.RuneCountInString(host) > 253 {
 			return invalid(message, value)
 		}
 		return nil
@@ -277,6 +277,23 @@ func URLValidator(schemes ...string) Validator {
 
 // ValidateURL accepts an http, https, ftp or ftps URL.
 var ValidateURL = URLValidator()
+
+// netlocHostname returns the host of a network location as Python's
+// urlsplit(...).hostname does: without user info, port and brackets.
+func netlocHostname(netloc string) string {
+	if at := strings.LastIndex(netloc, "@"); at >= 0 {
+		netloc = netloc[at+1:]
+	}
+	if strings.HasPrefix(netloc, "[") {
+		end := strings.Index(netloc, "]")
+		if end < 0 {
+			return ""
+		}
+		return netloc[1:end]
+	}
+	host, _, _ := strings.Cut(netloc, ":")
+	return host
+}
 
 // urlHost matches the part of a URL after "://" against Django's pattern
 // (optional user info, host, optional port, optional path) and returns the

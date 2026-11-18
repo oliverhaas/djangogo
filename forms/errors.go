@@ -3,11 +3,8 @@ package forms
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 )
 
 // NonFieldErrors is the key under which an ErrorDict stores the errors that
@@ -256,59 +253,6 @@ func formatMessage(msg string, params map[string]any) string {
 		i += end + 1 // skip the conversion character after ")"
 	}
 	return b.String()
-}
-
-// pyString renders v the way Python's str() renders the corresponding value,
-// so that messages and widget values match Django's output.
-func pyString(v any) string {
-	switch t := v.(type) {
-	case nil:
-		return "None"
-	case string:
-		return t
-	case bool:
-		if t {
-			return "True"
-		}
-		return "False"
-	case float64:
-		return formatFloat(t)
-	case float32:
-		return formatFloat(float64(t))
-	case time.Time:
-		return formatDateTime(t)
-	case time.Duration:
-		return formatDuration(t)
-	case fmt.Stringer:
-		return t.String()
-	}
-	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() != reflect.Uint8 {
-		items := make([]string, rv.Len())
-		for i := range items {
-			items[i] = pyRepr(rv.Index(i).Interface())
-		}
-		return "[" + strings.Join(items, ", ") + "]"
-	}
-	return fmt.Sprint(v)
-}
-
-// pyRepr renders v the way Python's repr() renders the corresponding value: a
-// string in single quotes, everything else as pyString.
-func pyRepr(v any) string {
-	if s, ok := v.(string); ok {
-		return "'" + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), "'", `\'`) + "'"
-	}
-	return pyString(v)
-}
-
-// formatFloat renders a float as Python's str(float) does: the shortest
-// representation, always with a fractional part ("1.0").
-func formatFloat(f float64) string {
-	s := strconv.FormatFloat(f, 'g', -1, 64)
-	if strings.ContainsAny(s, ".eEnN") { // "NaN" and "+Inf" stay as they are
-		return s
-	}
-	return s + ".0"
 }
 
 // escape escapes s for HTML exactly as Django's escape() does (html.escape of

@@ -218,6 +218,56 @@ func (f *MultipleChoiceField) HasChanged(initial, data any) bool {
 	return false
 }
 
+// TypedMultipleChoiceField is a MultipleChoiceField that converts each chosen
+// value with a function; its cleaned value is a []any of the converted values.
+type TypedMultipleChoiceField struct {
+	MultipleChoiceField
+	// Coerce converts a valid choice. An error makes the choice invalid.
+	Coerce func(string) (any, error)
+	// EmptyValue is the cleaned value of an empty submission, an empty []any
+	// by default.
+	EmptyValue any
+}
+
+// NewTypedMultipleChoiceField returns a TypedMultipleChoiceField. It reads the
+// options Coerce and EmptyValue beside those of a MultipleChoiceField.
+func NewTypedMultipleChoiceField(opts ...FieldOption) *TypedMultipleChoiceField {
+	o := collectOptions(opts)
+	f := &TypedMultipleChoiceField{Coerce: o.coerce, EmptyValue: []any{}}
+	if o.hasEmptyValue {
+		f.EmptyValue = o.emptyValue
+	}
+	f.Choices = o.choices
+	f.init(f, SelectMultiple{}, map[string]string{
+		"invalid_choice": invalidChoiceMessage,
+		"invalid_list":   "Enter a list of values.",
+	}, o)
+	return f
+}
+
+// Clean validates the choices and then converts them.
+func (f *TypedMultipleChoiceField) Clean(value any) (any, error) {
+	v, err := f.BaseField.Clean(value)
+	if err != nil {
+		return nil, err
+	}
+	list, _ := v.([]string)
+	if len(list) == 0 {
+		return f.EmptyValue, nil
+	}
+	out := make([]any, len(list))
+	for i, s := range list {
+		out[i] = s
+		if f.Coerce == nil {
+			continue
+		}
+		if out[i], err = f.Coerce(s); err != nil {
+			return nil, f.Error("invalid_choice", map[string]any{"value": s})
+		}
+	}
+	return out, nil
+}
+
 // modelRow is one selectable object of a ModelChoiceField.
 type modelRow struct {
 	pk    string
