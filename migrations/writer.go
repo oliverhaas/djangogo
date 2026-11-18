@@ -231,7 +231,8 @@ func (w *writer) operation(op Operation) (string, error) {
 	case RunSQL:
 		b.WriteString("migrations.RunSQL{\n")
 		fmt.Fprintf(&b, "SQL: %s,\n", stringList(o.SQL))
-		if len(o.ReverseSQL) > 0 {
+		// An empty list means "nothing to undo", a missing one "irreversible".
+		if o.ReverseSQL != nil {
 			fmt.Fprintf(&b, "ReverseSQL: %s,\n", stringList(o.ReverseSQL))
 		}
 		if len(o.StateOperations) > 0 {
