@@ -15,10 +15,6 @@ import (
 // This file ports the form tests of Django's test client and the tests of
 // assertFormError. A Go form has no class name, so the form in the failure
 // messages is "<Form ...>" where Django writes the class, "<TestForm ...>".
-//
-// The template engine of this branch records the template a view renders but
-// not the templates it extends, so the checks that base.html was used are
-// skipped (FIXME-PORT) until the engine records them.
 
 // formTemplates holds the templates of the form views: the inline templates of
 // tests/test_client/views.py under their names, and form_view.html,
@@ -219,7 +215,6 @@ func TestValidFormWithTemplate(t *testing.T) {
 	djangotest.AssertContains(t, resp, "POST data OK")
 	djangotest.AssertTemplateUsed(t, resp, "form_view.html")
 	djangotest.AssertTemplateNotUsed(t, resp, "Valid POST Template")
-	t.Skip("FIXME-PORT: Go: the template engine does not record the templates a template extends, Django: base.html is a template used")
 	djangotest.AssertTemplateUsed(t, resp, "base.html")
 }
 
@@ -234,7 +229,6 @@ func TestIncompleteDataFormWithTemplate(t *testing.T) {
 	djangotest.AssertFormError(t, form, "email", []string{"This field is required."})
 	djangotest.AssertFormError(t, form, "single", []string{"This field is required."})
 	djangotest.AssertFormError(t, form, "multi", []string{"This field is required."})
-	t.Skip("FIXME-PORT: Go: the template engine does not record the templates a template extends, Django: base.html is a template used")
 	djangotest.AssertTemplateUsed(t, resp, "base.html")
 }
 
@@ -247,7 +241,6 @@ func TestFormErrorWithTemplate(t *testing.T) {
 	djangotest.AssertTemplateUsed(t, resp, "form_view.html")
 	djangotest.AssertTemplateNotUsed(t, resp, "Invalid POST Template")
 	djangotest.AssertFormError(t, contextValue(t, resp, "form"), "email", []string{"Enter a valid email address."})
-	t.Skip("FIXME-PORT: Go: the template engine does not record the templates a template extends, Django: base.html is a template used")
 	djangotest.AssertTemplateUsed(t, resp, "base.html")
 }
 
@@ -258,7 +251,6 @@ func TestMultipleContext(t *testing.T) {
 	mustFail(t, "Template 'form_view.html' was used unexpectedly in rendering the response", func(ft djangotest.TB) {
 		djangotest.AssertTemplateNotUsed(ft, resp, "form_view.html")
 	})
-	t.Skip("FIXME-PORT: Go: the template engine does not record the templates a template extends, Django: base.html is a template used")
 	mustFail(t, "Template 'base.html' was used unexpectedly in rendering the response", func(ft djangotest.TB) {
 		djangotest.AssertTemplateNotUsed(ft, resp, "base.html")
 	})
@@ -293,7 +285,6 @@ func TestContextsInheritedContext(t *testing.T) {
 	djangotest.AssertEqual(t, contextValue(t, resp, "data"), any("bacon"))
 	_, ok := resp.Context("does-not-exist")
 	djangotest.AssertEqual(t, ok, false)
-	t.Skip("FIXME-PORT: Go: the template engine does not record the templates a template extends, Django: 2 contexts, extended.html and base.html")
 	djangotest.AssertEqual(t, len(resp.Templates), 2)
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -219,7 +220,25 @@ func assertContextObject[T any](t *testing.T, db *orm.DB, resp *djangotest.Respo
 	if !ok {
 		t.Fatalf("%T is not a registered model", want)
 	}
-	djangotest.AssertEqual(t, contextValue(t, resp, key), any(templates.ModelContext(m, want)))
+	djangotest.AssertEqual(t, withoutMethods(contextValue(t, resp, key)), withoutMethods(templates.ModelContext(m, want)))
+}
+
+// withoutMethods returns the entries of a model context without the methods
+// the template engine exposes (get_absolute_url and the like). Go compares
+// two non-nil func values as different, and the methods follow from the
+// instance anyway.
+func withoutMethods(v any) any {
+	m, ok := v.(templates.ModelMap)
+	if !ok {
+		return v
+	}
+	out := templates.ModelMap{}
+	for k, e := range m {
+		if reflect.ValueOf(e).Kind() != reflect.Func {
+			out[k] = e
+		}
+	}
+	return out
 }
 
 // assertContextObjects asserts that the context entry is the list of the model
@@ -233,9 +252,14 @@ func assertContextObjects[T any](t *testing.T, db *orm.DB, resp *djangotest.Resp
 	}
 	wantMaps := make([]any, len(want))
 	for i, obj := range want {
-		wantMaps[i] = templates.ModelContext(m, obj)
+		wantMaps[i] = withoutMethods(templates.ModelContext(m, obj))
 	}
-	djangotest.AssertSequenceEqual(t, contextList(t, resp, key), wantMaps)
+	got := contextList(t, resp, key)
+	gotMaps := make([]any, len(got))
+	for i, e := range got {
+		gotMaps[i] = withoutMethods(e)
+	}
+	djangotest.AssertSequenceEqual(t, gotMaps, wantMaps)
 }
 
 // assertSameList asserts that two context keys hold the same list, Django's

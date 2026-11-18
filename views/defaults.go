@@ -1,9 +1,9 @@
 package views
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/oliverhaas/djangogo/templates"
@@ -45,25 +45,9 @@ func writeHTML(w http.ResponseWriter, status int, body string) {
 // template name, says that this very template could not be found. A template
 // that exists but extends or includes a missing one does not count: that is a
 // defect of the template and must surface as an error.
-//
-// The engine has no existence check and no sentinel for a missing template,
-// so this is the one place that inspects its error text. The text names the
-// file that was not found: the template name for an engine over an fs.FS, and
-// the name joined to the template directory for an engine over directories.
 func isTemplateMissing(err error, name string) bool {
-	if err == nil {
-		return false
-	}
-	rest, ok := strings.CutPrefix(err.Error(), fmt.Sprintf("templates: load %q: [Error (where: fromfile) in ", name))
-	if !ok {
-		return false
-	}
-	file, reason, ok := strings.Cut(rest, "]")
-	if !ok || !strings.Contains(reason, "unable to resolve template") {
-		return false
-	}
-	file = filepath.ToSlash(file)
-	return file == name || strings.HasSuffix(file, "/"+name)
+	var missing *templates.TemplateDoesNotExist
+	return errors.As(err, &missing) && missing.Name == name
 }
 
 // errorPage renders an error template for the request, or falls back to

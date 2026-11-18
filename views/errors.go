@@ -45,8 +45,9 @@ var (
 	// setting it needs. It is a programming error and maps to a 500.
 	ErrImproperlyConfigured error = &kindError{msg: "views: improperly configured"}
 	// ErrTemplateDoesNotExist is Django's TemplateDoesNotExist: none of the
-	// candidate templates could be loaded.
-	ErrTemplateDoesNotExist error = &kindError{msg: "views: template does not exist"}
+	// candidate templates could be loaded. It is a kind of
+	// templates.ErrTemplateDoesNotExist.
+	ErrTemplateDoesNotExist error = &kindError{msg: "views: template does not exist", parent: templates.ErrTemplateDoesNotExist}
 )
 
 // messageError is an error of a given kind that carries a message meant for
