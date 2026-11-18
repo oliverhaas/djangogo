@@ -301,16 +301,34 @@ func TestRouterWithIncludedRoutes(t *testing.T) {
 	}
 }
 
-// ---- NewRouter duplicate name ----------------------------------------------
+// ---- NewRouter: shared names and declaration mistakes ----------------------
 
-func TestNewRouterDuplicateNamePanics(t *testing.T) {
+// TestNewRouterAllowsSharedName checks that routes may share a name, as in
+// Django: Reverse picks the route that fits the arguments.
+func TestNewRouterAllowsSharedName(t *testing.T) {
+	router := urls.NewRouter(
+		urls.Path("/a/", handlerFunc(http.StatusOK), "same"),
+		urls.Path("/b/{id}/", handlerFunc(http.StatusOK), "same"),
+	)
+	if got, err := router.Reverse("same"); err != nil || got != "/a/" {
+		t.Fatalf("Reverse(same) = %q, %v; want /a/", got, err)
+	}
+	if got, err := router.Reverse("same", 3); err != nil || got != "/b/3/" {
+		t.Fatalf("Reverse(same, 3) = %q, %v; want /b/3/", got, err)
+	}
+}
+
+// TestNewRouterPanicsOnBadRoute checks that a declaration mistake stops
+// NewRouter and is an error from NewRouterChecked.
+func TestNewRouterPanicsOnBadRoute(t *testing.T) {
+	bad := urls.Path("a/<nope:x>/", handlerFunc(http.StatusOK), "")
+	if _, err := urls.NewRouterChecked(bad); err == nil {
+		t.Fatal("NewRouterChecked accepted an unknown converter")
+	}
 	defer func() {
 		if r := recover(); r == nil {
-			t.Fatal("expected panic on duplicate name, got none")
+			t.Fatal("expected panic on a bad route, got none")
 		}
 	}()
-	urls.NewRouter(
-		urls.Path("/a/", handlerFunc(http.StatusOK), "same"),
-		urls.Path("/b/", handlerFunc(http.StatusOK), "same"),
-	)
+	urls.NewRouter(bad)
 }
