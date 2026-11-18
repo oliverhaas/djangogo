@@ -47,6 +47,16 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - `makemigrations` warns on a likely field rename (a removed field and an added
   field of the same type), which the autodetector would otherwise emit as a
   drop + add that discards the column's data without notice.
+- `djangotest`, the counterpart of `django.test`: you can now write Django-style
+  tests in Go, with a stateful client, Django's assertions, and private test
+  databases on SQLite and PostgreSQL. `NewClient` drives an `http.Handler` in
+  process with cookies, sessions, login, redirects, and CSRF checks. The
+  assertions (`AssertContains`, `AssertRedirects`, `AssertTemplateUsed`,
+  `AssertNumQueries`, and others) fail with Django's messages. `NewDB` and
+  `EachDB` give each test its own database or schema, and `EachDB` also runs on
+  PostgreSQL when `DJANGOGO_TEST_POSTGRES_DSN` is set. Tests ported from
+  Django's suite carry a `// Ported from Django: tests/<file>.py::<Class>.<test>`
+  comment, and `LICENSE-DJANGO` holds Django's BSD 3-Clause license for them.
 
 ### Fixed
 

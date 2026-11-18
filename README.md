@@ -201,6 +201,70 @@ DJANGOGO_TEST_POSTGRES_DSN="postgres://user:pass@localhost:5432/djangogo?sslmode
 The `Makefile` provides `make` (fmt + vet + test), `make test-race`,
 `make cover`, and `make lint`. Requires Go 1.26+.
 
+### The `djangotest` package
+
+`djangotest` is the counterpart of Django's `django.test`. It offers:
+
+- a stateful test client that drives an `http.Handler` in process, with cookies,
+  sessions, login, redirects, and CSRF checks;
+- Django's assertions as plain functions, with Django's failure messages;
+- query capture (`AssertNumQueries`, `CaptureQueries`);
+- private test databases on SQLite and PostgreSQL.
+
+A test that drives a view:
+
+```go
+func TestHome(t *testing.T) {
+	c := djangotest.NewClient(t, handler)
+	resp := c.Get("/")
+
+	djangotest.AssertContains(t, resp, "Welcome")
+	djangotest.AssertTemplateUsed(t, resp, "home.html")
+}
+```
+
+A test that runs on every configured database:
+
+```go
+func TestCreatePost(t *testing.T) {
+	djangotest.EachDB(t, []any{&Post{}}, func(t *testing.T, db *orm.DB) {
+		err := orm.Query[Post](db).Create(context.Background(), &Post{Title: "Hello"})
+		djangotest.AssertEqual(t, err, nil)
+
+		n, _ := orm.Query[Post](db).Count(context.Background())
+		djangotest.AssertEqual(t, n, int64(1))
+	})
+}
+```
+
+`EachDB` always runs on SQLite. It also runs on PostgreSQL when
+`DJANGOGO_TEST_POSTGRES_DSN` is set. Each run gets its own database or schema,
+so tests may run in parallel.
+
+Django's test methods become plain Go test functions:
+
+| Django                               | Go                                          |
+| ------------------------------------ | ------------------------------------------- |
+| `self.client.get("/x/")`             | `c.Get("/x/")`                              |
+| `self.assertContains(response, "x")` | `djangotest.AssertContains(t, resp, "x")`   |
+| `self.assertNumQueries(2, fn)`       | `djangotest.AssertNumQueries(t, db, 2, fn)` |
+
+[`djangotest/doc.go`](djangotest/doc.go) has the full mapping and the
+differences from Django.
+
+Features are developed test first. Where Django has a test for the behavior,
+that test is ported, and its doc comment cites the source in this form:
+
+```go
+// Ported from Django: tests/<file>.py::<Class>.<test>
+```
+
+Ported tests live in external test packages, in files named
+`django_<area>_test.go`.
+
 ## License
 
 [MIT](LICENSE)
+
+The ported tests in `django_*_test.go` files derive from Django's test suite,
+which uses the BSD 3-Clause license. See [LICENSE-DJANGO](LICENSE-DJANGO).
