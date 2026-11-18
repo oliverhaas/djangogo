@@ -107,9 +107,10 @@ const (
 )
 
 // Pow returns e raised to the power x, like Django's F("n") ** x. x is an
-// Expr or a plain value. The SQL is POWER(e, x), whose result is a floating
-// point number on both SQLite and PostgreSQL; stored in an integer column or
-// read as an integer it is rounded toward zero.
+// Expr or a plain value. The SQL is POWER(e, x), a floating point number on
+// both dialects. With integer operands the result is read as an integer,
+// truncated toward zero; a fractional result written to an integer column is
+// rounded by PostgreSQL and kept as a real number by SQLite.
 func (e Expr) Pow(x any) Expr { return e.binary(opPow, x) }
 
 // BitAnd returns the bitwise and of e and x, like Django's bitand().
