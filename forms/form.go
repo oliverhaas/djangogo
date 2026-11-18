@@ -485,6 +485,17 @@ func (f *Form) HTML() string { return f.String() }
 // Render returns the form in its default layout, AsDiv.
 func (f *Form) Render() string { return f.AsDiv() }
 
+// Repr returns a short description of the form for messages, Django's
+// repr(form): "<Form bound=True, valid=False, fields=(name;email)>". valid is
+// Unknown until the form has been validated; Repr does not validate it.
+func (f *Form) Repr() string {
+	valid := "Unknown"
+	if f.errors != nil {
+		valid = pyString(f.bound && f.errors.Len() == 0)
+	}
+	return fmt.Sprintf("<Form bound=%s, valid=%s, fields=(%s)>", pyString(f.bound), valid, strings.Join(f.names, ";"))
+}
+
 // prettyName converts a field name to a label, Django's pretty_name:
 // "first_name" becomes "First name".
 func prettyName(name string) string {

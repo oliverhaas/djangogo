@@ -294,12 +294,26 @@ func TestErrorListWithNonFieldErrorsHasCorrectClass(t *testing.T) {
 			"</div>")
 }
 
-// Python's repr() has no Go counterpart, so only the claim that the form is
-// not validated by looking at it is kept: nothing validates until asked.
+// A Go form has no class name, so Repr names every form "Form" where Django
+// writes the class, "Person".
 //
+// Ported from Django: tests/forms_tests/tests/test_forms.py::FormsTestCase.test_baseform_repr
+func TestBaseformRepr(t *testing.T) {
+	p := personForm()
+	equal(t, p.Repr(), "<Form bound=False, valid=Unknown, fields=(first_name;last_name;birthday)>")
+	p = personForm().Bind(vals("first_name", "John", "last_name", "Lennon", "birthday", "1940-10-9"))
+	equal(t, p.Repr(), "<Form bound=True, valid=Unknown, fields=(first_name;last_name;birthday)>")
+	p.IsValid()
+	equal(t, p.Repr(), "<Form bound=True, valid=True, fields=(first_name;last_name;birthday)>")
+	p = personForm().Bind(vals("first_name", "John", "last_name", "Lennon", "birthday", "fakedate"))
+	p.IsValid()
+	equal(t, p.Repr(), "<Form bound=True, valid=False, fields=(first_name;last_name;birthday)>")
+}
+
 // Ported from Django: tests/forms_tests/tests/test_forms.py::FormsTestCase.test_baseform_repr_dont_trigger_validation
 func TestBaseformReprDontTriggerValidation(t *testing.T) {
 	p := personForm().Bind(vals("first_name", "John", "last_name", "Lennon", "birthday", "fakedate"))
+	_ = p.Repr()
 	if p.CleanedData() != nil {
 		t.Errorf("CleanedData before validation = %v, want nil", p.CleanedData())
 	}
