@@ -479,6 +479,9 @@ func (f *Form) IsMultipart() bool { return false }
 // String returns AsDiv, as str() of a Django form does.
 func (f *Form) String() string { return f.AsDiv() }
 
+// HTML returns the rendered markup; templates print it without escaping.
+func (f *Form) HTML() string { return f.String() }
+
 // Render returns the form in its default layout, AsDiv.
 func (f *Form) Render() string { return f.AsDiv() }
 

@@ -6,10 +6,11 @@ import (
 )
 
 // The types of this file are what a template sees of a form. The template
-// engine (pongo2) resolves {{ form.title }} only on maps, iterates only over
-// slices, and escapes only values of kind string. So a form becomes a map with
-// Django's attribute names as keys, HTML is carried in a non-string type that
-// renders itself, and plain text stays a string and is escaped by the engine.
+// engine (pongo2) resolves {{ form.title }} only on maps and iterates only
+// over slices. So a form becomes a map with Django's attribute names as keys,
+// HTML is carried in a type whose HTML method returns the markup (Django's
+// __html__ protocol), which the engine prints without escaping, and plain text
+// stays a string and is escaped by the engine.
 // views.Render converts a context value through its TemplateValue method.
 
 // SafeHTML is HTML that a template writes without escaping, the counterpart of
@@ -18,6 +19,9 @@ type SafeHTML []byte
 
 // String returns the HTML.
 func (s SafeHTML) String() string { return string(s) }
+
+// HTML returns the rendered markup; templates print it without escaping.
+func (s SafeHTML) HTML() string { return string(s) }
 
 // TemplateError is one error message in a template. Printed, it is the
 // escaped message.
@@ -32,6 +36,9 @@ type TemplateError struct {
 
 // String returns the escaped message.
 func (e TemplateError) String() string { return escape(e.Message) }
+
+// HTML returns the rendered markup; templates print it without escaping.
+func (e TemplateError) HTML() string { return e.String() }
 
 // TemplateErrors is an error list in a template. Printed, it is Django's
 // <ul class="errorlist">; iterated, it yields the messages; an empty list is
@@ -49,6 +56,9 @@ func (l TemplateErrors) String() string {
 	}
 	return out.AsUL()
 }
+
+// HTML returns the rendered markup; templates print it without escaping.
+func (l TemplateErrors) HTML() string { return l.String() }
 
 // TemplateValue returns the list in the form a template uses.
 func (l ErrorList) TemplateValue() any {
@@ -78,6 +88,9 @@ func (d TemplateErrorDict) String() string {
 	b.WriteString("</ul>")
 	return b.String()
 }
+
+// HTML returns the rendered markup; templates print it without escaping.
+func (d TemplateErrorDict) HTML() string { return d.String() }
 
 // TemplateValue returns the dictionary in the form a template uses.
 func (d *ErrorDict) TemplateValue() any {
@@ -111,6 +124,9 @@ func (t TemplateField) String() string {
 	}
 	return ""
 }
+
+// HTML returns the rendered markup; templates print it without escaping.
+func (t TemplateField) HTML() string { return t.String() }
 
 // lazyHTML defers the rendering of a part until a template asks for it.
 func lazyHTML(fn func() string) func() SafeHTML {
@@ -190,6 +206,9 @@ func (t TemplateForm) String() string {
 	}
 	return ""
 }
+
+// HTML returns the rendered markup; templates print it without escaping.
+func (t TemplateForm) HTML() string { return t.String() }
 
 // templateFields converts bound fields for a template.
 func templateFields(fields []*BoundField) []TemplateField {

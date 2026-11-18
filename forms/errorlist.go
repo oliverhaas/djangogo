@@ -127,6 +127,9 @@ func (l ErrorList) AsUL() string {
 // String returns AsUL, as str() of a Django ErrorList does.
 func (l ErrorList) String() string { return l.AsUL() }
 
+// HTML returns the rendered markup; templates print it without escaping.
+func (l ErrorList) HTML() string { return l.String() }
+
 // ErrorDict holds the errors of a form by field name, the counterpart of
 // Django's ErrorDict. Form-level errors are stored under NonFieldErrors. The
 // fields keep the order in which their first error was added.
@@ -257,6 +260,9 @@ func (d *ErrorDict) AsUL() string {
 
 // String returns AsUL, as str() of a Django ErrorDict does.
 func (d *ErrorDict) String() string { return d.AsUL() }
+
+// HTML returns the rendered markup; templates print it without escaping.
+func (d *ErrorDict) HTML() string { return d.String() }
 
 // add appends errs to the list of field, creating the list with the given CSS
 // class and field id when it is the first error of that field.

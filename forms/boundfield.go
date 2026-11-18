@@ -189,6 +189,9 @@ func (bf *BoundField) AsWidget(w Widget, attrs Attrs) string {
 // String renders the field with its own widget.
 func (bf *BoundField) String() string { return bf.AsWidget(nil, nil) }
 
+// HTML returns the rendered markup; templates print it without escaping.
+func (bf *BoundField) HTML() string { return bf.String() }
+
 // AsText renders the field as <input type="text">.
 func (bf *BoundField) AsText(attrs Attrs) string { return bf.AsWidget(TextInput{}, attrs) }
 
