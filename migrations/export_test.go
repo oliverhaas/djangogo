@@ -33,3 +33,18 @@ func TrimToApps(changes map[string][]*Migration, apps []string) map[string][]*Mi
 
 // ParseNumber exposes parseNumber, Django's parse_number.
 func ParseNumber(name string) int { return parseNumber(name) }
+
+// BoolInput exposes boolInput, Django's _boolean_input.
+func (q *InteractiveQuestioner) BoolInput(question string, def bool) (bool, error) {
+	return q.boolInput(question, def)
+}
+
+// ChoiceInput exposes choiceInput, Django's _choice_input.
+func (q *InteractiveQuestioner) ChoiceInput(question string, choices []string) (int, error) {
+	return q.choiceInput(question, choices)
+}
+
+// AskDefault exposes askDefault, Django's _ask_default.
+func (q *InteractiveQuestioner) AskDefault(field FieldState) (any, error) {
+	return q.askDefault(field)
+}

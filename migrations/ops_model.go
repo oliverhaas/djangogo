@@ -32,6 +32,11 @@ func (o CreateModel) StateForwards(app string, state *ProjectState) error {
 		}
 		seen[f.Name] = true
 	}
+	for _, idx := range o.Indexes {
+		if idx.Name == "" {
+			return errors.New("migrations: indexes passed to CreateModel operations require a name argument")
+		}
+	}
 	table := o.Table
 	if table == "" {
 		table = defaultTable(app, o.Name)
