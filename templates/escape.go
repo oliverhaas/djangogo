@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"html/template"
 	"reflect"
 	"strings"
 
@@ -20,6 +21,30 @@ var htmlEscaper = strings.NewReplacer(
 // escapeHTML escapes s for HTML text and attribute values like Django.
 func escapeHTML(s string) string { return htmlEscaper.Replace(s) }
 
+// HTMLer is implemented by a value that renders itself as HTML, the
+// counterpart of Django's __html__ protocol (a form, a bound field or an
+// error list, for example). A template prints what HTML returns without
+// escaping it, and filters treat it as safe. The text of any other value is
+// escaped, also when it comes from a String method. A html/template.HTML
+// value counts as safe too.
+type HTMLer interface {
+	HTML() string
+}
+
+// safeHTML returns the HTML of v when v renders itself as HTML.
+func safeHTML(v *pongo2.Value) (string, bool) {
+	if v == nil {
+		return "", false
+	}
+	switch h := v.Interface().(type) {
+	case HTMLer:
+		return h.HTML(), true
+	case template.HTML:
+		return string(h), true
+	}
+	return "", false
+}
+
 // text returns the text of a template value for a filter that works on
 // strings. A model instance gives its label unescaped, where String would
 // give the escaped form meant for direct output.
@@ -27,11 +52,15 @@ func text(v *pongo2.Value) string {
 	if mv, ok := v.Interface().(modelView); ok {
 		return mv.label()
 	}
+	if h, ok := safeHTML(v); ok {
+		return h
+	}
 	return v.String()
 }
 
-// isSafe reports whether v is marked as HTML that needs no escaping: by the
-// safe filter, by MarkSafe or by a filter of this package that builds HTML.
+// isSafe reports whether v is HTML that needs no escaping: marked by the
+// safe filter, by MarkSafe or by a filter of this package that builds HTML,
+// or a value that renders itself as HTML (see HTMLer).
 //
 // pongo2 keeps the mark in an unexported field and has no accessor for it, so
 // it is read through reflection. Should the field be renamed, every value
@@ -39,6 +68,9 @@ func text(v *pongo2.Value) string {
 func isSafe(v *pongo2.Value) bool {
 	if v == nil {
 		return false
+	}
+	if _, ok := safeHTML(v); ok {
+		return true
 	}
 	mark := reflect.ValueOf(v).Elem().FieldByName("safe")
 	return mark.IsValid() && mark.Kind() == reflect.Bool && mark.Bool()

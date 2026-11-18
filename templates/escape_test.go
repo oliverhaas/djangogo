@@ -2,6 +2,7 @@ package templates
 
 import (
 	"errors"
+	"html/template"
 	"testing"
 	"time"
 
@@ -106,6 +107,38 @@ func TestFloatPrintsLikePython(t *testing.T) {
 		}
 		if got != c.want {
 			t.Errorf("{{ f }} with %v = %q, want %q", c.f, got, c.want)
+		}
+	}
+}
+
+// htmlBlock is a value that renders itself as HTML.
+type htmlBlock struct{ html string }
+
+// HTML returns the markup.
+func (h htmlBlock) HTML() string { return h.html }
+
+// String returns the markup too, as the String of a form does.
+func (h htmlBlock) String() string { return h.html }
+
+// TestHTMLerNotEscaped checks that a value implementing HTMLer, and a
+// html/template.HTML value, print as written, like a Django object with
+// __html__.
+func TestHTMLerNotEscaped(t *testing.T) {
+	ctx := map[string]any{"v": htmlBlock{"<b>x</b>\ny"}, "h": template.HTML("<i>")}
+	cases := []struct{ src, want string }{
+		{`{{ v }}`, "<b>x</b>\ny"},
+		{`{{ v|linebreaksbr }}`, "<b>x</b><br>y"},
+		{`{% firstof v %}`, "<b>x</b>\ny"},
+		// upper drops the safe mark, as in Django.
+		{`{{ h }}{{ h|upper }}`, "<i>&lt;I&gt;"},
+	}
+	for _, c := range cases {
+		got, err := New().RenderString(c.src, ctx)
+		if err != nil {
+			t.Fatalf("RenderString(%q): %v", c.src, err)
+		}
+		if got != c.want {
+			t.Errorf("RenderString(%q) = %q, want %q", c.src, got, c.want)
 		}
 	}
 }
