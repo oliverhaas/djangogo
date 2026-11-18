@@ -1,7 +1,8 @@
 // Package views provides Django's view layer in Go: the shortcuts of
 // django.shortcuts, the error views of django.views.defaults, the method
-// decorators of django.views.decorators.http and generic views in the style
-// of django.views.generic.
+// decorators of django.views.decorators.http, the Paginator of
+// django.core.paginator and generic views in the style of
+// django.views.generic.
 //
 // # Views that return errors
 //
@@ -58,7 +59,12 @@
 // A top-level context value that implements TemplateValuer is replaced by its
 // template value before rendering. A type whose fields a template should read
 // under Django's names (a form, a page of results) implements it and returns a
-// map.
+// map. That is how a Page reaches a template with Django's attribute names
+// (page_obj.number, page_obj.has_next, page_obj.paginator.num_pages). The
+// template engine cannot iterate a value and read attributes from it, so a
+// template loops over page_obj.object_list instead of page_obj:
+//
+//	{% for post in page_obj.object_list %}...{% endfor %}
 //
 // Model instances reach templates through templates.ModelContext, so
 // {{ post.created_at }} and {{ post }} work as in Django.
