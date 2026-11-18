@@ -1,0 +1,4 @@
+// Package sessions holds the migrations of the sessions app: makemigrations writes
+// them here, and main.go imports the package so that they register with
+// migrate.
+package sessions

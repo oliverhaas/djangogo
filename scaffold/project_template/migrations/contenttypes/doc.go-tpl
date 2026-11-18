@@ -1,0 +1,4 @@
+// Package contenttypes holds the migrations of the contenttypes app: makemigrations writes
+// them here, and main.go imports the package so that they register with
+// migrate.
+package contenttypes

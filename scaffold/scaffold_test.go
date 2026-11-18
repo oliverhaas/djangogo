@@ -92,7 +92,7 @@ func TestProjectWritesExpectedFiles(t *testing.T) {
 		t.Fatalf("Project: %v", err)
 	}
 	want := make([]string, 0, 5+len(appFiles))
-	want = append(want, "go.mod", "main.go", "migrations/auth/doc.go", "migrations/myprojapp/doc.go", "settings.go")
+	want = append(want, "go.mod", "main.go", "migrations/auth/doc.go", "migrations/contenttypes/doc.go", "migrations/myprojapp/doc.go", "migrations/sessions/doc.go", "settings.go")
 	for _, f := range appFiles {
 		want = append(want, "myprojapp/"+strings.ReplaceAll(f, "blog", "myprojapp"))
 	}
@@ -140,8 +140,12 @@ func TestProjectMainWiresAppAndMigrations(t *testing.T) {
 		`"myproj/myprojapp"`,
 		`_ "myproj/migrations/myprojapp"`,
 		`_ "myproj/migrations/auth"`,
+		`_ "myproj/migrations/contenttypes"`,
+		`_ "myproj/migrations/sessions"`,
 		"&myprojapp.App{}",
 		"auth.App{}",
+		"contenttypes.App{}",
+		"sessions.App{}",
 		"settings()",
 		"defer func() { _ = app.Close() }()",
 		"return app.Run(os.Args[1:])",
@@ -196,7 +200,7 @@ func TestAppWritesPackageFiles(t *testing.T) {
 	for rel, want := range map[string]string{
 		"app.go":                          `func (*App) Name() string { return "blog" }`,
 		"urls.go":                         `urls.Include("blog/", "blog",`,
-		"views.go":                        `Template:    "blog/post_list.html",`,
+		"views.go":                        `TemplateName:      "blog/post_list.html",`,
 		"views_test.go":                   `Get("/blog/")`,
 		"templates/blog/post_list.html":   `{% url 'blog:post_detail' post.id %}">{{ post }}</a>`,
 		"templates/blog/post_detail.html": `{% extends "blog/base.html" %}`,

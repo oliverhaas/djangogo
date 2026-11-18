@@ -10,12 +10,12 @@ import (
 // postList shows the published posts, the newest first.
 func (a *App) postList() http.Handler {
 	return views.ListView[Post]{
-		DB:          a.db,
-		Engine:      a.templates,
-		Template:    "[[.AppName]]/post_list.html",
-		ContextName: "posts",
-		Query: func(db *orm.DB) *orm.QuerySet[Post] {
-			return orm.Query[Post](db).Filter("published", true).OrderBy("-id")
+		DB:                a.db,
+		Engine:            a.templates,
+		TemplateName:      "[[.AppName]]/post_list.html",
+		ContextObjectName: "posts",
+		GetQueryset: func(*http.Request) (*orm.QuerySet[Post], error) {
+			return orm.Query[Post](a.db).Filter("published", true).OrderBy("-id"), nil
 		},
 	}
 }
@@ -23,9 +23,9 @@ func (a *App) postList() http.Handler {
 // postDetail shows the post whose primary key is in the URL.
 func (a *App) postDetail() http.Handler {
 	return views.DetailView[Post]{
-		DB:          a.db,
-		Engine:      a.templates,
-		Template:    "[[.AppName]]/post_detail.html",
-		ContextName: "post",
+		DB:                a.db,
+		Engine:            a.templates,
+		TemplateName:      "[[.AppName]]/post_detail.html",
+		ContextObjectName: "post",
 	}
 }

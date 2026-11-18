@@ -16,12 +16,16 @@ import (
 
 	"github.com/oliverhaas/djangogo"
 	"github.com/oliverhaas/djangogo/auth"
+	"github.com/oliverhaas/djangogo/contenttypes"
+	"github.com/oliverhaas/djangogo/sessions"
 
 	"[[.Module]]/[[.AppName]]"
 
 	// Importing the migrations of an app registers them with migrate.
 	_ "[[.Module]]/migrations/[[.AppName]]"
 	_ "[[.Module]]/migrations/auth"
+	_ "[[.Module]]/migrations/contenttypes"
+	_ "[[.Module]]/migrations/sessions"
 )
 
 func main() {
@@ -37,10 +41,14 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	// The installed apps, Django's INSTALLED_APPS. The admin needs auth.
+	// The installed apps, Django's INSTALLED_APPS. The admin needs auth,
+	// auth needs contenttypes, and sessions keeps the sessions in the
+	// database.
 	app, err := djangogo.New(s,
 		&[[.AppName]].App{},
 		auth.App{},
+		contenttypes.App{},
+		sessions.App{},
 	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
