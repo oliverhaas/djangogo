@@ -18,9 +18,15 @@ func (c *compiler) resolveSelectRelated() ([]relPlan, error) {
 		for _, part := range strings.Split(name, lookupSep) {
 			f, rel := forwardRelation(model, part)
 			if rel == nil {
+				// Django names the part that failed, and tells a field that
+				// is not a relation from a name that is no field at all.
+				problem := "invalid field name(s)"
+				if f != nil {
+					problem = "non-relational field"
+				}
 				return nil, &FieldError{
 					Model: c.q.model.Name(),
-					Message: "invalid field name(s) given in select_related: '" + name +
+					Message: problem + " given in select_related: '" + part +
 						"'. Choices are: " + relationChoices(model),
 				}
 			}
@@ -47,7 +53,8 @@ func (c *compiler) resolveSelectRelated() ([]relPlan, error) {
 
 // forwardRelation finds the forward foreign key of m named by name: a key as
 // in a filter, or the Go field name. It returns a nil path when name is not a
-// relation whose object can be stored on a field of m.
+// relation whose object can be stored on a field of m; the field is then the
+// field that name addresses, or nil when it addresses none.
 func forwardRelation(m *Model, name string) (*Field, *relationPath) {
 	f, rel, ok := lookupName(m, name)
 	if !ok {
@@ -57,8 +64,11 @@ func forwardRelation(m *Model, name string) (*Field, *relationPath) {
 		}
 		f, rel, ok = lookupName(m, byName.Attr)
 	}
-	if !ok || rel == nil || rel.local == nil {
+	if !ok {
 		return nil, nil
+	}
+	if rel == nil || rel.local == nil {
+		return f, nil
 	}
 	return f, rel
 }
