@@ -317,7 +317,9 @@ func referencesModel(op Operation, name, app string) bool {
 	case CreateModel:
 		return o.Name == name || slices.ContainsFunc(o.Fields, pointsTo)
 	case DeleteModel:
-		return o.Name == name
+		// The deleted model may point to the model through a relation field,
+		// which the operation does not carry.
+		return true
 	case RenameModel:
 		return o.OldName == name || o.NewName == name
 	case AlterModelTable:

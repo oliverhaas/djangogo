@@ -60,14 +60,20 @@ func modelDeps(ms *ModelState) []opDep {
 	return deps
 }
 
-// relationAgnostic returns the fields sorted by name, without the targets of
-// their relations. Two models with the same result differ at most in name.
+// relationAgnostic returns the definitions of the fields in the order of their
+// names, without the names, the columns that follow from the names and the
+// targets of the relations. Two models with the same result can be one model
+// under two names, also when fields were renamed along with it.
 func relationAgnostic(fields []FieldState) []FieldState {
 	out := slices.Clone(fields)
+	slices.SortFunc(out, func(x, y FieldState) int { return cmp.Compare(x.Name, y.Name) })
 	for i := range out {
+		if out[i].Column == defaultColumn(out[i].Name, out[i].RelKind) {
+			out[i].Column = ""
+		}
+		out[i].Name = ""
 		out[i].RelTo = ""
 	}
-	slices.SortFunc(out, func(x, y FieldState) int { return cmp.Compare(x.Name, y.Name) })
 	return out
 }
 

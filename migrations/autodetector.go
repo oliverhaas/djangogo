@@ -442,12 +442,23 @@ func (a *Autodetector) optimizeMigrations() {
 	}
 }
 
-// leadingNumber matches the number at the start of a migration name.
-var leadingNumber = regexp.MustCompile(`^\d+`)
+var (
+	// leadingNumber matches the number at the start of a migration name.
+	leadingNumber = regexp.MustCompile(`^\d+`)
+	// squashedNumber matches the last number after "_squashed_" in the name of
+	// a squashed migration, such as "0001_squashed_0004_more".
+	squashedNumber = regexp.MustCompile(`.*_squashed_(\d+)`)
+)
 
-// parseNumber returns the number a migration name starts with, or 0.
+// parseNumber returns the number a migration name starts with, or 0 when it
+// has none. A squashed migration counts as the last migration it replaces, as
+// in Django, so numbering continues after a history squashed elsewhere.
 func parseNumber(name string) int {
-	n, err := strconv.Atoi(leadingNumber.FindString(name))
+	digits := leadingNumber.FindString(name)
+	if m := squashedNumber.FindStringSubmatch(name); m != nil {
+		digits = m[1]
+	}
+	n, err := strconv.Atoi(digits)
 	if err != nil {
 		return 0
 	}
