@@ -1,0 +1,1 @@
+Mail <a href="mailto:me@example.com">me@example.com</a>, see (<a href="http://example.com/a" rel="nofollow">http://example.com/a</a>) or <a href="http://example.org" rel="nofollow">example.org</a>! not.a.url nor x@y

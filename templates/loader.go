@@ -133,26 +133,6 @@ func MapSource(label string, templates map[string]string) Source {
 // extendsRe finds the parent named by a template's {% extends %} tag.
 var extendsRe = regexp.MustCompile(`\{%-?\s*extends\s+(?:"([^"]*)"|'([^']*)')\s*-?%\}`)
 
-// tagRe finds the variable and block tags of a template source.
-var tagRe = regexp.MustCompile(`\{\{.*?\}\}|\{%.*?%\}`)
-
-// blockSuperRe finds Django's spelling of the parent block's content.
-var blockSuperRe = regexp.MustCompile(`\bblock\.super\b`)
-
-// djangoSyntax rewrites the one Django spelling pongo2 cannot be taught
-// through its tag and filter registry: {{ block.super }}, which pongo2 only
-// knows as {{ block.Super }}. The replacement has the same length, so the
-// positions in error messages stay right. Text outside tags is left alone; a
-// tag quoted inside {% verbatim %} is rewritten too.
-func djangoSyntax(src []byte) []byte {
-	if !bytes.Contains(src, []byte("block.super")) {
-		return src
-	}
-	return tagRe.ReplaceAllFunc(src, func(tag []byte) []byte {
-		return blockSuperRe.ReplaceAll(tag, []byte("block.Super"))
-	})
-}
-
 // sourceLoader is the pongo2 loader of an Engine. It searches the sources in
 // order and remembers which template each one extends, which the render
 // recorder needs and pongo2 does not expose.

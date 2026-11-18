@@ -52,6 +52,8 @@ type renderState struct {
 	included []Rendered
 	// depth counts the includes being rendered, one inside the other.
 	depth int
+	// cycles holds the position of every {% cycle %} tag of the render.
+	cycles map[*cycleTagNode]int
 }
 
 // stateFrom returns the renderState of the render ctx belongs to, or nil for a
@@ -109,7 +111,11 @@ func (e *Engine) context(ctx map[string]any, st *renderState) pongo2.Context {
 func New(sources ...Source) *Engine {
 	loader := &sourceLoader{}
 	loader.add(sources...)
-	return &Engine{set: pongo2.NewSet("djangogo", loader), loader: loader}
+	set := pongo2.NewSet("djangogo", loader)
+	// Django's literals. pongo2 itself knows true and false only, and reads
+	// the capitalized words as the names of variables.
+	set.Globals["True"], set.Globals["False"], set.Globals["None"] = true, false, nil
+	return &Engine{set: set, loader: loader}
 }
 
 // NewEngine returns an Engine loading templates from the given directories (searched

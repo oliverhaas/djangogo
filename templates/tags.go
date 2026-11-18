@@ -74,7 +74,14 @@ func registerTags() {
 	mustRegister("static", staticTagParser)
 	mustRegister("url", urlTagParser)
 	mustRegister("csrf_token", csrfTokenTagParser)
+	mustRegister("load", loadTagParser)
 	mustReplace("include", includeTagParser)
+	mustReplace("for", forTagParser)
+	mustReplace("cycle", cycleTagParser)
+	mustReplace("widthratio", widthratioTagParser)
+	mustReplace("now", nowTagParser)
+	mustReplace("firstof", firstofTagParser)
+	mustReplace("spaceless", spacelessTagParser)
 }
 
 // mustRegister registers a tag and panics if pongo2 rejects it. A rejection means
@@ -93,22 +100,28 @@ func mustReplace(name string, fn pongo2.TagParser) {
 	}
 }
 
-// staticTagNode implements {% static <expr> %}.
+// staticTagNode implements Django's {% static %}:
+//
+//	{% static "css/app.css" %}
+//	{% static path as url %}
 type staticTagNode struct {
 	pathExpr pongo2.IEvaluator
+	asVar    string
 }
 
-// Execute writes StaticBase joined with the evaluated path expression.
+// Execute writes StaticBase joined with the percent-encoded path, or stores
+// it under the "as" name.
 func (n *staticTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter) *pongo2.Error {
 	val, err := n.pathExpr.Evaluate(ctx)
 	if err != nil {
 		return err
 	}
-	_, werr := w.WriteString(joinStatic(StaticBase, val.String()))
-	if werr != nil {
-		return ctx.OrigError(werr, nil)
+	url := joinStatic(StaticBase, percentEncode(val.String(), "/"))
+	if n.asVar != "" {
+		ctx.Private[n.asVar] = url
+		return nil
 	}
-	return nil
+	return writeOutput(ctx, w, pongo2.AsValue(url))
 }
 
 // joinStatic joins a static URL base and a path with exactly one slash between them.
@@ -116,17 +129,21 @@ func joinStatic(base, path string) string {
 	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
 }
 
-// staticTagParser parses {% static "css/app.css" %}. The argument may be a string
-// literal or any expression resolving to a string.
+// staticTagParser parses {% static "css/app.css" [as name] %}. The argument
+// may be a string literal or any expression resolving to a string.
 func staticTagParser(_ *pongo2.Parser, _ *pongo2.Token, args *pongo2.Parser) (pongo2.INodeTag, *pongo2.Error) {
 	pathExpr, err := args.ParseExpression()
+	if err != nil {
+		return nil, err
+	}
+	asVar, err := parseAsVar(args)
 	if err != nil {
 		return nil, err
 	}
 	if args.Remaining() > 0 {
 		return nil, args.Error("templates: 'static' takes exactly one argument", nil)
 	}
-	return &staticTagNode{pathExpr: pathExpr}, nil
+	return &staticTagNode{pathExpr: pathExpr, asVar: asVar}, nil
 }
 
 // csrfTokenTagNode implements {% csrf_token %}.

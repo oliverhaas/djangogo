@@ -153,8 +153,15 @@ func (c converter) wrap(m map[string]any) any {
 // from v. Containers are copied only when something inside them changed.
 func (c converter) convert(v any, depth int) (any, bool) {
 	switch x := v.(type) {
-	case nil, string, bool, int, int64, float64, time.Time, modelView:
+	case nil, string, bool, int, int64, float64, modelView, templateTime:
 		return v, false
+	case time.Time:
+		return templateTime{x}, true
+	case *time.Time:
+		if x == nil {
+			return nil, true
+		}
+		return templateTime{*x}, true
 	case ModelMap:
 		if c.public {
 			return v, false
@@ -298,6 +305,10 @@ func (c converter) instance(m *orm.Model, rv reflect.Value, depth int) map[strin
 		}
 		val := fv.Interface()
 		out[f.Attr] = val
+		if !c.public {
+			// A time takes the form that prints like Django's datetime.
+			out[f.Attr] = c.value(val, maxModelDepth+1)
+		}
 		if f.PrimaryKey {
 			pk, hasPK = val, true
 		}

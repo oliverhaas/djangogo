@@ -2,37 +2,58 @@
   {
     "name": "variable",
     "template": "Hello {{ name }}",
-    "context": { "name": "World" }
+    "context": {
+      "name": "World"
+    }
   },
   {
     "name": "nested_attr",
     "template": "{{ user.name }} <{{ user.email }}>",
-    "context": { "user": { "name": "Ada Lovelace", "email": "ada@example.com" } }
+    "context": {
+      "user": {
+        "name": "Ada Lovelace",
+        "email": "ada@example.com"
+      }
+    }
   },
   {
     "name": "for_loop",
     "template": "{% for x in items %}{{ x }},{% endfor %}",
-    "context": { "items": ["alpha", "beta", "gamma"] }
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
   },
   {
     "name": "if_else_true",
     "template": "{% if cond %}A{% else %}B{% endif %}",
-    "context": { "cond": true }
+    "context": {
+      "cond": true
+    }
   },
   {
     "name": "if_else_false",
     "template": "{% if cond %}A{% else %}B{% endif %}",
-    "context": { "cond": false }
+    "context": {
+      "cond": false
+    }
   },
   {
     "name": "filter_upper",
     "template": "{{ s|upper }}",
-    "context": { "s": "django fidelity" }
+    "context": {
+      "s": "django fidelity"
+    }
   },
   {
     "name": "filter_lower",
     "template": "{{ s|lower }}",
-    "context": { "s": "DJANGO Fidelity" }
+    "context": {
+      "s": "DJANGO Fidelity"
+    }
   },
   {
     "name": "filter_default",
@@ -42,26 +63,1922 @@
   {
     "name": "filter_default_present",
     "template": "{{ present|default:\"none\" }}",
-    "context": { "present": "value" }
+    "context": {
+      "present": "value"
+    }
   },
   {
     "name": "filter_length",
     "template": "{{ items|length }}",
-    "context": { "items": ["a", "b", "c", "d"] }
+    "context": {
+      "items": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ]
+    }
   },
   {
     "name": "filter_join",
     "template": "{{ items|join:\", \" }}",
-    "context": { "items": ["one", "two", "three"] }
+    "context": {
+      "items": [
+        "one",
+        "two",
+        "three"
+      ]
+    }
   },
   {
     "name": "autoescape",
     "template": "{{ v }}",
-    "context": { "v": "Tom & <b>\"Jerry\"</b>" }
+    "context": {
+      "v": "Tom & <b>\"Jerry\"</b>"
+    }
   },
   {
     "name": "autoescape_apostrophe",
     "template": "{{ v }}",
-    "context": { "v": "it's a <trap>" }
+    "context": {
+      "v": "it's a <trap>"
+    }
+  },
+  {
+    "name": "for_counter",
+    "template": "{% for x in items %}{{ forloop.counter }}:{{ x }} {% endfor %}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "for_counter0",
+    "template": "{% for x in items %}{{ forloop.counter0 }}:{{ x }} {% endfor %}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "for_revcounter",
+    "template": "{% for x in items %}{{ forloop.revcounter }}/{{ forloop.revcounter0 }} {% endfor %}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "for_first_last",
+    "template": "{% for x in items %}{% if forloop.first %}[{% endif %}{{ x }}{% if forloop.last %}]{% else %},{% endif %}{% endfor %}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "for_parentloop",
+    "template": "{% for row in rows %}{% for x in row %}{{ forloop.parentloop.counter }}.{{ forloop.counter }}={{ x }} {% endfor %}{% endfor %}",
+    "context": {
+      "rows": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "for_empty",
+    "template": "{% for x in items %}{{ x }}{% empty %}nothing{% endfor %}",
+    "context": {
+      "items": []
+    }
+  },
+  {
+    "name": "for_empty_missing",
+    "template": "{% for x in missing %}{{ x }}{% empty %}nothing{% endfor %}",
+    "context": {}
+  },
+  {
+    "name": "for_reversed",
+    "template": "{% for x in items reversed %}{{ x }} {% endfor %}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "for_unpack",
+    "template": "{% for a, b in pairs %}{{ a }}={{ b }};{% endfor %}",
+    "context": {
+      "pairs": [
+        [
+          "x",
+          "1"
+        ],
+        [
+          "y",
+          "2"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "for_string",
+    "template": "{% for c in word %}{{ c }}-{% endfor %}",
+    "context": {
+      "word": "abc"
+    }
+  },
+  {
+    "name": "for_length",
+    "template": "{% for x in items %}{{ forloop.length }}{% endfor %}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "if_elif",
+    "template": "{% if a %}A{% elif b %}B{% else %}C{% endif %}",
+    "context": {
+      "a": false,
+      "b": true
+    }
+  },
+  {
+    "name": "if_and_or_not",
+    "template": "{% if a and not b or c %}yes{% else %}no{% endif %}",
+    "context": {
+      "a": true,
+      "b": true,
+      "c": false
+    }
+  },
+  {
+    "name": "if_eq_string",
+    "template": "{% if s == \"x\" %}eq{% endif %}{% if s != \"y\" %}ne{% endif %}",
+    "context": {
+      "s": "x"
+    }
+  },
+  {
+    "name": "if_compare_int",
+    "template": "{% if n > 3 %}gt{% endif %}{% if n <= 5 %}le{% endif %}",
+    "context": {
+      "n": 5
+    }
+  },
+  {
+    "name": "if_in",
+    "template": "{% if \"b\" in items %}in{% endif %}{% if \"z\" not in items %}notin{% endif %}",
+    "context": {
+      "items": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "name": "if_not_in",
+    "template": "{% if \"a\" not in items %}absent{% else %}present{% endif %}|{% if not \"z\" in items %}absent{% endif %}",
+    "context": {
+      "items": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "name": "if_not_compare",
+    "template": "{% if not a == b %}differ{% else %}same{% endif %}|{% if not a > b %}le{% endif %}",
+    "context": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "name": "if_and_or_precedence",
+    "template": "{% if a and b or c %}yes{% else %}no{% endif %}|{% if c or b and a %}yes{% else %}no{% endif %}",
+    "context": {
+      "a": false,
+      "b": true,
+      "c": true
+    }
+  },
+  {
+    "name": "if_is",
+    "template": "{% if x is None %}none{% endif %}|{% if y is not None %}some{% endif %}|{% if t is True %}true{% endif %}|{% if y is None %}wrong{% endif %}",
+    "context": {
+      "x": null,
+      "y": "v",
+      "t": true
+    }
+  },
+  {
+    "name": "if_literals",
+    "template": "{% if x == True %}t{% endif %}{% if y == False %}f{% endif %}{% if missing == None %}n{% endif %}",
+    "context": {
+      "x": true,
+      "y": false
+    }
+  },
+  {
+    "name": "if_string_operand",
+    "template": "{% if s == \"a and b\" or s in \"x not in y\" %}match{% endif %}",
+    "context": {
+      "s": "a and b"
+    }
+  },
+  {
+    "name": "if_empty_list",
+    "template": "{% if items %}some{% else %}none{% endif %}",
+    "context": {
+      "items": []
+    }
+  },
+  {
+    "name": "if_filter",
+    "template": "{% if items|length > 1 %}many{% endif %}",
+    "context": {
+      "items": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "name": "with_assign",
+    "template": "{% with total=items|length %}{{ total }} item{{ total|pluralize }}{% endwith %}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "with_multiple",
+    "template": "{% with a=\"x\" b=\"y\" %}{{ a }}{{ b }}{% endwith %}[{{ a }}]",
+    "context": {}
+  },
+  {
+    "name": "with_as",
+    "template": "{% with items|length as total %}{{ total }}{% endwith %}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "spaceless",
+    "template": "{% spaceless %}<p>\n  <a href=\"#\">x  y</a>\n</p>  <b> z </b>{% endspaceless %}",
+    "context": {}
+  },
+  {
+    "name": "verbatim",
+    "template": "{% verbatim %}{{ not_rendered }} {% if x %}{% endverbatim %}",
+    "context": {}
+  },
+  {
+    "name": "comment_tag",
+    "template": "a{% comment %}hidden {{ x }}{% endcomment %}b{# short #}c",
+    "context": {}
+  },
+  {
+    "name": "firstof",
+    "template": "{% firstof a b c %}|{% firstof a b \"fallback\" %}",
+    "context": {
+      "a": "",
+      "b": 0,
+      "c": "third"
+    }
+  },
+  {
+    "name": "firstof_escape",
+    "template": "{% firstof a b %}",
+    "context": {
+      "a": "",
+      "b": "<b>"
+    }
+  },
+  {
+    "name": "cycle",
+    "template": "{% for x in items %}{% cycle 'odd' 'even' %} {% endfor %}",
+    "context": {
+      "items": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "cycle_vars",
+    "template": "{% for x in items %}{% cycle a b %}{% endfor %}",
+    "context": {
+      "items": [
+        1,
+        2,
+        3
+      ],
+      "a": "<",
+      "b": "-"
+    }
+  },
+  {
+    "name": "cycle_as",
+    "template": "{% for x in items %}{% cycle 'r1' 'r2' as row %}{{ row }};{% endfor %}",
+    "context": {
+      "items": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "widthratio",
+    "template": "{% widthratio value max 100 %}|{% widthratio 175 200 100 %}",
+    "context": {
+      "value": 1,
+      "max": 3
+    }
+  },
+  {
+    "name": "templatetag",
+    "template": "{% templatetag openblock %} {% templatetag closeblock %} {% templatetag openvariable %} {% templatetag closevariable %} {% templatetag openbrace %} {% templatetag closebrace %} {% templatetag opencomment %} {% templatetag closecomment %}",
+    "context": {}
+  },
+  {
+    "name": "autoescape_off",
+    "template": "{% autoescape off %}{{ v }}{% endautoescape %}{{ v }}",
+    "context": {
+      "v": "<b>"
+    }
+  },
+  {
+    "name": "filter_tag",
+    "template": "{% filter upper %}shout {{ v }}{% endfilter %}",
+    "context": {
+      "v": "x"
+    }
+  },
+  {
+    "name": "ifchanged",
+    "template": "{% for x in items %}{% ifchanged %}{{ x }}{% endifchanged %}{% endfor %}",
+    "context": {
+      "items": [
+        "a",
+        "a",
+        "b",
+        "b",
+        "a"
+      ]
+    }
+  },
+  {
+    "name": "static_tag",
+    "template": "{% load static %}{% static \"css/site.css\" %}|{% static path %}",
+    "context": {
+      "path": "img/a b.png"
+    }
+  },
+  {
+    "name": "static_as",
+    "template": "{% load static %}{% static \"x.js\" as script %}[{{ script }}]",
+    "context": {}
+  },
+  {
+    "name": "include_basic",
+    "template": "{% include \"part.html\" %}",
+    "context": {
+      "name": "N"
+    },
+    "templates": {
+      "part.html": "part:{{ name }}"
+    }
+  },
+  {
+    "name": "include_with_only",
+    "template": "{% include \"part.html\" with name=\"W\" only %}{% include \"part.html\" only %}",
+    "context": {
+      "name": "N",
+      "other": "O"
+    },
+    "templates": {
+      "part.html": "[{{ name }}{{ other }}]"
+    }
+  },
+  {
+    "name": "extends_block",
+    "template": "{% extends \"base.html\" %}{% block content %}child {{ block.super }}{% endblock %}",
+    "context": {
+      "t": "T"
+    },
+    "templates": {
+      "base.html": "<h1>{% block title %}{{ t }}{% endblock %}</h1>{% block content %}base{% endblock %}"
+    }
+  },
+  {
+    "name": "lorem_words",
+    "template": "{% lorem 3 w %}",
+    "context": {}
+  },
+  {
+    "name": "now_literal",
+    "template": "{% now \"\\n\\o\\w\" %}",
+    "context": {}
+  },
+  {
+    "name": "cycle_silent",
+    "template": "{% for x in items %}{% cycle 'a' 'b' as c silent %}{{ c }}{{ x }} {% endfor %}",
+    "context": {
+      "items": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "widthratio_as",
+    "template": "{% widthratio a b 50 as w %}[{{ w }}]",
+    "context": {
+      "a": 5,
+      "b": 10
+    }
+  },
+  {
+    "name": "firstof_none",
+    "template": "[{% firstof a b %}]",
+    "context": {
+      "a": 0,
+      "b": ""
+    }
+  },
+  {
+    "name": "for_dict",
+    "template": "{% for k, v in d %}{{ k }}={{ v }};{% endfor %}",
+    "context": {
+      "d": [
+        [
+          "a",
+          1
+        ],
+        [
+          "b",
+          2
+        ]
+      ]
+    }
+  },
+  {
+    "name": "safe_filter",
+    "template": "{{ v|safe }}",
+    "context": {
+      "v": "<b>&</b>"
+    }
+  },
+  {
+    "name": "safe_value",
+    "template": "{{ v }}",
+    "context": {
+      "v": {
+        "__safe__": "<i>ok</i>"
+      }
+    }
+  },
+  {
+    "name": "escape_filter",
+    "template": "{{ v|escape }}",
+    "context": {
+      "v": "<b>'x'</b>"
+    }
+  },
+  {
+    "name": "escape_filter_off",
+    "template": "{% autoescape off %}{{ v|escape }}{% endautoescape %}",
+    "context": {
+      "v": "<b>"
+    }
+  },
+  {
+    "name": "force_escape",
+    "template": "{{ v|force_escape }}",
+    "context": {
+      "v": "<b>"
+    }
+  },
+  {
+    "name": "force_escape_safe",
+    "template": "{{ v|force_escape }}",
+    "context": {
+      "v": {
+        "__safe__": "<b>"
+      }
+    }
+  },
+  {
+    "name": "escapejs",
+    "template": "{{ v|escapejs }}",
+    "context": {
+      "v": "a'b\"c\n<script>&=-;"
+    }
+  },
+  {
+    "name": "striptags",
+    "template": "{{ v|striptags }}",
+    "context": {
+      "v": "<p>Hello <b>world</b></p> &amp;"
+    }
+  },
+  {
+    "name": "default_escape",
+    "template": "{{ missing|default:\"<none>\" }}",
+    "context": {}
+  },
+  {
+    "name": "capfirst",
+    "template": "{{ v|capfirst }}",
+    "context": {
+      "v": "hello world"
+    }
+  },
+  {
+    "name": "title",
+    "template": "{{ v|title }}",
+    "context": {
+      "v": "hello wORLD it's 2nd"
+    }
+  },
+  {
+    "name": "center",
+    "template": "[{{ v|center:\"9\" }}]",
+    "context": {
+      "v": "abc"
+    }
+  },
+  {
+    "name": "ljust",
+    "template": "[{{ v|ljust:\"6\" }}]",
+    "context": {
+      "v": "abc"
+    }
+  },
+  {
+    "name": "rjust",
+    "template": "[{{ v|rjust:\"6\" }}]",
+    "context": {
+      "v": "abc"
+    }
+  },
+  {
+    "name": "cut",
+    "template": "{{ v|cut:\" \" }}",
+    "context": {
+      "v": "a b c"
+    }
+  },
+  {
+    "name": "addslashes",
+    "template": "{{ v|addslashes|safe }}",
+    "context": {
+      "v": "I'm \"here\" \\"
+    }
+  },
+  {
+    "name": "slugify",
+    "template": "{{ v|slugify }}",
+    "context": {
+      "v": " Hello, World! It's -- 2nd_time "
+    }
+  },
+  {
+    "name": "truncatechars",
+    "template": "{{ v|truncatechars:9 }}|{{ w|truncatechars:9 }}",
+    "context": {
+      "v": "Joel is a slug",
+      "w": "short"
+    }
+  },
+  {
+    "name": "truncatewords",
+    "template": "{{ v|truncatewords:2 }}|{{ w|truncatewords:2 }}",
+    "context": {
+      "v": "Joel is a slug",
+      "w": "one two"
+    }
+  },
+  {
+    "name": "wordcount",
+    "template": "{{ v|wordcount }}",
+    "context": {
+      "v": "Joel is a slug"
+    }
+  },
+  {
+    "name": "wordwrap",
+    "template": "{{ v|wordwrap:5 }}",
+    "context": {
+      "v": "Joel is a slug"
+    }
+  },
+  {
+    "name": "linebreaks",
+    "template": "{{ v|linebreaks }}",
+    "context": {
+      "v": "line 1\nline <2>\n\npara 2"
+    }
+  },
+  {
+    "name": "linebreaksbr",
+    "template": "{{ v|linebreaksbr }}",
+    "context": {
+      "v": "a <b>\nc"
+    }
+  },
+  {
+    "name": "linenumbers",
+    "template": "{{ v|linenumbers }}",
+    "context": {
+      "v": "one\ntwo\n<three>"
+    }
+  },
+  {
+    "name": "urlencode",
+    "template": "{{ v|urlencode }}",
+    "context": {
+      "v": "https://example.org/a b?x=1&y=ä"
+    }
+  },
+  {
+    "name": "urlencode_safe_arg",
+    "template": "{{ v|urlencode:\"\" }}",
+    "context": {
+      "v": "a/b c"
+    }
+  },
+  {
+    "name": "iriencode",
+    "template": "{{ v|iriencode }}",
+    "context": {
+      "v": "?test=1&me=2 ä"
+    }
+  },
+  {
+    "name": "urlize",
+    "template": "{{ v|urlize }}",
+    "context": {
+      "v": "see https://example.org/x?a=1&b=2 and www.example.com or <b>"
+    }
+  },
+  {
+    "name": "urlizetrunc",
+    "template": "{{ v|urlizetrunc:15 }}",
+    "context": {
+      "v": "see https://www.example.org/long/path now"
+    }
+  },
+  {
+    "name": "make_list",
+    "template": "{{ v|make_list|join:\",\" }}",
+    "context": {
+      "v": "abc"
+    }
+  },
+  {
+    "name": "stringformat",
+    "template": "{{ n|stringformat:\"03d\" }}|{{ s|stringformat:\"s\" }}",
+    "context": {
+      "n": 7,
+      "s": "x"
+    }
+  },
+  {
+    "name": "phone2numeric",
+    "template": "{{ v|phone2numeric }}",
+    "context": {
+      "v": "800-COLLECT"
+    }
+  },
+  {
+    "name": "lower_upper_chain",
+    "template": "{{ v|lower|capfirst }}",
+    "context": {
+      "v": "HELLO"
+    }
+  },
+  {
+    "name": "add_int",
+    "template": "{{ n|add:2 }}|{{ n|add:m }}",
+    "context": {
+      "n": 4,
+      "m": 10
+    }
+  },
+  {
+    "name": "add_string",
+    "template": "{{ a|add:\"b\" }}",
+    "context": {
+      "a": "a"
+    }
+  },
+  {
+    "name": "divisibleby",
+    "template": "{{ n|divisibleby:3 }}|{{ n|divisibleby:4 }}",
+    "context": {
+      "n": 21
+    }
+  },
+  {
+    "name": "floatformat",
+    "template": "{{ f|floatformat }}|{{ g|floatformat }}|{{ f|floatformat:3 }}|{{ f|floatformat:0 }}|{{ g|floatformat:\"-2\" }}|{{ f|floatformat:\"-2\" }}",
+    "context": {
+      "f": 34.23234,
+      "g": 34.0
+    }
+  },
+  {
+    "name": "floatformat_round",
+    "template": "{{ f|floatformat }}|{{ f|floatformat:2 }}|{{ n|floatformat:2 }}",
+    "context": {
+      "f": 34.26,
+      "n": 12
+    }
+  },
+  {
+    "name": "filesizeformat",
+    "template": "{{ a|filesizeformat }}|{{ b|filesizeformat }}|{{ c|filesizeformat }}|{{ d|filesizeformat }}|{{ e|filesizeformat }}",
+    "context": {
+      "a": 0,
+      "b": 1,
+      "c": 1023,
+      "d": 123456789,
+      "e": 5368709120
+    }
+  },
+  {
+    "name": "intcomma",
+    "template": "{% load humanize %}{{ a|intcomma }}|{{ b|intcomma }}|{{ c|intcomma }}",
+    "context": {
+      "a": 450,
+      "b": 4500000,
+      "c": -1234
+    }
+  },
+  {
+    "name": "get_digit",
+    "template": "{{ n|get_digit:2 }}",
+    "context": {
+      "n": 123
+    }
+  },
+  {
+    "name": "pluralize",
+    "template": "{{ a|pluralize }}|{{ b|pluralize }}|{{ b|pluralize:\"es\" }}|{{ a|pluralize:\"y,ies\" }}|{{ b|pluralize:\"y,ies\" }}",
+    "context": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "name": "pluralize_list",
+    "template": "{{ items|pluralize }}",
+    "context": {
+      "items": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "name": "yesno",
+    "template": "{{ a|yesno }}|{{ b|yesno }}|{{ c|yesno }}|{{ a|yesno:\"on,off\" }}|{{ c|yesno:\"y,n,maybe\" }}",
+    "context": {
+      "a": true,
+      "b": false,
+      "c": null
+    }
+  },
+  {
+    "name": "default_if_none",
+    "template": "{{ a|default_if_none:\"x\" }}|{{ b|default_if_none:\"x\" }}|{{ b|default:\"x\" }}",
+    "context": {
+      "a": null,
+      "b": ""
+    }
+  },
+  {
+    "name": "length_is_zero",
+    "template": "{{ items|length }}|{{ s|length }}",
+    "context": {
+      "items": [],
+      "s": "héllo"
+    }
+  },
+  {
+    "name": "first_last",
+    "template": "{{ items|first }}|{{ items|last }}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "join_escape",
+    "template": "{{ items|join:\" & \" }}",
+    "context": {
+      "items": [
+        "<a>",
+        "b"
+      ]
+    }
+  },
+  {
+    "name": "slice",
+    "template": "{{ items|slice:\":2\"|join:\",\" }}|{{ items|slice:\"1:\"|join:\",\" }}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "dictsort",
+    "template": "{% for p in people|dictsort:\"name\" %}{{ p.name }} {% endfor %}",
+    "context": {
+      "people": [
+        {
+          "name": "zed",
+          "age": 19
+        },
+        {
+          "name": "amy",
+          "age": 22
+        },
+        {
+          "name": "joe",
+          "age": 31
+        }
+      ]
+    }
+  },
+  {
+    "name": "dictsortreversed",
+    "template": "{% for p in people|dictsortreversed:\"age\" %}{{ p.name }} {% endfor %}",
+    "context": {
+      "people": [
+        {
+          "name": "zed",
+          "age": 19
+        },
+        {
+          "name": "amy",
+          "age": 22
+        },
+        {
+          "name": "joe",
+          "age": 31
+        }
+      ]
+    }
+  },
+  {
+    "name": "unordered_list",
+    "template": "{{ items|unordered_list }}",
+    "context": {
+      "items": [
+        "States",
+        [
+          "Kansas",
+          [
+            "Lawrence",
+            "Topeka"
+          ],
+          "Illinois"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "unordered_list_escape",
+    "template": "{{ items|unordered_list }}",
+    "context": {
+      "items": [
+        "<a>",
+        [
+          "b & c"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "json_script",
+    "template": "{{ data|json_script:\"hello-data\" }}",
+    "context": {
+      "data": {
+        "hello": "world",
+        "tag": "</script>&"
+      }
+    }
+  },
+  {
+    "name": "json_script_list",
+    "template": "{{ data|json_script:\"d\" }}",
+    "context": {
+      "data": [
+        1,
+        "two",
+        true,
+        null
+      ]
+    }
+  },
+  {
+    "name": "date_ymd",
+    "template": "{{ d|date:\"Y-m-d\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      }
+    }
+  },
+  {
+    "name": "date_long",
+    "template": "{{ d|date:\"l, F j, Y\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      }
+    }
+  },
+  {
+    "name": "date_short_names",
+    "template": "{{ d|date:\"D M N b y\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      }
+    }
+  },
+  {
+    "name": "date_day_numbers",
+    "template": "{{ d|date:\"d j S w z W t L o\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      }
+    }
+  },
+  {
+    "name": "date_time_chars",
+    "template": "{{ d|date:\"H:i:s G g h A a\" }}|{{ e|date:\"H:i:s G g h A a\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      },
+      "e": {
+        "__datetime__": "2024-12-25T15:30:00"
+      }
+    }
+  },
+  {
+    "name": "date_f_P",
+    "template": "{{ d|date:\"f P\" }}|{{ e|date:\"f P\" }}|{{ m|date:\"f P\" }}|{{ n|date:\"f P\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      },
+      "e": {
+        "__datetime__": "2024-12-25T15:30:00"
+      },
+      "m": {
+        "__datetime__": "2024-12-25T00:00:00"
+      },
+      "n": {
+        "__datetime__": "2024-07-21T12:00:00"
+      }
+    }
+  },
+  {
+    "name": "date_escaped",
+    "template": "{{ d|date:\"jS \\o\\f F\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      }
+    }
+  },
+  {
+    "name": "date_escaped_words",
+    "template": "{{ d|date:\"jS \\o\\f F \\a\\t g:i\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      }
+    }
+  },
+  {
+    "name": "date_zone",
+    "template": "{{ d|date:\"e T O Z I\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      }
+    }
+  },
+  {
+    "name": "date_rfc",
+    "template": "{{ d|date:\"r\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      }
+    }
+  },
+  {
+    "name": "date_default",
+    "template": "{{ d|date }}|{{ e|date }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      },
+      "e": {
+        "__datetime__": "2024-12-25T15:30:00"
+      }
+    }
+  },
+  {
+    "name": "date_named",
+    "template": "{{ d|date:\"SHORT_DATE_FORMAT\" }}|{{ d|date:\"DATE_FORMAT\" }}|{{ d|date:\"DATETIME_FORMAT\" }}|{{ d|date:\"SHORT_DATETIME_FORMAT\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2024-12-25T15:30:00"
+      }
+    }
+  },
+  {
+    "name": "date_iso",
+    "template": "{{ d|date:\"c\" }}|{{ d|date:\"U\" }}|{{ d|date:\"u\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      }
+    }
+  },
+  {
+    "name": "date_months",
+    "template": "{{ a|date:\"N E\" }}|{{ b|date:\"N\" }}|{{ c|date:\"N\" }}",
+    "context": {
+      "a": {
+        "__datetime__": "2024-03-05T00:00:00"
+      },
+      "b": {
+        "__datetime__": "2024-09-05T00:00:00"
+      },
+      "c": {
+        "__datetime__": "2024-05-05T00:00:00"
+      }
+    }
+  },
+  {
+    "name": "date_invalid",
+    "template": "[{{ s|date:\"Y\" }}]",
+    "context": {
+      "s": "not a date"
+    }
+  },
+  {
+    "name": "time_filter",
+    "template": "{{ d|time:\"H:i\" }}|{{ d|time }}|{{ e|time }}",
+    "context": {
+      "d": {
+        "__datetime__": "2008-01-02T03:04:05"
+      },
+      "e": {
+        "__datetime__": "2024-12-25T15:30:00"
+      }
+    }
+  },
+  {
+    "name": "datetime_print",
+    "template": "{{ d }}",
+    "context": {
+      "d": {
+        "__datetime__": "2024-12-25T15:30:00"
+      }
+    }
+  },
+  {
+    "name": "timesince",
+    "template": "{{ a|timesince:b }}|{{ a|timesince:c }}|{{ a|timesince:d }}|{{ b|timesince:a }}",
+    "context": {
+      "a": {
+        "__datetime__": "2024-01-01T00:00:00"
+      },
+      "b": {
+        "__datetime__": "2024-01-01T08:10:00"
+      },
+      "c": {
+        "__datetime__": "2024-02-17T00:00:00"
+      },
+      "d": {
+        "__datetime__": "2026-03-01T00:00:00"
+      }
+    }
+  },
+  {
+    "name": "timesince_small",
+    "template": "{{ a|timesince:b }}|{{ a|timesince:c }}|{{ a|timesince:d }}",
+    "context": {
+      "a": {
+        "__datetime__": "2024-01-01T00:00:00"
+      },
+      "b": {
+        "__datetime__": "2024-01-01T00:00:30"
+      },
+      "c": {
+        "__datetime__": "2024-01-01T00:01:00"
+      },
+      "d": {
+        "__datetime__": "2024-01-09T05:00:00"
+      }
+    }
+  },
+  {
+    "name": "timeuntil",
+    "template": "{{ b|timeuntil:a }}|{{ a|timeuntil:b }}",
+    "context": {
+      "a": {
+        "__datetime__": "2024-01-01T00:00:00"
+      },
+      "b": {
+        "__datetime__": "2024-01-15T03:00:00"
+      }
+    }
+  },
+  {
+    "name": "literal_backslash",
+    "template": "{{ v|default:\"a\\nb\" }}|{{ \"q\\\"q\"|length }}|{{ v|default:\"c\\\\d\" }}",
+    "context": {
+      "v": ""
+    }
+  },
+  {
+    "name": "print_int",
+    "template": "{{ n }}|{{ neg }}",
+    "context": {
+      "n": 42,
+      "neg": -7
+    }
+  },
+  {
+    "name": "print_bool",
+    "template": "{{ t }}|{{ f }}",
+    "context": {
+      "t": true,
+      "f": false
+    }
+  },
+  {
+    "name": "print_float",
+    "template": "{{ f }}|{{ g }}",
+    "context": {
+      "f": 1.5,
+      "g": 5.0
+    }
+  },
+  {
+    "name": "print_none",
+    "template": "[{{ n }}]",
+    "context": {
+      "n": null
+    }
+  },
+  {
+    "name": "print_list",
+    "template": "{{ items }}",
+    "context": {
+      "items": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "name": "missing_attr",
+    "template": "[{{ user.missing.deeper }}]",
+    "context": {
+      "user": {
+        "name": "x"
+      }
+    }
+  },
+  {
+    "name": "index_lookup",
+    "template": "{{ items.0 }}{{ items.2 }}",
+    "context": {
+      "items": [
+        "alpha",
+        "beta",
+        "gamma"
+      ]
+    }
+  },
+  {
+    "name": "for_dict_items",
+    "template": "{% for k, v in d.items %}{{ k }}={{ v }};{% endfor %}",
+    "context": {
+      "d": {
+        "a": 1,
+        "b": 2
+      }
+    }
+  },
+  {
+    "name": "for_dict_items_pair",
+    "template": "{% for pair in d.items %}{{ pair.0 }}{{ pair.1 }}{% endfor %}",
+    "context": {
+      "d": {
+        "a": 1,
+        "b": 2
+      }
+    }
+  },
+  {
+    "name": "for_dict_keys_values",
+    "template": "{% for k in d.keys %}{{ k }}{% endfor %}|{% for v in d.values %}{{ v }}{% endfor %}",
+    "context": {
+      "d": {
+        "a": 1,
+        "b": 2
+      }
+    }
+  },
+  {
+    "name": "for_dict_nested",
+    "template": "{% for k, v in o.d.items reversed %}{{ k }}{{ v }}{% empty %}none{% endfor %}",
+    "context": {
+      "o": {
+        "d": {
+          "a": 1,
+          "b": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "for_items_key",
+    "template": "{% for item in order.items %}{{ item }} {% endfor %}",
+    "context": {
+      "order": {
+        "items": [
+          "x",
+          "y"
+        ]
+      }
+    }
+  },
+  {
+    "name": "title_edges",
+    "template": "{{ a|title }}|{{ b|title }}",
+    "context": {
+      "a": "the BOY's 1st o'clock",
+      "b": "ünïcode-word a.b"
+    }
+  },
+  {
+    "name": "slugify_unicode",
+    "template": "{{ v|slugify }}",
+    "context": {
+      "v": "Héllo Wörld über_straße"
+    }
+  },
+  {
+    "name": "filesizeformat_edges",
+    "template": "{{ a|filesizeformat }}|{{ b|filesizeformat }}|{{ c|filesizeformat }}|{{ d|filesizeformat }}|{{ e|filesizeformat }}",
+    "context": {
+      "a": 1024,
+      "b": 1536,
+      "c": 1048576,
+      "d": -1048576,
+      "e": "abc"
+    }
+  },
+  {
+    "name": "pluralize_edges",
+    "template": "[{{ a|pluralize }}][{{ b|pluralize }}][{{ c|pluralize }}][{{ d|pluralize }}][{{ e|pluralize }}]",
+    "context": {
+      "a": "1",
+      "b": "2",
+      "c": "abc",
+      "d": null,
+      "e": [
+        1
+      ]
+    }
+  },
+  {
+    "name": "intcomma_edges",
+    "template": "{% load humanize %}{{ a|intcomma }}|{{ b|intcomma }}|{{ c|intcomma }}",
+    "context": {
+      "a": 1234.5,
+      "b": "1234567",
+      "c": 100
+    }
+  },
+  {
+    "name": "linebreaks_crlf",
+    "template": "{{ v|linebreaks }}",
+    "context": {
+      "v": "a\r\nb\r\n\r\n\r\nc"
+    }
+  },
+  {
+    "name": "urlize_edges",
+    "template": "{{ v|urlize }}",
+    "context": {
+      "v": "Mail me@example.com, see (http://example.com/a) or example.org! not.a.url nor x@y"
+    }
+  },
+  {
+    "name": "urlize_quotes",
+    "template": "{{ v|urlize }}",
+    "context": {
+      "v": "say \"hi\" & 'bye' at http://example.com/?q=<x>"
+    }
+  },
+  {
+    "name": "wordwrap_edges",
+    "template": "{{ v|wordwrap:6 }}",
+    "context": {
+      "v": "extraordinarily long word\nnew line  here"
+    }
+  },
+  {
+    "name": "stringformat_edges",
+    "template": "{{ f|stringformat:\".2f\" }}|{{ n|stringformat:\"5d\" }}|{{ s|stringformat:\"d\" }}|{{ n|stringformat:\"x\" }}|{{ f|stringformat:\"e\" }}",
+    "context": {
+      "f": 3.14159,
+      "n": 42,
+      "s": "x"
+    }
+  },
+  {
+    "name": "truncate_edges",
+    "template": "{{ v|truncatechars:1 }}|{{ v|truncatewords:1 }}|{{ w|truncatewords:3 }}|{{ v|truncatechars:5 }}",
+    "context": {
+      "v": "Hello there",
+      "w": "a\nb  c d"
+    }
+  },
+  {
+    "name": "date_ordinals",
+    "template": "{{ a|date:\"jS\" }} {{ b|date:\"jS\" }} {{ c|date:\"jS\" }} {{ d|date:\"jS\" }} {{ e|date:\"jS\" }} {{ f|date:\"jS\" }}",
+    "context": {
+      "a": {
+        "__datetime__": "2024-01-01T00:00:00"
+      },
+      "b": {
+        "__datetime__": "2024-01-03T00:00:00"
+      },
+      "c": {
+        "__datetime__": "2024-01-11T00:00:00"
+      },
+      "d": {
+        "__datetime__": "2024-01-21T00:00:00"
+      },
+      "e": {
+        "__datetime__": "2024-01-22T00:00:00"
+      },
+      "f": {
+        "__datetime__": "2024-01-23T00:00:00"
+      }
+    }
+  },
+  {
+    "name": "date_noon_formats",
+    "template": "{{ d|date:\"g:i A\" }}|{{ d|date:\"h\" }}|{{ m|date:\"g A h G H\" }}|{{ m|date:\"P\" }}",
+    "context": {
+      "d": {
+        "__datetime__": "2024-07-21T12:00:00"
+      },
+      "m": {
+        "__datetime__": "2024-12-25T00:00:00"
+      }
+    }
+  },
+  {
+    "name": "date_week_edges",
+    "template": "{{ a|date:\"W o\" }}|{{ b|date:\"W o z\" }}|{{ c|date:\"L t\" }}",
+    "context": {
+      "a": {
+        "__datetime__": "2021-01-01T00:00:00"
+      },
+      "b": {
+        "__datetime__": "2024-12-30T00:00:00"
+      },
+      "c": {
+        "__datetime__": "2023-02-10T00:00:00"
+      }
+    }
+  },
+  {
+    "name": "timesince_edges",
+    "template": "{{ a|timesince:b }}|{{ a|timesince:c }}|{{ a|timesince:d }}|{{ a|timesince:e }}",
+    "context": {
+      "a": {
+        "__datetime__": "2024-01-31T10:00:00"
+      },
+      "b": {
+        "__datetime__": "2024-03-01T10:00:00"
+      },
+      "c": {
+        "__datetime__": "2025-01-31T09:00:00"
+      },
+      "d": {
+        "__datetime__": "2024-02-01T09:59:00"
+      },
+      "e": {
+        "__datetime__": "2029-06-15T10:00:00"
+      }
+    }
+  },
+  {
+    "name": "dictsort_missing",
+    "template": "{% for p in people|dictsort:\"age\" %}{{ p.name }} {% endfor %}",
+    "context": {
+      "people": [
+        {
+          "name": "b",
+          "age": 2
+        },
+        {
+          "name": "a",
+          "age": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "unordered_list_deep",
+    "template": "{{ items|unordered_list }}",
+    "context": {
+      "items": [
+        "a",
+        [
+          "b",
+          [
+            "c",
+            [
+              "d"
+            ]
+          ],
+          "e"
+        ],
+        "f"
+      ]
+    }
+  },
+  {
+    "name": "json_script_nested",
+    "template": "{{ data|json_script }}",
+    "context": {
+      "data": {
+        "a": [
+          1,
+          2.5,
+          {
+            "b": null
+          }
+        ],
+        "t": true,
+        "ü": "é\n"
+      }
+    }
+  },
+  {
+    "name": "add_edges",
+    "template": "[{{ s|add:1 }}][{{ n|add:\"2\" }}][{{ l|add:m|join:\"\" }}]",
+    "context": {
+      "s": "a",
+      "n": 3,
+      "l": [
+        "x"
+      ],
+      "m": [
+        "y"
+      ]
+    }
+  },
+  {
+    "name": "center_edges",
+    "template": "[{{ v|center:8 }}][{{ w|center:5 }}][{{ v|center:2 }}]",
+    "context": {
+      "v": "abc",
+      "w": "ab"
+    }
+  },
+  {
+    "name": "first_last_edges",
+    "template": "[{{ s|first }}{{ s|last }}][{{ e|first }}][{{ e|last }}]",
+    "context": {
+      "s": "xyz",
+      "e": []
+    }
+  },
+  {
+    "name": "length_edges",
+    "template": "{{ n|length }}|{{ m|length }}|{{ d|length }}",
+    "context": {
+      "n": null,
+      "d": {
+        "a": 1
+      }
+    }
+  },
+  {
+    "name": "join_ints",
+    "template": "{{ nums|join:\", \" }}",
+    "context": {
+      "nums": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "default_edges",
+    "template": "{{ z|default:\"d\" }}{{ f|default:\"d\" }}{{ e|default:\"d\" }}{{ s|default:\"d\" }}{{ n|default:\"d\" }}{{ v|default:\"d\" }}",
+    "context": {
+      "z": 0,
+      "f": false,
+      "e": [],
+      "s": "",
+      "n": null,
+      "v": "v"
+    }
+  },
+  {
+    "name": "yesno_edges",
+    "template": "{{ n|yesno:\"y,n\" }}|{{ s|yesno:\"y,n\" }}|{{ e|yesno:\"y,n,m\" }}",
+    "context": {
+      "n": null,
+      "s": "text",
+      "e": ""
+    }
+  },
+  {
+    "name": "floatformat_edges",
+    "template": "{{ a|floatformat:2 }}|{{ b|floatformat }}|{{ c|floatformat:\"-3\" }}|{{ s|floatformat }}|{{ d|floatformat:1 }}",
+    "context": {
+      "a": -1.555,
+      "b": 0.0,
+      "c": 2.5,
+      "s": "3.75",
+      "d": 0.05
+    }
+  },
+  {
+    "name": "divisibleby_get_digit",
+    "template": "{{ n|get_digit:1 }}{{ n|get_digit:3 }}{{ n|get_digit:9 }}",
+    "context": {
+      "n": 123
+    }
+  },
+  {
+    "name": "cut_edges",
+    "template": "{{ v|cut:\"a\" }}|{{ v|cut:\"na\" }}",
+    "context": {
+      "v": "banana"
+    }
+  },
+  {
+    "name": "upper_lower",
+    "template": "{{ v|upper }}|{{ v|lower }}",
+    "context": {
+      "v": "Ünïcode <B>"
+    }
+  },
+  {
+    "name": "escape_chain",
+    "template": "{{ v|escape|upper }}|{{ v|upper|escape }}",
+    "context": {
+      "v": "<b>"
+    }
+  },
+  {
+    "name": "linebreaksbr_safe_chain",
+    "template": "{{ v|linebreaksbr|upper }}",
+    "context": {
+      "v": "a\n<b>"
+    }
+  },
+  {
+    "name": "striptags_edges",
+    "template": "{{ v|striptags }}",
+    "context": {
+      "v": "a<br>b <script>x()</script> 1 < 2 <!-- c -->d"
+    }
+  },
+  {
+    "name": "spaceless_edges",
+    "template": "{% spaceless %} <div> <b>a</b> <i>b</i> text </div> {% endspaceless %}",
+    "context": {}
+  },
+  {
+    "name": "firstof_as",
+    "template": "{% firstof a b \"c\" as v %}[{{ v }}]",
+    "context": {
+      "a": "",
+      "b": "B"
+    }
+  },
+  {
+    "name": "with_scope",
+    "template": "{% with x=1 %}{% with x=2 y=x %}{{ x }}{{ y }}{% endwith %}{{ x }}{% endwith %}",
+    "context": {}
+  },
+  {
+    "name": "for_nested_vars",
+    "template": "{% for a in aa %}{% for b in bb %}{{ a }}{{ b }}{{ forloop.parentloop.last }}{{ forloop.first }} {% endfor %}{% endfor %}",
+    "context": {
+      "aa": [
+        1,
+        2
+      ],
+      "bb": [
+        "x",
+        "y"
+      ]
+    }
+  },
+  {
+    "name": "for_cycle_reset",
+    "template": "{% for a in aa %}{% for b in bb %}{% cycle 'o' 'e' %}{% endfor %}|{% endfor %}",
+    "context": {
+      "aa": [
+        1,
+        2
+      ],
+      "bb": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "ifchanged_else",
+    "template": "{% for x in items %}{% ifchanged x %}{{ x }}{% else %}.{% endifchanged %}{% endfor %}",
+    "context": {
+      "items": [
+        1,
+        1,
+        2,
+        2,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "escape_safe",
+    "template": "{{ v|escape }}|{{ v|force_escape }}|{{ v|escape|escape }}|{{ w|escape|escape }}",
+    "context": {
+      "v": {
+        "__safe__": "<b>"
+      },
+      "w": "<i>"
+    }
+  },
+  {
+    "name": "linebreaks_safe",
+    "template": "{{ v|linebreaksbr }}|{{ v|linebreaks }}",
+    "context": {
+      "v": {
+        "__safe__": "a<b>\nc"
+      }
+    }
+  },
+  {
+    "name": "firstof_safe",
+    "template": "{% firstof a|safe %}|{% firstof s %}|{% firstof a %}",
+    "context": {
+      "a": "<b>",
+      "s": {
+        "__safe__": "<b>"
+      }
+    }
+  },
+  {
+    "name": "cycle_safe",
+    "template": "{% for x in items %}{% cycle a b %}{% endfor %}",
+    "context": {
+      "items": [
+        1,
+        2
+      ],
+      "a": {
+        "__safe__": "<b>"
+      },
+      "b": "<i>"
+    }
+  },
+  {
+    "name": "unordered_list_safe",
+    "template": "{{ items|unordered_list }}",
+    "context": {
+      "items": [
+        "<a>",
+        {
+          "__safe__": "<b>x</b>"
+        }
+      ]
+    }
+  },
+  {
+    "name": "urlize_safe",
+    "template": "{{ v|urlize }}",
+    "context": {
+      "v": {
+        "__safe__": "x &amp; <i>y</i> http://example.com/?a=1&amp;b=2"
+      }
+    }
+  },
+  {
+    "name": "floatformat_group",
+    "template": "{{ a|floatformat:\"2g\" }}|{{ b|floatformat:\"g\" }}|{{ a|floatformat:\"-3g\" }}",
+    "context": {
+      "a": 1234567.891,
+      "b": 10000
+    }
+  },
+  {
+    "name": "floatformat_half",
+    "template": "{{ a|floatformat:2 }}|{{ b|floatformat:0 }}|{{ c|floatformat:\"-1\" }}|{{ d|floatformat:1 }}|{{ e|floatformat:3 }}",
+    "context": {
+      "a": 2.675,
+      "b": 0.5,
+      "c": 34.001,
+      "d": -0.01,
+      "e": 1
+    }
+  },
+  {
+    "name": "floatformat_invalid",
+    "template": "[{{ s|floatformat }}][{{ n|floatformat }}][{{ f|floatformat:\"x\" }}]",
+    "context": {
+      "s": "abc",
+      "n": null,
+      "f": 1.5
+    }
+  },
+  {
+    "name": "get_digit_edges",
+    "template": "{{ n|get_digit:0 }}|{{ s|get_digit:1 }}|{{ n|get_digit:\"2\" }}",
+    "context": {
+      "n": 456,
+      "s": "xyz"
+    }
+  },
+  {
+    "name": "safe_chain",
+    "template": "{{ v|safe|linebreaksbr }}|{{ v|safe }}|{{ n|safe }}|{{ v|safe|escape }}|{{ v|safe|force_escape }}",
+    "context": {
+      "v": "<b>\n",
+      "n": 5
+    }
+  },
+  {
+    "name": "join_then_safe",
+    "template": "{{ items|join:\", \"|safe }}|{{ items|join:\"<br>\" }}|{{ items|join:sep }}|{{ items|join:\"<br>\"|safe }}",
+    "context": {
+      "items": [
+        "<a>",
+        "b"
+      ],
+      "sep": "<hr>"
+    }
+  },
+  {
+    "name": "join_safe_items",
+    "template": "{{ items|join:\" & \" }}|{{ word|join:\"-\" }}|{{ n|join:\"-\" }}",
+    "context": {
+      "items": [
+        "<a>",
+        {
+          "__safe__": "<b>"
+        }
+      ],
+      "word": "a<b",
+      "n": 5
+    }
+  },
+  {
+    "name": "default_literal",
+    "template": "{{ a|default:'<i>none</i>' }}|{{ a|default:fallback }}|{{ n|default_if_none:\"<none>\" }}|{{ v|default:\"<x>\" }}|{{ a|default:\"<b>\"|upper }}",
+    "context": {
+      "a": "",
+      "fallback": "<i>",
+      "n": null,
+      "v": "<v>"
+    }
+  },
+  {
+    "name": "firstof_literal",
+    "template": "{% firstof a '<b>x</b>' %}|{% firstof a '<b>'|upper %}|{% firstof a b %}",
+    "context": {
+      "a": "",
+      "b": "<i>"
+    }
+  },
+  {
+    "name": "cycle_literal",
+    "template": "{% for x in items %}{% cycle '<b>' v %}{% endfor %}",
+    "context": {
+      "items": [
+        1,
+        2
+      ],
+      "v": "<i>"
+    }
+  },
+  {
+    "name": "truncatechars_html",
+    "template": "{{ v|truncatechars_html:7 }}|{{ s|truncatechars_html:7 }}|{{ s|truncatechars_html:100 }}|{{ s|truncatechars_html:0 }}|{{ s|truncatechars_html:11 }}",
+    "context": {
+      "v": "<p>Joel is a slug</p>",
+      "s": {
+        "__safe__": "<p>Joel <b>is &amp; a</b> slug<br>x</p>"
+      }
+    }
+  },
+  {
+    "name": "truncatewords_html",
+    "template": "{{ v|truncatewords_html:2 }}|{{ s|truncatewords_html:2 }}|{{ s|truncatewords_html:3 }}|{{ s|truncatewords_html:100 }}|{{ s|truncatewords_html:\"x\" }}",
+    "context": {
+      "v": "<p>Joel is a slug</p>",
+      "s": {
+        "__safe__": "<p>Joel <b>is &amp; a</b> slug<br>x</p>"
+      }
+    }
+  },
+  {
+    "name": "truncate_html_edges",
+    "template": "{{ c|truncatechars_html:4 }}|{{ c|truncatewords_html:1 }}|{{ t|truncatechars_html:3 }}|{{ u|truncatechars_html:3 }}|{{ i|truncatechars_html:3 }}|{{ i|truncatewords_html:1 }}",
+    "context": {
+      "c": {
+        "__safe__": "<DIV class=\"a\">one <!-- note -->two <I>three</I></DIV>"
+      },
+      "t": "abc",
+      "u": "abcd",
+      "i": {
+        "__safe__": "<img src=\"a.png\"/><span/>a &lt; b c"
+      }
+    }
+  },
+  {
+    "name": "safeseq",
+    "template": "{{ items|safeseq|join:\", \" }}|{{ items|escapeseq|join:\"<br>\" }}|{{ items|join:\", \" }}",
+    "context": {
+      "items": [
+        "<a>",
+        "b&c"
+      ]
+    }
   }
 ]
