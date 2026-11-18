@@ -332,15 +332,35 @@ func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, valu
 		return p, nil
 	}
 
-	param, ok := rhs.(paramNode)
-	if !ok {
-		return nil, fmt.Errorf("orm: the %s lookup needs a plain value, not an expression", lookup)
-	}
 	if (lookup == lookupRegex || lookup == lookupIRegex) && !supportsRegex(c.d) {
 		return nil, fmt.Errorf("orm: the %s dialect does not support the %s lookup", c.d.Name(), lookup)
 	}
+	param, ok := rhs.(paramNode)
+	if !ok {
+		p.rhs = []sqlNode{exprPattern(lookup, rhs)}
+		return p, nil
+	}
 	p.rhs = []sqlNode{paramNode{value: likePattern(lookup, fmt.Sprint(param.value))}}
 	return p, nil
+}
+
+// exprPattern returns the pattern of a pattern lookup whose value is the
+// expression n, such as F("lastname"). It is the SQL counterpart of
+// likePattern: the database escapes the LIKE wildcards of the value and adds
+// the wildcards of the lookup, as Django's pattern_esc and pattern_ops do.
+func exprPattern(lookup string, n sqlNode) sqlNode {
+	switch lookup {
+	case lookupRegex, lookupIRegex:
+		return n
+	case lookupContains, lookupIContains:
+		return likeExprNode{inner: n, prefix: true, suffix: true}
+	case lookupStartsWith, lookupIStartsWith:
+		return likeExprNode{inner: n, suffix: true}
+	case lookupEndsWith, lookupIEndsWith:
+		return likeExprNode{inner: n, prefix: true}
+	default:
+		return likeExprNode{inner: n}
+	}
 }
 
 // likePattern returns the bound pattern of a pattern lookup for the text s.

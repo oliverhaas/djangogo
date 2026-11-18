@@ -193,12 +193,43 @@ type binaryNode struct {
 }
 
 // render writes "(left op right)". The parentheses keep the precedence of
-// nested combinations as it was written in Go.
+// nested combinations as it was written in Go. The operators without a common
+// infix form are written as functions or identities that both dialects run.
 func (n binaryNode) render(w *sqlWriter) {
+	switch n.op {
+	case opPow:
+		w.write("POWER(")
+		n.left.render(w)
+		w.write(", ")
+		n.right.render(w)
+		w.write(")")
+		return
+	case opBitXor:
+		// a XOR b is (a | b) - (a & b): the bits of a & b are a subset of
+		// those of a | b, so the subtraction clears them without a borrow.
+		w.write("((")
+		n.left.render(w)
+		w.write(" | ")
+		n.right.render(w)
+		w.write(") - (")
+		n.left.render(w)
+		w.write(" & ")
+		n.right.render(w)
+		w.write("))")
+		return
+	}
 	w.write("(")
 	n.left.render(w)
 	w.write(" " + n.op + " ")
-	n.right.render(w)
+	if n.op == opShiftLeft || n.op == opShiftRight {
+		// PostgreSQL shifts a bigint by an integer only, and a literal is
+		// bound as a bigint.
+		w.write("CAST(")
+		n.right.render(w)
+		w.write(" AS INTEGER)")
+	} else {
+		n.right.render(w)
+	}
 	w.write(")")
 }
 
@@ -217,6 +248,37 @@ func (n binaryNode) vtype() valueType {
 
 // aggregate reports whether either side holds an aggregate.
 func (n binaryNode) aggregate() bool { return n.left.aggregate() || n.right.aggregate() }
+
+// likeExprNode is the LIKE pattern built from an expression: the value of
+// inner with "\", "%", and "_" escaped by a backslash, between the "%"
+// wildcards that prefix and suffix ask for. The wildcards are SQL literals,
+// never bound values, so that the database sees the whole pattern.
+type likeExprNode struct {
+	inner          sqlNode
+	prefix, suffix bool
+}
+
+// render writes the pattern, parenthesized so that the concatenation binds
+// before the LIKE that uses it.
+func (n likeExprNode) render(w *sqlWriter) {
+	w.write("(")
+	if n.prefix {
+		w.write("'%' || ")
+	}
+	w.write("REPLACE(REPLACE(REPLACE(")
+	n.inner.render(w)
+	w.write(`, '\', '\\'), '%', '\%'), '_', '\_')`)
+	if n.suffix {
+		w.write(" || '%'")
+	}
+	w.write(")")
+}
+
+// vtype is string: a pattern is text.
+func (likeExprNode) vtype() valueType { return typeString }
+
+// aggregate reports whether the expression holds an aggregate.
+func (n likeExprNode) aggregate() bool { return n.inner.aggregate() }
 
 // aggNode is an aggregate function call. arg is nil for COUNT(*).
 type aggNode struct {

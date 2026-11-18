@@ -21,7 +21,7 @@ const (
 )
 
 // Expr is an SQL value expression: a field reference (F), a literal (Value),
-// an arithmetic combination of expressions, or an aggregate (Count, Sum, Avg,
+// an arithmetic or bitwise combination of expressions, or an aggregate (Count, Sum, Avg,
 // Min, Max). It is immutable; every method returns a new Expr.
 //
 // An Expr can be the value of a filter, so a column is compared with another
@@ -94,6 +94,42 @@ func (e Expr) Div(x any) Expr { return e.binary("/", x) }
 
 // Mod returns e % x. x is an Expr or a plain value.
 func (e Expr) Mod(x any) Expr { return e.binary("%", x) }
+
+// The operators of Expr that are not written infix in every dialect.
+const (
+	// opPow is the power operator, rendered as POWER(e, x).
+	opPow = "^"
+	// opBitXor is the bitwise exclusive or, which SQLite has no operator for.
+	opBitXor = "#"
+	// opShiftLeft and opShiftRight shift an integer by a number of bits.
+	opShiftLeft  = "<<"
+	opShiftRight = ">>"
+)
+
+// Pow returns e raised to the power x, like Django's F("n") ** x. x is an
+// Expr or a plain value. The SQL is POWER(e, x), whose result is a floating
+// point number on both SQLite and PostgreSQL; stored in an integer column or
+// read as an integer it is rounded toward zero.
+func (e Expr) Pow(x any) Expr { return e.binary(opPow, x) }
+
+// BitAnd returns the bitwise and of e and x, like Django's bitand().
+func (e Expr) BitAnd(x any) Expr { return e.binary("&", x) }
+
+// BitOr returns the bitwise or of e and x, like Django's bitor().
+func (e Expr) BitOr(x any) Expr { return e.binary("|", x) }
+
+// BitXor returns the bitwise exclusive or of e and x, like Django's
+// bitxor(). It is written as (e | x) - (e & x), which is the same for
+// integers and runs on every dialect.
+func (e Expr) BitXor(x any) Expr { return e.binary(opBitXor, x) }
+
+// BitLeftShift returns e shifted left by x bits, like Django's
+// bitleftshift().
+func (e Expr) BitLeftShift(x any) Expr { return e.binary(opShiftLeft, x) }
+
+// BitRightShift returns e shifted right by x bits, like Django's
+// bitrightshift().
+func (e Expr) BitRightShift(x any) Expr { return e.binary(opShiftRight, x) }
 
 // Distinct makes an aggregate consider each distinct value once, like Django's
 // distinct=True: orm.Count("author").Distinct() is COUNT(DISTINCT author_id).
