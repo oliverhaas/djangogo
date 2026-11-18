@@ -81,8 +81,8 @@ func Authenticate(ctx context.Context, db *orm.DB, username, password string) (*
 	for _, b := range backends() {
 		u, err := b.Authenticate(ctx, db, username, password)
 		if errors.Is(err, ErrPermissionDenied) {
-			// This backend says to stop in our tracks: the user must not
-			// be allowed in at all.
+			// The backend ends the search: the user must not be let in
+			// at all.
 			break
 		}
 		if err != nil {

@@ -1,5 +1,12 @@
 package auth
 
+import (
+	"context"
+	"fmt"
+
+	"github.com/oliverhaas/djangogo/orm"
+)
+
 // SetPassword hashes raw with the preferred hasher and stores the result in
 // u.Password (Django's set_password). It does not save the user.
 func (u *User) SetPassword(raw string) error {
@@ -8,6 +15,19 @@ func (u *User) SetPassword(raw string) error {
 		return err
 	}
 	u.Password = encoded
+	return nil
+}
+
+// ChangePassword hashes raw, makes it the password of u and stores it
+// (Django's set_password followed by save). Sessions of u that were logged in
+// with the old password end; UpdateSessionAuthHash keeps the current one.
+func ChangePassword(ctx context.Context, db *orm.DB, u *User, raw string) error {
+	if err := u.SetPassword(raw); err != nil {
+		return err
+	}
+	if _, err := orm.Query[User](db).Filter("id", u.ID).Update(ctx, "password", u.Password); err != nil {
+		return fmt.Errorf("auth: store password: %w", err)
+	}
 	return nil
 }
 

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+</head>
+<body>
+<h1>{{ title }}</h1>
+{% for error in non_field_errors %}<p class="errornote">{{ error }}</p>
+{% endfor %}<form method="post">
+{% csrf_token %}
+<input type="hidden" name="{{ redirect_field_name }}" value="{{ next }}">
+<p>{% for error in field_errors.username %}<span class="errorlist">{{ error }}</span>
+{% endfor %}<label for="id_username">Username:</label>
+<input type="text" name="username" id="id_username" value="{{ username }}" maxlength="150" autocapitalize="none" autocomplete="username" autofocus required></p>
+<p>{% for error in field_errors.password %}<span class="errorlist">{{ error }}</span>
+{% endfor %}<label for="id_password">Password:</label>
+<input type="password" name="password" id="id_password" autocomplete="current-password" required></p>
+<p><button type="submit">Log in</button></p>
+</form>
+</body>
+</html>

@@ -55,8 +55,8 @@ func TestLoginRequired(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("anonymous status = %d, want %d", rec.Code, http.StatusFound)
 	}
-	if loc := rec.Header().Get("Location"); loc != "/login/?next=%2Fsecret%2F" {
-		t.Fatalf("Location = %q, want /login/?next=%%2Fsecret%%2F", loc)
+	if loc := rec.Header().Get("Location"); loc != "/login/?next=/secret/" {
+		t.Fatalf("Location = %q, want /login/?next=/secret/", loc)
 	}
 	if ran {
 		t.Fatal("wrapped handler ran for an anonymous request")
@@ -84,7 +84,7 @@ func TestPermissionRequired(t *testing.T) {
 	must(t, granted.AddPermissions(ctx, db, groupPerm(t, db, "Can do it", "do_it")))
 	denied := createUser(t, db, "noperm", "pw")
 
-	guard := auth.PermissionRequired(db, "auth.do_it", "/login/")
+	guard := auth.PermissionRequired("auth.do_it", auth.WithLoginURL("/login/"), auth.WithGuardDB(db))
 
 	// Granted: 200.
 	var ran bool

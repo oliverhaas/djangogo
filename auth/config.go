@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"net/http"
 	"sync"
 	"sync/atomic"
 )
@@ -53,6 +54,18 @@ type Config struct {
 	// (Django's LOGOUT_REDIRECT_URL). Empty means that LogoutView renders
 	// the logged-out page.
 	LogoutRedirectURL string
+
+	// PasswordValidators check a new password in the password views and the
+	// commands (Django's AUTH_PASSWORD_VALIDATORS). Nil means
+	// DefaultPasswordValidators, the list of a new Django project; an empty,
+	// non-nil list turns validation off.
+	PasswordValidators []PasswordValidator
+
+	// IsSecure reports whether the request reached the site over HTTPS
+	// (Django's request.is_secure). Nil means that the connection itself
+	// used TLS. Set it when a proxy terminates TLS. A secure request is
+	// redirected to https URLs only.
+	IsSecure func(*http.Request) bool
 }
 
 // current is the active configuration. It is replaced as a whole, so a reader
@@ -100,6 +113,30 @@ func backendByName(name string) Backend {
 		}
 	}
 	return nil
+}
+
+// configuredLoginURL returns Config.LoginURL or its default.
+func configuredLoginURL() string {
+	if u := settings().LoginURL; u != "" {
+		return u
+	}
+	return DefaultLoginURL
+}
+
+// configuredLoginRedirectURL returns Config.LoginRedirectURL or its default.
+func configuredLoginRedirectURL() string {
+	if u := settings().LoginRedirectURL; u != "" {
+		return u
+	}
+	return DefaultLoginRedirectURL
+}
+
+// requestIsSecure reports whether r came in over HTTPS, as configured.
+func requestIsSecure(r *http.Request) bool {
+	if isSecure := settings().IsSecure; isSecure != nil {
+		return isSecure(r)
+	}
+	return r.TLS != nil
 }
 
 // processSecret is the key in use while Config.SecretKey is empty: 32 random
