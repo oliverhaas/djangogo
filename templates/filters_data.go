@@ -150,43 +150,62 @@ func filterJSONScript(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 }
 
 // lookupKey resolves a dictsort key ("name", "author.name", "0") on an
-// element.
-func lookupKey(v reflect.Value, key string) any {
+// element. ok is false when the element has no such key.
+func lookupKey(v reflect.Value, key string) (value any, ok bool) {
 	for _, part := range strings.Split(key, ".") {
 		for v.IsValid() && (v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer) {
 			if v.IsNil() {
-				return nil
+				return nil, false
 			}
 			v = v.Elem()
 		}
 		if !v.IsValid() {
-			return nil
+			return nil, false
 		}
 		switch v.Kind() {
 		case reflect.Map:
 			if v.Type().Key().Kind() != reflect.String {
-				return nil
+				return nil, false
 			}
 			v = v.MapIndex(reflect.ValueOf(part).Convert(v.Type().Key()))
 		case reflect.Slice, reflect.Array:
 			i, err := strconv.Atoi(part)
 			if err != nil || i < 0 || i >= v.Len() {
-				return nil
+				return nil, false
 			}
 			v = v.Index(i)
 		case reflect.Struct:
 			v = v.FieldByName(part)
 		default:
-			return nil
+			return nil, false
 		}
 	}
 	for v.IsValid() && v.Kind() == reflect.Interface && !v.IsNil() {
 		v = v.Elem()
 	}
 	if !v.IsValid() || !v.CanInterface() {
-		return nil
+		return nil, false
 	}
-	return v.Interface()
+	return v.Interface(), true
+}
+
+// sortKind is the kind of a dictsort key that Python can order against
+// another key of the same kind.
+func sortKind(v any) string {
+	if v == nil {
+		return "none"
+	}
+	pv := pongo2.AsValue(v)
+	switch {
+	case pv.IsNumber() || pv.IsBool():
+		return "number"
+	case pv.IsString():
+		return "string"
+	}
+	if _, ok := asTime(pv); ok {
+		return "time"
+	}
+	return "other"
 }
 
 // compareValues orders two sort keys: numbers by value, times by instant,
@@ -221,11 +240,15 @@ func compareValues(a, b any) int {
 }
 
 // dictsortFilter returns Django's dictsort or dictsortreversed: a list of
-// maps (or of lists) ordered by the given key. The sort is stable.
+// maps (or of lists) ordered by the given key. The sort is stable. Like
+// Django it gives an empty string for a key that starts with "_" (or has a
+// part that does), for an element without the key, and for keys Python
+// cannot order against each other.
 func dictsortFilter(reversed bool) pongo2.FilterFunction {
 	return func(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 		rv := reflect.ValueOf(in.Interface())
-		if !isList(rv) {
+		key := param.String()
+		if !isList(rv) || strings.HasPrefix(key, "_") || strings.Contains(key, "._") {
 			return str("")
 		}
 		type keyed struct {
@@ -233,8 +256,17 @@ func dictsortFilter(reversed bool) pongo2.FilterFunction {
 			item any
 		}
 		rows := make([]keyed, rv.Len())
+		kinds := map[string]bool{}
 		for i := range rows {
-			rows[i] = keyed{key: lookupKey(rv.Index(i), param.String()), item: rv.Index(i).Interface()}
+			k, ok := lookupKey(rv.Index(i), key)
+			if !ok {
+				return str("")
+			}
+			kinds[sortKind(k)] = true
+			rows[i] = keyed{key: k, item: rv.Index(i).Interface()}
+		}
+		if len(rows) > 1 && (len(kinds) > 1 || kinds["none"]) {
+			return str("")
 		}
 		slices.SortStableFunc(rows, func(a, b keyed) int {
 			if reversed {

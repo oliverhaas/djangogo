@@ -65,8 +65,8 @@ func (n *forTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWrit
 
 // assign binds the loop variables for one element. With one variable it is the
 // element (the key, for a map). With several, a map gives key and value and
-// any other element is unpacked like a Python tuple; variables the element
-// has no value for are nil.
+// any other element, a string too, is unpacked like a Python tuple; variables
+// the element has no value for are nil.
 func (n *forTagNode) assign(ctx *pongo2.ExecutionContext, key, value *pongo2.Value) {
 	if len(n.vars) == 1 {
 		ctx.Private[n.vars[0]] = key
@@ -81,6 +81,14 @@ func (n *forTagNode) assign(ctx *pongo2.ExecutionContext, key, value *pongo2.Val
 		return
 	}
 	rv := reflect.ValueOf(key.Interface())
+	if rv.Kind() == reflect.String {
+		// A Python string unpacks into its characters.
+		chars := []rune(rv.String())
+		rv = reflect.ValueOf(make([]string, len(chars)))
+		for i, c := range chars {
+			rv.Index(i).SetString(string(c))
+		}
+	}
 	unpack := rv.IsValid() && (rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array)
 	for i, name := range n.vars {
 		if unpack && i < rv.Len() {

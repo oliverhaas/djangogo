@@ -85,7 +85,10 @@ func (n *includeTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.Template
 		return ctx.OrigError(errIncludeDepth, n.start)
 	}
 	st.depth++
+	saved := st.tagState
+	st.tagState = nil
 	err = tpl.ExecuteWriter(inc, w)
+	st.tagState = saved
 	st.depth--
 	if err != nil {
 		var inner *pongo2.Error

@@ -52,8 +52,9 @@ type renderState struct {
 	included []Rendered
 	// depth counts the includes being rendered, one inside the other.
 	depth int
-	// cycles holds the position of every {% cycle %} tag of the render.
-	cycles map[*cycleTagNode]int
+	// tagState holds what tags such as {% cycle %} remember during the
+	// render of one template, keyed by the tag, see tagState.
+	tagState map[any]any
 }
 
 // stateFrom returns the renderState of the render ctx belongs to, or nil for a
@@ -186,13 +187,35 @@ func (e *Engine) loadError(err error) error {
 	return wrapPongo(err)
 }
 
+// errPanic is the cause of the error a render returns when pongo2 panicked.
+var errPanic = errors.New("pongo2 panicked")
+
+// guard runs fn and turns a panic into an error. pongo2 panics on some
+// malformed templates ({{ a%b }} with both sides missing divides by zero),
+// and a template must not take down the request that renders it.
+func guard(what string, fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("templates: %s: %w: %v", what, errPanic, r)
+		}
+	}()
+	return fn()
+}
+
 // load returns the compiled template of name, compiling it on first use.
 func (e *Engine) load(name string) (*pongo2.Template, error) {
 	if name == "" {
 		// pongo2 reports an empty name without saying which template it was.
 		return nil, fmt.Errorf("templates: load %q: %w", name, &TemplateDoesNotExist{Name: name})
 	}
-	tpl, err := e.set.FromCache(name)
+	var tpl *pongo2.Template
+	err := guard(fmt.Sprintf("load %q", name), func() (err error) {
+		tpl, err = e.set.FromCache(name)
+		return err
+	})
+	if errors.Is(err, errPanic) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, fmt.Errorf("templates: load %q: %w", name, e.loadError(err))
 	}
@@ -240,11 +263,15 @@ func (e *Engine) render(name string, ctx map[string]any, st *renderState) (strin
 	if err != nil {
 		return "", err
 	}
-	out, err := tpl.Execute(e.context(ctx, st))
-	if err != nil {
-		return "", fmt.Errorf("templates: render %q: %w", name, wrapPongo(err))
+	var out string
+	err = guard(fmt.Sprintf("render %q", name), func() (err error) {
+		out, err = tpl.Execute(e.context(ctx, st))
+		return err
+	})
+	if err != nil && !errors.Is(err, errPanic) {
+		err = fmt.Errorf("templates: render %q: %w", name, wrapPongo(err))
 	}
-	return out, nil
+	return out, err
 }
 
 // RenderTo renders the named template with ctx to w.
@@ -253,10 +280,13 @@ func (e *Engine) RenderTo(w io.Writer, name string, ctx map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if err := tpl.ExecuteWriter(e.context(ctx, nil), w); err != nil {
-		return fmt.Errorf("templates: render %q: %w", name, wrapPongo(err))
+	err = guard(fmt.Sprintf("render %q", name), func() error {
+		return tpl.ExecuteWriter(e.context(ctx, nil), w)
+	})
+	if err != nil && !errors.Is(err, errPanic) {
+		err = fmt.Errorf("templates: render %q: %w", name, wrapPongo(err))
 	}
-	return nil
+	return err
 }
 
 // RenderString renders a template given as a source string. The source is
@@ -268,13 +298,24 @@ func (e *Engine) RenderString(src string, ctx map[string]any) (string, error) {
 
 // renderString renders a source string with the given render state.
 func (e *Engine) renderString(src string, ctx map[string]any, st *renderState) (string, error) {
-	tpl, err := e.set.FromBytes(djangoSyntax([]byte(src)))
+	var tpl *pongo2.Template
+	err := guard("parse string", func() (err error) {
+		tpl, err = e.set.FromBytes(djangoSyntax([]byte(src)))
+		return err
+	})
 	if err != nil {
+		if errors.Is(err, errPanic) {
+			return "", err
+		}
 		return "", fmt.Errorf("templates: parse string: %w", e.loadError(err))
 	}
-	out, err := tpl.Execute(e.context(ctx, st))
-	if err != nil {
-		return "", fmt.Errorf("templates: render string: %w", wrapPongo(err))
+	var out string
+	err = guard("render string", func() (err error) {
+		out, err = tpl.Execute(e.context(ctx, st))
+		return err
+	})
+	if err != nil && !errors.Is(err, errPanic) {
+		err = fmt.Errorf("templates: render string: %w", wrapPongo(err))
 	}
-	return out, nil
+	return out, err
 }

@@ -27,24 +27,19 @@ with `python3 fidelity/oracle/render.py`.
 
 | Case | Django | This engine |
 | --- | --- | --- |
-| `print_float` | `{{ 1.5 }}` prints `1.5` | prints `1.500000`; `floatformat` prints floats like Django |
 | `print_none` | `{{ n }}` prints `None` | prints nothing |
-| `print_list` | `['a', 'b']` (Python repr) | Go's formatting of the value; the same holds for maps |
+| `print_list` | `['a', 'b']` (Python repr) | Go's formatting of the value; the same holds for maps and for `stringformat:"s"` and `make_list` of a list |
 | `lorem_words` | `{% lorem 3 w %}` prints `lorem ipsum dolor` | pongo2's tag prints `Lorem ipsum dolor` with punctuation |
+| `urlize_bracket_punctuation` | 6.0.3 drops the `.` of `(see www.example.com).`, a bug its main branch fixed | keeps it, as Django's main branch does |
 
 ## Differences without a case
 
 ### Escaping
 
-- A filter cannot see `{% autoescape off %}`. `linebreaks`, `linebreaksbr`,
-  `urlize`, `urlizetrunc`, `unordered_list` and `join` escape input that is not
-  marked safe inside such a block too.
-- `safe` anywhere in a filter chain turns escaping off for that output:
-  `{{ v|safe|upper }}` prints unescaped, where Django escapes because `upper`
-  drops the safe mark.
-- `{% with x="<b>" %}{{ x }}{% endwith %}` escapes the literal. Django prints a
-  string literal as written. `default`, `default_if_none`, `join`, `firstof` and
-  `cycle` print their literal arguments as written, as Django does.
+- A string literal is safe where Django's is: as a `{{ }}` value, a `{% with %}`
+  or `{% include ... with %}` assignment and an argument of `default`,
+  `default_if_none`, `join`, `firstof` and `cycle`. A literal elsewhere, for
+  example the argument of a custom filter, is not marked safe.
 - An included template starts with autoescape on, also inside
   `{% autoescape off %}`.
 - The safe mark is read from an unexported field of `pongo2.Value` by
@@ -53,6 +48,14 @@ with `python3 fidelity/oracle/render.py`.
 
 ### Values
 
+- `{{ var.1 }}` indexes a list but does not look up the key `"1"` of a map,
+  where Django tries the key first.
+- `add` does not concatenate two lists.
+- `{% cycle name %}` inside `{% with %}` or another block that opens a scope
+  sets the variable of the cycle for that block only. Django sets it where the
+  cycle defined it.
+- A float prints as Django prints it; a `float32` is converted to `float64`
+  first, so `float32(0.1)` prints `0.10000000149011612`.
 - `1 == 1.0` is false: an `int` and a `float64` never compare equal.
 - `{{ text.0 }}` on a string prints the number of the byte, not the character.
 - Methods of Python types (`text.upper`, `mapping.items` outside a `{% for %}`
@@ -81,18 +84,23 @@ with `python3 fidelity/oracle/render.py`.
 - `is` and `is not` compare by value (`==`, `!=`).
 - `{% extends variable %}` is not supported; the name must be a string literal.
 - pongo2's own tags and filters stay available (`set`, `macro`, `import`,
-  `ifequal`, `length_is`, `float`, `integer`, `split`), and
-  `{{ call(arg) }}` is valid.
+  `ifequal`, `length_is`, `float`, `integer`, `split`), and pongo2
+  expressions such as `{{ call(arg) }}` and `{{ a or b }}` are valid.
 - Error messages are pongo2's. After a rewritten tag the reported column can
-  be off by a few characters, and the hidden filters `_literal_default`,
-  `_literal_default_if_none`, `_literal_join`, `_dict_items`, `_dict_keys` and
-  `_dict_values` can appear in a message.
+  be off by a few characters, and the hidden filters `_out`, `_safe_literal`,
+  `_literal_default`, `_literal_default_if_none`, `_literal_join`,
+  `_noescape_<filter>`, `_dict_items`, `_dict_keys` and `_dict_values` can
+  appear in a message.
+- Some templates Django rejects render: `{{ var.__dict__ }}` (a name that
+  starts with an underscore) prints nothing, `{{ va>r }}` is a comparison, and
+  `{{ block.super }}` outside a child template prints nothing. `{{ 1.2.3 }}`
+  fails, where Django looks up the variable.
 - `{% load %}` accepts any library name and does nothing; every tag and filter
   is always loaded.
 
 ### Missing
 
-- Tags: `regroup`, `resetcycle`, `querystring`, `debug`, `partialdef`,
+- Tags: `regroup`, `querystring`, `debug`, `partialdef`,
   `partial`, and the `i18n`, `l10n`, `tz` and `cache` libraries.
 - Filters: `pprint`.
 - `forloop.Counter` and the other capitalized pongo2 loop names; use Django's

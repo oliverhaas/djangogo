@@ -2,6 +2,7 @@ package templates
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"regexp"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 // writeOutput writes a tag's result the way a variable is printed: escaped
 // under autoescape when it is a string that is not marked safe.
 func writeOutput(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter, val *pongo2.Value) *pongo2.Error {
+	val, _ = filterOut(val, nil)
 	out := val.String()
 	if ctx.Autoescape && val.IsString() && !isSafe(val) {
 		out = escapeHTML(out)
@@ -171,66 +173,6 @@ func firstofTagParser(_ *pongo2.Parser, _ *pongo2.Token, args *pongo2.Parser) (p
 	return node, nil
 }
 
-// cycleTagNode implements Django's {% cycle %}:
-//
-//	{% cycle 'odd' 'even' %}
-//	{% cycle a b c as color %}           also stores the value
-//	{% cycle a b c as color silent %}    only stores it
-//
-// It replaces pongo2's tag, which prints variables unescaped.
-type cycleTagNode struct {
-	args   []tagArg
-	asVar  string
-	silent bool
-}
-
-// Execute prints the next value of the cycle. The position is kept per render.
-func (n *cycleTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter) *pongo2.Error {
-	idx := 0
-	if st := stateFrom(ctx); st != nil {
-		if st.cycles == nil {
-			st.cycles = make(map[*cycleTagNode]int)
-		}
-		idx = st.cycles[n]
-		st.cycles[n] = idx + 1
-	}
-	val, err := n.args[idx%len(n.args)].evaluate(ctx)
-	if err != nil {
-		return err
-	}
-	if n.asVar != "" {
-		ctx.Private[n.asVar] = val
-	}
-	if n.silent {
-		return nil
-	}
-	return writeOutput(ctx, w, val)
-}
-
-// cycleTagParser parses {% cycle v1 v2 ... [as name [silent]] %}.
-func cycleTagParser(_ *pongo2.Parser, _ *pongo2.Token, args *pongo2.Parser) (pongo2.INodeTag, *pongo2.Error) {
-	tagArgs, err := parseTagArgs(args)
-	if err != nil {
-		return nil, err
-	}
-	node := &cycleTagNode{args: tagArgs}
-	if len(node.args) == 0 {
-		return nil, args.Error("'cycle' tag requires at least two arguments", nil)
-	}
-	asVar, err := parseAsVar(args)
-	if err != nil {
-		return nil, err
-	}
-	node.asVar = asVar
-	if asVar != "" && args.Match(pongo2.TokenIdentifier, "silent") != nil {
-		node.silent = true
-	}
-	if args.Remaining() > 0 {
-		return nil, args.Error("Malformed arguments to 'cycle' tag.", nil)
-	}
-	return node, nil
-}
-
 // widthratioTagNode implements Django's {% widthratio value max width %}: the
 // ratio of value to max, scaled to width and rounded like Python rounds (half
 // to even). pongo2's tag rounds differently.
@@ -239,23 +181,53 @@ type widthratioTagNode struct {
 	asVar             string
 }
 
-// Execute prints or stores the scaled ratio; "0" when max is zero.
+// errWidthratioWidth is Django's error for a width that is not an integer.
+var errWidthratioWidth = errors.New("widthratio final argument must be a number")
+
+// pyFloat converts a template value like Python's float(): a number, a
+// boolean or a string that holds a number ("1.5", "inf", "nan").
+func pyFloat(v *pongo2.Value) (float64, bool) {
+	switch {
+	case v.IsNumber():
+		return v.Float(), true
+	case v.IsBool():
+		if v.Bool() {
+			return 1, true
+		}
+		return 0, true
+	case v.IsString():
+		f, err := strconv.ParseFloat(strings.TrimSpace(v.String()), 64)
+		return f, err == nil || errors.Is(err, strconv.ErrRange)
+	}
+	return 0, false
+}
+
+// Execute prints or stores the scaled ratio: "0" when max is zero, "" when
+// value or max is not a number.
 func (n *widthratioTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter) *pongo2.Error {
-	var nums [3]float64
+	vals := make([]*pongo2.Value, 3)
 	for i, expr := range []pongo2.IEvaluator{n.value, n.max, n.width} {
 		val, err := expr.Evaluate(ctx)
 		if err != nil {
 			return err
 		}
-		nums[i] = val.Float()
+		vals[i] = val
 	}
-	result := "0"
-	if nums[1] != 0 {
-		ratio := math.RoundToEven(nums[0] / nums[1] * nums[2])
-		if math.IsNaN(ratio) || math.IsInf(ratio, 0) {
-			result = ""
-		} else {
-			result = strconv.FormatInt(int64(ratio), 10)
+	width, ok := asInt(vals[2])
+	if !ok {
+		return ctx.OrigError(errWidthratioWidth, nil)
+	}
+	value, okValue := pyFloat(vals[0])
+	limit, okLimit := pyFloat(vals[1])
+	result := ""
+	switch {
+	case !okValue || !okLimit:
+	case limit == 0:
+		result = "0"
+	default:
+		ratio := math.RoundToEven(value / limit * float64(width))
+		if !math.IsNaN(ratio) && !math.IsInf(ratio, 0) {
+			result = strconv.FormatFloat(ratio, 'f', 0, 64)
 		}
 	}
 	if n.asVar != "" {
@@ -313,7 +285,11 @@ func (n *nowTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWrit
 		ctx.Private[n.asVar] = out
 		return nil
 	}
-	return writeOutput(ctx, w, pongo2.AsValue(out))
+	// Django writes the output of a tag as it is; only {{ }} escapes.
+	if _, err := w.WriteString(out); err != nil {
+		return ctx.OrigError(err, nil)
+	}
+	return nil
 }
 
 // nowTagParser parses {% now "format" [as name] %}.
@@ -333,4 +309,17 @@ func nowTagParser(_ *pongo2.Parser, _ *pongo2.Token, args *pongo2.Parser) (pongo
 		return nil, args.Error("'now' statement takes one argument", nil)
 	}
 	return &nowTagNode{format: format, asVar: asVar}, nil
+}
+
+// syntaxErrorTag is the tag djangoSyntax puts in place of a construct that
+// Django rejects and pongo2 would accept, see syntaxError.
+const syntaxErrorTag = "_syntax_error"
+
+// syntaxErrorTagParser fails with the message the tag carries.
+func syntaxErrorTagParser(_ *pongo2.Parser, start *pongo2.Token, args *pongo2.Parser) (pongo2.INodeTag, *pongo2.Error) {
+	msg := args.MatchType(pongo2.TokenString)
+	if msg == nil {
+		return nil, args.Error("invalid template syntax", start)
+	}
+	return nil, args.Error(msg.Val, start)
 }

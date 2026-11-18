@@ -131,6 +131,28 @@ func decimalText(v *pongo2.Value) (string, bool) {
 	return "", false
 }
 
+// nonFiniteRe matches the infinities and NaNs Python's Decimal reads.
+var nonFiniteRe = regexp.MustCompile(`(?i)^\s*[+-]?(inf|infinity|s?nan[0-9]*)\s*$`)
+
+// nonFinite returns the text of v when it is an infinity or NaN, a float or
+// a string Python's Decimal reads as one.
+func nonFinite(v *pongo2.Value) (string, bool) {
+	switch {
+	case v.IsFloat():
+		switch f := v.Float(); {
+		case math.IsNaN(f):
+			return "nan", true
+		case math.IsInf(f, 1):
+			return "inf", true
+		case math.IsInf(f, -1):
+			return "-inf", true
+		}
+	case v.IsString() && nonFiniteRe.MatchString(v.String()):
+		return v.String(), true
+	}
+	return "", false
+}
+
 // groupThousands inserts a comma between every three digits of a whole
 // number given in decimal digits.
 func groupThousands(whole string) string {
@@ -154,6 +176,10 @@ func groupThousands(whole string) string {
 // Decimal: 2.675 gives 2.68, where pongo2's filter, working on the binary
 // float, gives 2.67.
 func filterFloatformat(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	if s, ok := nonFinite(in); ok {
+		// Django gives an infinity or NaN back as Python prints it.
+		return str(s)
+	}
 	digits, ok := decimalText(in)
 	if !ok {
 		return str("")

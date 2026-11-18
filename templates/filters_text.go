@@ -41,7 +41,7 @@ func filterTitle(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 			}
 		}
 	}
-	return str(string(runes))
+	return keep(in, string(runes))
 }
 
 // asciiFold maps the accented Latin letters to their base letter, standing
@@ -85,67 +85,172 @@ func slugify(s string) string {
 
 // filterSlugify implements Django's slugify.
 func filterSlugify(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	return str(slugify(text(in)))
+	return keep(in, slugify(text(in)))
 }
 
 // filterTruncatechars implements Django's truncatechars: at most n characters,
-// the last of them an ellipsis when text was cut.
+// the last of them an ellipsis when text was cut. An argument that is not a
+// number gives the value back.
 func filterTruncatechars(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	runes := []rune(text(in))
-	n := param.Integer()
-	if n <= 0 || len(runes) <= n {
-		return str(string(runes))
+	n, ok := asInt(param)
+	if !ok {
+		return in, nil
 	}
-	return str(string(runes[:n-1]) + ellipsis)
+	runes := []rune(text(in))
+	switch {
+	case n <= 0:
+		return keep(in, "")
+	case len(runes) <= n:
+		return keep(in, string(runes))
+	}
+	return keep(in, string(runes[:n-1])+ellipsis)
 }
 
 // filterTruncatewords implements Django's truncatewords: at most n words,
-// followed by an ellipsis when words were cut.
+// followed by an ellipsis when words were cut. An argument that is not a
+// number gives the value back.
 func filterTruncatewords(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	n, ok := asInt(param)
+	if !ok {
+		return in, nil
+	}
 	words := strings.Fields(text(in))
-	n := param.Integer()
-	if n <= 0 {
-		return str("")
+	switch {
+	case n <= 0:
+		return keep(in, "")
+	case len(words) > n:
+		return keep(in, strings.Join(words[:n], " ")+" "+ellipsis)
 	}
-	if len(words) > n {
-		return str(strings.Join(words[:n], " ") + " " + ellipsis)
-	}
-	return str(strings.Join(words, " "))
+	return keep(in, strings.Join(words, " "))
 }
 
-// filterWordwrap implements Django's wordwrap: lines of at most n characters,
-// broken at spaces only, existing line breaks kept. pongo2's filter panics on
-// some inputs.
-func filterWordwrap(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	width := param.Integer()
-	if width <= 0 {
-		return str(text(in))
+// pyLineBreak reports whether r ends a line for Python's str.splitlines.
+func pyLineBreak(r rune) bool {
+	switch r {
+	case '\n', '\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\u0085', '\u2028', '\u2029':
+		return true
 	}
-	lines := strings.Split(text(in), "\n")
-	for i, line := range lines {
-		words := strings.Fields(line)
-		if len(words) == 0 {
+	return false
+}
+
+// splitLines splits s like Python's str.splitlines: at every line break,
+// "\r\n" counting as one, without a last empty line.
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i, r := range s {
+		if i < start || !pyLineBreak(r) {
 			continue
 		}
-		var b strings.Builder
-		length := 0
-		for j, word := range words {
-			n := len([]rune(word))
-			switch {
-			case j == 0:
-				length = n
-			case length+1+n > width:
-				b.WriteByte('\n')
-				length = n
-			default:
-				b.WriteByte(' ')
-				length += 1 + n
-			}
-			b.WriteString(word)
+		lines = append(lines, s[start:i])
+		start = i + utf8.RuneLen(r)
+		if r == '\r' && strings.HasPrefix(s[start:], "\n") {
+			start++
 		}
-		lines[i] = b.String()
 	}
-	return str(strings.Join(lines, "\n"))
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+// wrapSpace reports whether r is white space for Python's textwrap.
+func wrapSpace(r rune) bool { return strings.ContainsRune("\t\n\v\f\r ", r) }
+
+// expandTabs replaces the tabs of a line with spaces up to the next multiple
+// of eight columns, like Python's str.expandtabs.
+func expandTabs(line string) string {
+	if !strings.Contains(line, "\t") {
+		return line
+	}
+	var b strings.Builder
+	col := 0
+	for _, r := range line {
+		if r == '\t' {
+			n := 8 - col%8
+			b.WriteString(strings.Repeat(" ", n))
+			col += n
+			continue
+		}
+		b.WriteRune(r)
+		col++
+	}
+	return b.String()
+}
+
+// wrapLine wraps one line like Python's textwrap.TextWrapper with the
+// options of Django's wrap: words are never broken, white space is kept
+// except where a line is broken, and white space at the start of the line is
+// kept.
+func wrapLine(line string, width int) []string {
+	var chunks []string
+	for rest := expandTabs(line); rest != ""; {
+		space := wrapSpace([]rune(rest)[0])
+		end := strings.IndexFunc(rest, func(r rune) bool { return wrapSpace(r) != space })
+		if end < 0 {
+			end = len(rest)
+		}
+		chunks = append(chunks, rest[:end])
+		rest = rest[end:]
+	}
+	isSpace := func(c string) bool { return strings.TrimFunc(c, wrapSpace) == "" }
+	var lines []string
+	for i := 0; i < len(chunks); {
+		if len(lines) > 0 && isSpace(chunks[i]) {
+			i++
+		}
+		var cur []string
+		curLen := 0
+		for i < len(chunks) {
+			n := utf8.RuneCountInString(chunks[i])
+			if curLen+n > width {
+				break
+			}
+			cur = append(cur, chunks[i])
+			curLen += n
+			i++
+		}
+		if i < len(chunks) && len(cur) == 0 && utf8.RuneCountInString(chunks[i]) > width {
+			cur = append(cur, chunks[i])
+			i++
+		}
+		if len(cur) > 0 && isSpace(cur[len(cur)-1]) {
+			cur = cur[:len(cur)-1]
+		}
+		if len(cur) > 0 {
+			lines = append(lines, strings.Join(cur, ""))
+		}
+	}
+	return lines
+}
+
+// filterWordwrap implements Django's wordwrap: lines of at most the given
+// number of characters, broken at white space only; existing line breaks
+// and other white space are kept.
+func filterWordwrap(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	width, err := intArg("wordwrap", param)
+	if err != nil {
+		return nil, err
+	}
+	s := text(in)
+	lines := splitLines(s)
+	if width <= 0 && len(lines) > 0 {
+		return nil, filterError("wordwrap", fmt.Errorf("invalid width %d (must be > 0)", width))
+	}
+	var out []string
+	for _, line := range lines {
+		wrapped := wrapLine(line, width)
+		if len(wrapped) == 0 {
+			// A line of white space only is kept as it is.
+			out = append(out, line)
+			continue
+		}
+		out = append(out, wrapped...)
+	}
+	if strings.HasSuffix(s, "\n") {
+		out = append(out, "")
+	}
+	return keep(in, strings.Join(out, "\n"))
 }
 
 // filterStringformat implements Django's stringformat: the value formatted
@@ -154,7 +259,7 @@ func filterWordwrap(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 func filterStringformat(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	spec := param.String()
 	if spec == "" {
-		return str("")
+		return keep(in, "")
 	}
 	arg := in.Interface()
 	if mv, ok := arg.(modelView); ok {
@@ -170,23 +275,23 @@ func filterStringformat(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) 
 	switch verb {
 	case 'd', 'x', 'X', 'o', 'c':
 		if !in.IsNumber() {
-			return str("")
+			return keep(in, "")
 		}
 		arg = in.Integer()
 	case 'e', 'E', 'f', 'F', 'g', 'G':
 		if !in.IsNumber() {
-			return str("")
+			return keep(in, "")
 		}
 		arg = in.Float()
 	case 'v':
 	default:
-		return str("")
+		return keep(in, "")
 	}
 	out := fmt.Sprintf("%"+flags+string(verb), arg)
 	if strings.Contains(out, "%!") {
-		return str("")
+		return keep(in, "")
 	}
-	return str(out)
+	return keep(in, out)
 }
 
 // filterPluralize implements Django's pluralize: the plural suffix ("s", or
@@ -268,7 +373,7 @@ func filterURLEncode(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 // filterIRIEncode implements Django's iriencode: non-ASCII characters and
 // spaces of an IRI percent-encoded, the URL syntax characters kept.
 func filterIRIEncode(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	return str(percentEncode(text(in), "/#%[]=:;$&()+,!?*@'~"))
+	return keep(in, percentEncode(text(in), "/#%[]=:;$&()+,!?*@'~"))
 }
 
 // filterFilesizeformat implements Django's filesizeformat: a byte count as
@@ -278,7 +383,7 @@ func filterFilesizeformat(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	if in.IsString() {
 		f, err := strconv.ParseFloat(strings.TrimSpace(in.String()), 64)
 		if err != nil {
-			return str("0" + nbsp + "bytes")
+			return keep(in, "0"+nbsp+"bytes")
 		}
 		bytes = f
 	}
@@ -293,7 +398,7 @@ func filterFilesizeformat(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 		if int64(bytes) == 1 {
 			unit = "byte"
 		}
-		return str(sign + strconv.FormatInt(int64(bytes), 10) + nbsp + unit)
+		return keep(in, sign+strconv.FormatInt(int64(bytes), 10)+nbsp+unit)
 	}
 	scaled, unit := bytes/kb, units[0]
 	for _, next := range units[1:] {
@@ -302,7 +407,7 @@ func filterFilesizeformat(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 		}
 		scaled, unit = scaled/kb, next
 	}
-	return str(sign + strconv.FormatFloat(math.RoundToEven(scaled*10)/10, 'f', 1, 64) + nbsp + unit)
+	return keep(in, sign+strconv.FormatFloat(math.RoundToEven(scaled*10)/10, 'f', 1, 64)+nbsp+unit)
 }
 
 // filterIntcomma implements humanize's intcomma: the digits before the
@@ -333,9 +438,9 @@ func filterCenter(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	s := text(in)
 	pad := param.Integer() - utf8.RuneCountInString(s)
 	if pad <= 0 {
-		return str(s)
+		return keep(in, s)
 	}
-	return str(strings.Repeat(" ", pad/2) + s + strings.Repeat(" ", pad-pad/2))
+	return keep(in, strings.Repeat(" ", pad/2)+s+strings.Repeat(" ", pad-pad/2))
 }
 
 // stripTagsOnce removes the tags and comments of s. A "<" that does not
@@ -374,8 +479,8 @@ func stripTagsOnce(s string) string {
 
 // filterStriptags implements Django's striptags. The tags are removed again
 // until none is left, so that a tag put together from pieces
-// ("<<b>script>") does not survive. The result is plain text, not markup
-// that is safe to print: autoescape still applies to it.
+// ("<<b>script>") does not survive. The result is plain text: autoescape
+// still applies to it, unless the input was marked safe.
 func filterStriptags(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	s := text(in)
 	for range 50 {
@@ -385,5 +490,5 @@ func filterStriptags(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 		}
 		s = stripped
 	}
-	return str(s)
+	return keep(in, s)
 }

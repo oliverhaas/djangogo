@@ -10,19 +10,18 @@ import (
 	"github.com/flosch/pongo2/v6"
 )
 
-// The filters of this file build HTML. They escape their input, unless it is
-// marked safe, and return a value marked safe, so the markup they add is not
-// escaped again. pongo2 does not show a filter whether autoescape is on, so
-// the input is escaped inside {% autoescape off %} as well, where Django
-// leaves it alone.
+// The filters of this file build HTML. Under autoescape they escape their
+// input, unless it is marked safe, and they return a value marked safe, so
+// the markup they add is not escaped again. Inside {% autoescape off %} the
+// input is used as it is (see autoescapeFilters).
 
 // safe wraps a filter result that is finished HTML.
 func safe(s string) (*pongo2.Value, *pongo2.Error) { return pongo2.AsSafeValue(s), nil }
 
 // escaperFor returns the escaping a filter applies to the text of in: none
-// when the value is marked safe.
-func escaperFor(in *pongo2.Value) func(string) string {
-	if isSafe(in) {
+// when the value is marked safe or autoescape is off.
+func escaperFor(in *pongo2.Value, autoescape bool) func(string) string {
+	if !autoescape || isSafe(in) {
 		return func(s string) string { return s }
 	}
 	return escapeHTML
@@ -36,50 +35,92 @@ func newlines(s string) string {
 // paragraphBreak separates the paragraphs of linebreaks.
 var paragraphBreak = regexp.MustCompile(`\n{2,}`)
 
-// filterLinebreaks implements Django's linebreaks: paragraphs separated by a
+// linebreaksFilter returns Django's linebreaks: paragraphs separated by a
 // blank line become <p> elements, single line breaks become <br>.
-func filterLinebreaks(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	paras := paragraphBreak.Split(escaperFor(in)(newlines(text(in))), -1)
-	for i, p := range paras {
-		paras[i] = "<p>" + strings.ReplaceAll(p, "\n", "<br>") + "</p>"
+func linebreaksFilter(autoescape bool) pongo2.FilterFunction {
+	return func(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+		paras := paragraphBreak.Split(escaperFor(in, autoescape)(newlines(text(in))), -1)
+		for i, p := range paras {
+			paras[i] = "<p>" + strings.ReplaceAll(p, "\n", "<br>") + "</p>"
+		}
+		return safe(strings.Join(paras, "\n\n"))
 	}
-	return safe(strings.Join(paras, "\n\n"))
 }
 
-// filterLinebreaksbr implements Django's linebreaksbr: every line break
+// linebreaksbrFilter returns Django's linebreaksbr: every line break
 // becomes <br>.
-func filterLinebreaksbr(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	return safe(strings.ReplaceAll(escaperFor(in)(newlines(text(in))), "\n", "<br>"))
+func linebreaksbrFilter(autoescape bool) pongo2.FilterFunction {
+	return func(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+		return safe(strings.ReplaceAll(escaperFor(in, autoescape)(newlines(text(in))), "\n", "<br>"))
+	}
 }
 
 // urlWordSplit separates the words urlize looks at, as Django does.
 var urlWordSplit = regexp.MustCompile(`[\s<>"']+`)
 
-// Patterns of the words urlize turns into links.
+// Patterns of the words urlize turns into links. urlBareDomain is Django's
+// hostname and domain pattern without its look-arounds, which Go's regexp
+// lacks: each label has 1 to 63 characters and neither starts nor ends with
+// a hyphen.
 var (
 	urlWithScheme = regexp.MustCompile(`(?i)^https?://\[?\w`)
-	urlBareDomain = regexp.MustCompile(`(?i)^[a-z0-9_][^@]+\.(com|edu|gov|int|mil|net|org)($|/.*)$`)
+	urlBareDomain = regexp.MustCompile(`(?i)^` + urlLabel + `(?:\.` + urlLabel + `)*\.(com|edu|gov|int|mil|net|org)($|/.*)$`)
 )
+
+// urlLabel is one label of a host name.
+const urlLabel = `[a-z\x{a1}-\x{ffff}0-9](?:[a-z\x{a1}-\x{ffff}0-9-]{0,61}[a-z\x{a1}-\x{ffff}0-9])?`
 
 // trimPunctuation splits a word into leading punctuation, the part that may
 // be a URL, and trailing punctuation, so that "(see example.com)." links
-// only the address.
+// only the address. It follows Django's Urlizer.trim_punctuation, which
+// keeps a trailing ";" that ends an HTML entity.
 func trimPunctuation(word string) (lead, middle, trail string) {
-	middle = word
-	for changed := true; changed; {
+	middle = strings.TrimLeft(word, "([")
+	lead = word[:len(word)-len(middle)]
+	counts := map[string]int{
+		"(": strings.Count(middle, "("), ")": strings.Count(middle, ")"),
+		"[": strings.Count(middle, "["), "]": strings.Count(middle, "]"),
+	}
+	for changed := true; changed && middle != ""; {
 		changed = false
 		for _, pair := range [...][2]string{{"(", ")"}, {"[", "]"}} {
-			if strings.HasPrefix(middle, pair[0]) {
-				middle, lead, changed = middle[1:], lead+pair[0], true
-			}
-			if strings.HasSuffix(middle, pair[1]) &&
-				strings.Count(middle, pair[1]) == strings.Count(middle, pair[0])+1 {
-				middle, trail, changed = middle[:len(middle)-1], pair[1]+trail, true
+			opening, closing := pair[0], pair[1]
+			if counts[opening] < counts[closing] && strings.TrimRight(middle, closing) != middle {
+				strip := min(counts[closing]-counts[opening], len(middle))
+				trail = middle[len(middle)-strip:] + trail
+				middle = middle[:len(middle)-strip]
+				changed = true
+				counts[closing] -= strip
 			}
 		}
-		if stripped := strings.TrimRight(middle, ".,:;!"); stripped != middle {
+		amp := strings.LastIndex(middle, "&")
+		chars := ".,:;!"
+		if amp >= 0 {
+			chars = ".,:!"
+		}
+		if stripped := strings.TrimRight(middle, chars); stripped != middle {
 			trail, middle, changed = middle[len(stripped):]+trail, stripped, true
 		}
+		if !strings.HasSuffix(middle, ";") {
+			continue
+		}
+		entity := middle[len(middle)-1:]
+		if amp >= 0 {
+			entity = middle[amp:]
+		}
+		if unescaped := html.UnescapeString(entity); unescaped != entity && !strings.HasSuffix(unescaped, ";") {
+			// The ";" ends an entity.
+			continue
+		}
+		stripped := strings.TrimRight(middle, ".,:;!")
+		cut := len(stripped)
+		semicolons := len(middle) - len(strings.TrimRight(middle, ";"))
+		if amp >= 0 && semicolons > 1 {
+			// The first ";" may end an entity.
+			cut += strings.Index(middle[cut:], ";") + 1
+			stripped = middle[:cut]
+		}
+		trail, middle, changed = middle[cut:]+trail, stripped, true
 	}
 	return lead, middle, trail
 }
@@ -94,10 +135,10 @@ func isSimpleEmail(s string) bool {
 }
 
 // urlize turns the URLs and e-mail addresses in the text of in into links,
-// escaping everything else unless in is marked safe. limit, when positive,
-// shortens the link text.
-func urlize(in *pongo2.Value, limit int) string {
-	s, esc, markedSafe := text(in), escaperFor(in), isSafe(in)
+// escaping everything else under autoescape unless in is marked safe. limit,
+// unless negative, shortens the link text.
+func urlize(in *pongo2.Value, limit int, autoescape bool) string {
+	s, esc := text(in), escaperFor(in, autoescape)
 	var b strings.Builder
 	last := 0
 	word := func(w string) {
@@ -106,20 +147,17 @@ func urlize(in *pongo2.Value, limit int) string {
 			return
 		}
 		lead, middle, trail := trimPunctuation(w)
-		shown := middle
-		if markedSafe {
-			// The address of a link is taken from the text the entities
-			// stand for.
-			middle = html.UnescapeString(middle)
-		}
+		// The address of a link is taken from the text the entities stand
+		// for.
+		addr := html.UnescapeString(middle)
 		const urlSafe = "!*'();:@&=+$,/?#[]~%"
 		href, attrs := "", ` rel="nofollow"`
 		switch {
 		case urlWithScheme.MatchString(middle):
-			href = percentEncode(middle, urlSafe)
+			href = percentEncode(addr, urlSafe)
 		case strings.HasPrefix(strings.ToLower(middle), "www.") ||
 			(!strings.HasPrefix(strings.ToLower(middle), "http") && urlBareDomain.MatchString(middle)):
-			href = percentEncode("http://"+middle, urlSafe)
+			href = percentEncode("http://"+addr, urlSafe)
 		case !strings.Contains(middle, ":") && isSimpleEmail(middle):
 			local, domain, _ := strings.Cut(middle, "@")
 			href, attrs = "mailto:"+percentEncode(local, "")+"@"+percentEncode(domain, ""), ""
@@ -127,8 +165,9 @@ func urlize(in *pongo2.Value, limit int) string {
 			b.WriteString(esc(w))
 			return
 		}
-		if runes := []rune(shown); limit > 0 && len(runes) > limit {
-			shown = string(runes[:limit-1]) + ellipsis
+		shown := middle
+		if runes := []rune(shown); limit >= 0 && len(runes) > limit {
+			shown = string(runes[:max(limit-1, 0)]) + ellipsis
 		}
 		b.WriteString(esc(lead))
 		b.WriteString(`<a href="` + escapeHTML(href) + `"` + attrs + `>` + esc(shown) + `</a>`)
@@ -143,26 +182,33 @@ func urlize(in *pongo2.Value, limit int) string {
 	return b.String()
 }
 
-// filterUrlize implements Django's urlize.
-func filterUrlize(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	return safe(urlize(in, 0))
-}
-
-// filterUrlizetrunc implements Django's urlizetrunc: urlize with the link
-// text cut to the given number of characters.
-func filterUrlizetrunc(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	return safe(urlize(in, param.Integer()))
+// urlizeFilter returns Django's urlize, or with trunc its urlizetrunc:
+// urlize with the link text cut to the given number of characters.
+func urlizeFilter(trunc, autoescape bool) pongo2.FilterFunction {
+	return func(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+		limit := -1
+		if trunc {
+			n, err := intArg("urlizetrunc", param)
+			if err != nil {
+				return nil, err
+			}
+			limit = n
+		}
+		return safe(urlize(in, limit, autoescape))
+	}
 }
 
 // joinFilter returns Django's join: the elements of a list, or the
-// characters of a string, joined by the argument. Every element is escaped
-// unless it is marked safe, and the result is marked safe. trusted says that
-// the separator is a string literal of the template, which is printed as
-// written; a separator that comes from a variable is escaped like an element.
-func joinFilter(trusted bool) pongo2.FilterFunction {
+// characters of a string, joined by the argument. Under autoescape every
+// element is escaped unless it is marked safe; the result is marked safe.
+// trusted says that the separator is a string literal of the template,
+// which is printed as written; a separator that comes from a variable is
+// escaped like an element. Without autoescape, a list of anything but
+// strings is given back, as Python's str.join fails on it.
+func joinFilter(trusted, autoescape bool) pongo2.FilterFunction {
 	return func(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 		sep := param.String()
-		if !trusted {
+		if !trusted && autoescape {
 			sep = conditionalEscape(param)
 		}
 		var parts []string
@@ -171,10 +217,18 @@ func joinFilter(trusted bool) pongo2.FilterFunction {
 		case isList(rv):
 			parts = make([]string, rv.Len())
 			for i := range parts {
-				parts[i] = conditionalEscape(itemValue(elem(rv, i)))
+				item := itemValue(elem(rv, i))
+				switch {
+				case autoescape:
+					parts[i] = conditionalEscape(item)
+				case !item.IsString():
+					return in, nil
+				default:
+					parts[i] = item.String()
+				}
 			}
 		case in.IsString():
-			esc := escaperFor(in)
+			esc := escaperFor(in, autoescape)
 			parts = make([]string, 0, len(in.String()))
 			for _, r := range in.String() {
 				parts = append(parts, esc(string(r)))
@@ -233,7 +287,7 @@ func itemValue(item reflect.Value) *pongo2.Value {
 
 // unorderedList writes the <li> elements of a nested list. A list that
 // follows an item holds the children of that item.
-func unorderedList(b *strings.Builder, list reflect.Value, tabs int) {
+func unorderedList(b *strings.Builder, list reflect.Value, tabs int, esc func(*pongo2.Value) string) {
 	indent := strings.Repeat("\t", tabs)
 	first := true
 	for i := 0; i < list.Len(); i++ {
@@ -249,26 +303,32 @@ func unorderedList(b *strings.Builder, list reflect.Value, tabs int) {
 			b.WriteByte('\n')
 		}
 		first = false
-		b.WriteString(indent + "<li>" + conditionalEscape(itemValue(item)))
+		b.WriteString(indent + "<li>" + esc(itemValue(item)))
 		if children.IsValid() && children.Len() > 0 {
 			b.WriteString("\n" + indent + "<ul>\n")
-			unorderedList(b, children, tabs+1)
+			unorderedList(b, children, tabs+1, esc)
 			b.WriteString("\n" + indent + "</ul>\n" + indent)
 		}
 		b.WriteString("</li>")
 	}
 }
 
-// filterUnorderedList implements Django's unordered_list: a nested list as
-// the <li> elements of an HTML list, without the outer <ul>.
-func filterUnorderedList(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	rv := reflect.ValueOf(in.Interface())
-	if !isList(rv) {
-		return safe("")
+// unorderedListFilter returns Django's unordered_list: a nested list as the
+// <li> elements of an HTML list, without the outer <ul>.
+func unorderedListFilter(autoescape bool) pongo2.FilterFunction {
+	esc := conditionalEscape
+	if !autoescape {
+		esc = text
 	}
-	var b strings.Builder
-	unorderedList(&b, rv, 1)
-	return safe(b.String())
+	return func(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+		rv := reflect.ValueOf(in.Interface())
+		if !isList(rv) {
+			return safe("")
+		}
+		var b strings.Builder
+		unorderedList(&b, rv, 1, esc)
+		return safe(b.String())
+	}
 }
 
 // htmlTokenRe finds the tags and comments of an HTML fragment.

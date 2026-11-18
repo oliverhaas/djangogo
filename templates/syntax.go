@@ -3,11 +3,14 @@ package templates
 import (
 	"bytes"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
-// tagRe finds the variable and block tags of a template source.
-var tagRe = regexp.MustCompile(`\{\{.*?\}\}|\{%.*?%\}`)
+// tagRe finds the tags of a template source like the lexer of Django
+// (tag_re in django/template/base.py): a tag ends on the line it starts on,
+// so a "{{" without "}}" on the same line is text.
+var tagRe = regexp.MustCompile(`\{%.*?%\}|\{\{.*?\}\}|\{#.*?#\}`)
 
 // blockSuperRe finds Django's spelling of the parent block's content.
 var blockSuperRe = regexp.MustCompile(`\bblock\.super\b`)
@@ -16,66 +19,316 @@ var blockSuperRe = regexp.MustCompile(`\bblock\.super\b`)
 // values of a variable, see dictViewFilter.
 var dictViewRe = regexp.MustCompile(`^(.*\sin\s+)([A-Za-z_][\w.]*)\.(items|keys|values)(\s.*|-?%\})$`)
 
-// djangoSyntax rewrites the Django spellings pongo2 cannot be taught through
-// its tag and filter registry:
+// translatedRe finds a string literal marked for translation, _("text").
+// There is no translation catalog, so the literal stands for itself.
+var translatedRe = regexp.MustCompile(`\b_\(\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*\)`)
+
+// outFilter is the filter djangoSyntax appends to every {{ }} tag, see
+// filterOut.
+const outFilter = "_out"
+
+// djangoSyntax rewrites a Django template source into one pongo2 renders the
+// way Django does. It covers what pongo2 cannot be taught through its tag
+// and filter registry:
 //
+//   - text that Django's lexer leaves alone but pongo2 would read as a tag
+//     (a "{{" without "}}" on its line, the content of {% verbatim %}), see
+//     literalText;
+//   - {# #} comments and {% comment %} blocks, which are removed with
+//     everything in them;
 //   - {{ block.super }}, which pongo2 only knows as {{ block.Super }};
 //   - the conditions of {% if %} and {% elif %}, see rewriteCondition;
 //   - a loop over mapping.items, .keys or .values, see dictViewFilter;
 //   - a backslash in a string literal, see keepBackslashes;
-//   - a string literal given to default, default_if_none or join, see
-//     trustLiterals.
+//   - string literals, which Django never escapes, see trustLiterals and
+//     safeLiteral;
+//   - the filters that escape their input themselves, which take the
+//     autoescape setting of the {% autoescape %} block they are in, see
+//     noEscapeFilters;
+//   - the final filter of every {{ }} tag, see filterOut.
 //
-// Text outside tags and everything between {% verbatim %} and
-// {% endverbatim %} is left alone. A rewrite keeps the line of every tag, so
-// the lines in error messages stay right; a column after a rewritten condition
-// may shift by a few characters.
+// A rewrite keeps the line of every tag, so the lines in error messages stay
+// right; a column may shift by a few characters.
 func djangoSyntax(src []byte) []byte {
 	if bytes.IndexByte(src, '{') < 0 {
 		return src
 	}
-	var out []byte
-	last, changed, verbatim := 0, false, false
+	r := rewriter{autoescape: []bool{true}, out: make([]byte, 0, len(src)+len(src)/8)}
+	last := 0
 	for _, loc := range tagRe.FindAllIndex(src, -1) {
-		tag := src[loc[0]:loc[1]]
-		_, name, _, _ := tagParts(tag)
-		if verbatim {
-			verbatim = name != "endverbatim"
-			continue
+		r.addText(src[last:loc[0]])
+		r.token(src[loc[0]:loc[1]])
+		last = loc[1]
+	}
+	r.addText(src[last:])
+	r.finish()
+	return r.out
+}
+
+// rewriter holds the state of djangoSyntax while it walks a source.
+type rewriter struct {
+	out []byte
+	// text is the text that has not been written yet, see literalText.
+	text []byte
+	// autoescape is the stack of {% autoescape %} settings, innermost last.
+	autoescape []bool
+	// verbatim is, inside a {% verbatim %} block, the content of the tag
+	// that ends it ("endverbatim" or "endverbatim name").
+	verbatim string
+	// commentTag is, inside a {% comment %} block, the tag that opened it.
+	commentTag []byte
+}
+
+// addText adds text of the template. Inside a comment only its line breaks
+// are kept.
+func (r *rewriter) addText(text []byte) {
+	if r.commentTag != nil {
+		r.text = append(r.text, bytes.Repeat([]byte{'\n'}, bytes.Count(text, []byte{'\n'}))...)
+		return
+	}
+	r.text = append(r.text, text...)
+}
+
+// emit writes the pending text and then b.
+func (r *rewriter) emit(b []byte) {
+	r.out = append(r.out, literalText(r.text)...)
+	r.text = r.text[:0]
+	r.out = append(r.out, b...)
+}
+
+// finish writes what is left. An unclosed {% comment %} or {% verbatim %}
+// is put back, so that pongo2 reports it as unclosed.
+func (r *rewriter) finish() {
+	switch {
+	case r.commentTag != nil:
+		r.emit(r.commentTag)
+	case r.verbatim != "":
+		r.emit([]byte("{% verbatim %}"))
+	default:
+		r.emit(nil)
+	}
+}
+
+// token handles one tag, as Django's lexer and parser see it.
+func (r *rewriter) token(tag []byte) {
+	kind := tag[1]
+	content := strings.TrimSpace(string(tag[2 : len(tag)-2]))
+	if r.verbatim != "" {
+		if kind == '%' && content == r.verbatim {
+			r.verbatim = ""
+		} else {
+			r.addText(tag)
 		}
-		if name == "verbatim" {
-			verbatim = true
-			continue
-		}
-		repl := tag
-		if bytes.IndexByte(repl, '\\') >= 0 {
-			repl = quotedRe.ReplaceAllFunc(repl, keepBackslashes)
-		}
-		if bytes.Contains(repl, []byte("default")) || bytes.Contains(repl, []byte("join")) {
-			repl = trustLiterals(repl)
-		}
-		switch {
-		case name == "if" || name == "elif":
-			head, _, args, tail := tagParts(repl)
-			if cond, ok := rewriteCondition(splitBits(args)); ok {
-				repl = []byte(head + " " + cond + " " + tail)
+		return
+	}
+	if kind == '%' && (content == "verbatim" || strings.HasPrefix(content, "verbatim ")) {
+		r.verbatim = "end" + content
+		return
+	}
+	if r.commentTag != nil {
+		if kind == '%' && content == "endcomment" {
+			r.commentTag = nil
+			if len(r.text) > 0 {
+				// The line breaks of the comment go into a pongo2
+				// comment, which keeps the line numbers of the tags
+				// after it without printing them.
+				r.out = append(r.out, "{% comment %}"...)
+				r.out = append(r.out, r.text...)
+				r.out = append(r.out, "{% endcomment %}"...)
+				r.text = r.text[:0]
 			}
-		case name == "for":
-			repl = dictViewRe.ReplaceAll(repl, []byte("$1$2.$3|_dict_$3:$2$4"))
-		case bytes.Contains(repl, []byte("block.super")):
-			repl = blockSuperRe.ReplaceAll(repl, []byte("block.Super"))
 		}
-		if bytes.Equal(repl, tag) {
-			continue
+		return
+	}
+	switch kind {
+	case '#':
+	case '{':
+		r.emit(r.variable(tag))
+	default:
+		r.emit(r.block(tag))
+	}
+}
+
+// variable rewrites a {{ }} tag.
+func (r *rewriter) variable(tag []byte) []byte {
+	inner := bytes.TrimRight(tag[2:len(tag)-2], " \t")
+	if len(bytes.TrimSpace(inner)) == 0 {
+		return tag
+	}
+	inner = safeLiteral(r.expression(inner))
+	out := make([]byte, 0, len(inner)+len(outFilter)+8)
+	out = append(out, "{{"...)
+	out = append(out, inner...)
+	out = append(out, "|"+outFilter+" }}"...)
+	return out
+}
+
+// block rewrites a {% %} tag.
+func (r *rewriter) block(tag []byte) []byte {
+	_, name, args, _ := tagParts(tag)
+	switch name {
+	case "comment":
+		r.commentTag = tag
+		return nil
+	case "autoescape":
+		switch strings.TrimSpace(args) {
+		case "on":
+			r.autoescape = append(r.autoescape, true)
+		case "off":
+			r.autoescape = append(r.autoescape, false)
 		}
-		out = append(out, src[last:loc[0]]...)
-		out = append(out, repl...)
-		last, changed = loc[1], true
+		return tag
+	case "endautoescape":
+		if len(r.autoescape) > 1 {
+			r.autoescape = r.autoescape[:len(r.autoescape)-1]
+		}
+		return tag
+	case "filter":
+		// The first filter of the tag has no "|" in front.
+		for _, f := range filterNameRe.FindAllStringSubmatch("|"+args, -1) {
+			if f[2] == "escape" || f[2] == "safe" {
+				return syntaxError(`"filter ` + f[2] + `" is not permitted.  Use the "autoescape" tag instead.`)
+			}
+		}
+		if !r.autoescape[len(r.autoescape)-1] {
+			head, _, _, tail := tagParts(tag)
+			tag = []byte(head + string(noEscapeFilters([]byte("|" + args))[1:]) + tail)
+		}
+	}
+	repl := r.expression(tag)
+	switch name {
+	case "if", "elif":
+		head, _, args, tail := tagParts(repl)
+		if cond, ok := rewriteCondition(splitBits(args)); ok {
+			repl = []byte(head + " " + cond + " " + tail)
+		}
+	case "for":
+		repl = dictViewRe.ReplaceAll(repl, []byte("$1$2.$3|_dict_$3:$2$4"))
+	case "with", "include":
+		repl = safeAssignments(repl)
+	}
+	return repl
+}
+
+// assignedLiteralRe matches a {% with %} or {% include ... with %} argument
+// that assigns a string literal.
+var assignedLiteralRe = regexp.MustCompile(`^\w+=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')$`)
+
+// safeAssignments marks the string literals a {% with %} or {% include %}
+// tag assigns as safe, so that {% with x="<b>" %}{{ x }} prints them as
+// written, like Django.
+func safeAssignments(tag []byte) []byte {
+	head, name, args, tail := tagParts(tag)
+	bits := splitBits(args)
+	changed := false
+	for i, bit := range bits {
+		// {% with "text" as name %} is the older form.
+		legacy := name == "with" && i == 0 && len(bits) == 3 && bits[1] == "as" && isLiteral(bit)
+		if legacy || assignedLiteralRe.MatchString(bit) {
+			bits[i] = bit + "|" + safeLiteralFilter
+			changed = true
+		}
 	}
 	if !changed {
-		return src
+		return tag
 	}
-	return append(out, src[last:]...)
+	return []byte(head + " " + strings.Join(bits, " ") + " " + tail)
+}
+
+// expression applies the rewrites that hold for every expression of a tag.
+func (r *rewriter) expression(b []byte) []byte {
+	if bytes.IndexByte(b, '\\') >= 0 {
+		b = quotedRe.ReplaceAllFunc(b, keepBackslashes)
+	}
+	if bytes.Contains(b, []byte("_(")) {
+		b = translatedRe.ReplaceAll(b, []byte("$1"))
+	}
+	if bytes.Contains(b, []byte("default")) || bytes.Contains(b, []byte("join")) {
+		b = trustLiterals(b)
+	}
+	if bytes.Contains(b, []byte("block.super")) {
+		b = blockSuperRe.ReplaceAll(b, []byte("block.Super"))
+	}
+	if !r.autoescape[len(r.autoescape)-1] {
+		b = noEscapeFilters(b)
+	}
+	return b
+}
+
+// syntaxError returns a tag that fails to compile with msg, for a template
+// Django rejects but pongo2 would accept.
+func syntaxError(msg string) []byte {
+	return []byte("{% " + syntaxErrorTag + " " + strconv.Quote(msg) + " %}")
+}
+
+// literalText returns text that pongo2 prints as it is. Text with "{{",
+// "{%" or "{#" in it, or that ends with "{" in front of a tag, is wrapped in
+// pongo2's {% verbatim %}, which ends at the first "{% endverbatim %}"; an
+// "{% endverbatim %}" in the text is put together from {% templatetag %}.
+func literalText(text []byte) []byte {
+	if !bytes.Contains(text, []byte("{{")) && !bytes.Contains(text, []byte("{%")) &&
+		!bytes.Contains(text, []byte("{#")) && !bytes.HasSuffix(text, []byte("{")) {
+		return text
+	}
+	const end = "{% endverbatim %}"
+	var out []byte
+	for i, part := range bytes.Split(text, []byte(end)) {
+		if i > 0 {
+			out = append(out, "{% templatetag openblock %} endverbatim {% templatetag closeblock %}"...)
+		}
+		if len(part) > 0 {
+			out = append(out, "{% verbatim %}"...)
+			out = append(out, part...)
+			out = append(out, end...)
+		}
+	}
+	return out
+}
+
+// safeLiteral marks a string literal that starts a {{ }} expression as safe:
+// Django prints {{ "<b>" }} as written.
+func safeLiteral(inner []byte) []byte {
+	trimmed := bytes.TrimLeft(inner, " \t")
+	loc := quotedRe.FindIndex(trimmed)
+	if loc == nil || loc[0] != 0 {
+		return inner
+	}
+	rest := bytes.TrimLeft(trimmed[loc[1]:], " \t")
+	if len(rest) > 0 && rest[0] != '|' {
+		return inner
+	}
+	at := len(inner) - len(trimmed) + loc[1]
+	out := make([]byte, 0, len(inner)+len(safeLiteralFilter)+1)
+	out = append(out, inner[:at]...)
+	out = append(out, "|"+safeLiteralFilter...)
+	return append(out, inner[at:]...)
+}
+
+// filterNameRe finds the filters of an expression: a "|", then the name.
+var filterNameRe = regexp.MustCompile(`\|(\s*)(\w+)`)
+
+// noEscapeFilters renames, outside string literals, the filters that escape
+// their input themselves (Django's needs_autoescape filters) to the variant
+// for {% autoescape off %}, see autoescapeFilter.
+func noEscapeFilters(b []byte) []byte {
+	var out []byte
+	last := 0
+	rename := func(seg []byte) []byte {
+		return filterNameRe.ReplaceAllFunc(seg, func(m []byte) []byte {
+			sub := filterNameRe.FindSubmatch(m)
+			name := strings.TrimPrefix(string(sub[2]), literalPrefix)
+			if !needsAutoescape[name] {
+				return m
+			}
+			return []byte("|" + string(sub[1]) + noEscapePrefix + name)
+		})
+	}
+	for _, loc := range quotedRe.FindAllIndex(b, -1) {
+		out = append(out, rename(b[last:loc[0]])...)
+		out = append(out, b[loc[0]:loc[1]]...)
+		last = loc[1]
+	}
+	return append(out, rename(b[last:])...)
 }
 
 // tagParts splits a {% %} tag into the text up to the end of its name, the
@@ -140,6 +393,12 @@ func splitBits(s string) []string {
 
 // quotedRe finds the string literals of a tag.
 var quotedRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`)
+
+// isLiteral reports whether s is one string literal.
+func isLiteral(s string) bool {
+	loc := quotedRe.FindStringIndex(s)
+	return loc != nil && loc[0] == 0 && loc[1] == len(s)
+}
 
 // literalArgRe finds, at the end of the text in front of a string literal, a
 // filter that prints its argument.

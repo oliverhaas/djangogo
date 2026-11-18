@@ -25,11 +25,6 @@ func registerFilters() {
 		"iriencode":        filterIRIEncode,
 		"filesizeformat":   filterFilesizeformat,
 		"intcomma":         filterIntcomma,
-		"linebreaks":       filterLinebreaks,
-		"linebreaksbr":     filterLinebreaksbr,
-		"urlize":           filterUrlize,
-		"urlizetrunc":      filterUrlizetrunc,
-		"unordered_list":   filterUnorderedList,
 		"json_script":      filterJSONScript,
 		"dictsort":         dictsortFilter(false),
 		"dictsortreversed": dictsortFilter(true),
@@ -43,14 +38,28 @@ func registerFilters() {
 		"floatformat":      filterFloatformat,
 		"center":           filterCenter,
 		"striptags":        filterStriptags,
-		"join":             joinFilter(false),
 		"safeseq":          seqFilter(false),
 		"escapeseq":        seqFilter(true),
 
 		"truncatechars_html": truncateHTMLFilter(false),
 		"truncatewords_html": truncateHTMLFilter(true),
 
-		literalPrefix + "join":            joinFilter(true),
+		"lower":         filterLower,
+		"capfirst":      filterCapfirst,
+		"addslashes":    filterAddslashes,
+		"ljust":         justify("ljust", true),
+		"rjust":         justify("rjust", false),
+		"cut":           filterCut,
+		"escapejs":      filterEscapejs,
+		"phone2numeric": filterPhone2numeric,
+		"slice":         filterSlice,
+		"last":          filterLast,
+		"random":        filterRandom,
+		outFilter:       filterOut,
+
+		safeLiteralFilter: filterSafeLiteral,
+
+		literalPrefix + "join":            joinFilter(true, true),
 		literalPrefix + "default":         filterDefaultLiteral,
 		literalPrefix + "default_if_none": filterDefaultIfNoneLiteral,
 		"_dict_items":                     dictViewFilter("items"),
@@ -58,6 +67,10 @@ func registerFilters() {
 		"_dict_values":                    dictViewFilter("values"),
 	} {
 		mustFilter(name, fn)
+	}
+	for name, fn := range autoescapeFilters {
+		mustFilter(name, fn(true))
+		mustFilter(noEscapePrefix+name, fn(false))
 	}
 }
 

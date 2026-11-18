@@ -1980,5 +1980,251 @@
         "b&c"
       ]
     }
+  },
+  {
+    "name": "print_float_exponent",
+    "template": "{{ a }} {{ b }} {{ c }}",
+    "context": {
+      "a": 1e-05,
+      "b": 2.0,
+      "c": 1e+16
+    }
+  },
+  {
+    "name": "cycle_named",
+    "template": "{% cycle 'a' 'b' 'c' as x %}{% cycle x %}{% cycle x %}{% cycle x %}",
+    "context": {}
+  },
+  {
+    "name": "cycle_named_silent",
+    "template": "{% for i in items %}{% cycle 'odd' 'even' as row silent %}{{ i }}:{{ row }} {% endfor %}",
+    "context": {
+      "items": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "resetcycle",
+    "template": "{% for i in items %}{% cycle 'a' 'b' 'c' %}{% if i == 2 %}{% resetcycle %}{% endif %}{% endfor %}",
+    "context": {
+      "items": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  {
+    "name": "resetcycle_named",
+    "template": "{% for g in groups %}{% for i in g %}{% cycle 'x' 'y' as c %}{% endfor %}{% resetcycle c %}|{% endfor %}",
+    "context": {
+      "groups": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          1
+        ]
+      ]
+    }
+  },
+  {
+    "name": "ifchanged_nested",
+    "template": "{% for a in outer %}{% for b in inner %}{% ifchanged %}{{ b }}{% endifchanged %}{% endfor %}|{% endfor %}",
+    "context": {
+      "outer": [
+        1,
+        2
+      ],
+      "inner": [
+        1,
+        1,
+        2
+      ]
+    }
+  },
+  {
+    "name": "ifchanged_args",
+    "template": "{% for p in people %}{% ifchanged p.g %}[{{ p.g }}]{% else %},{% endifchanged %}{{ p.n }}{% endfor %}",
+    "context": {
+      "people": [
+        {
+          "g": "a",
+          "n": "x"
+        },
+        {
+          "g": "a",
+          "n": "y"
+        },
+        {
+          "g": "b",
+          "n": "z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "wordwrap_lines",
+    "template": "{{ t|wordwrap:5 }}",
+    "context": {
+      "t": "hello wonderful world\nab cd ef\n"
+    }
+  },
+  {
+    "name": "slice_forms",
+    "template": "{{ t|slice:'::-1' }} {{ t|slice:'2' }} {{ t|slice:'-2:' }} {{ items|slice:'1:3'|join:',' }} {{ t|slice:'x' }}",
+    "context": {
+      "t": "abcdef",
+      "items": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  {
+    "name": "cut_safe",
+    "template": "{{ a|cut:'x' }} {{ b|cut:';' }}",
+    "context": {
+      "a": {
+        "__safe__": "<b>x</b>"
+      },
+      "b": {
+        "__safe__": "&amp;"
+      }
+    }
+  },
+  {
+    "name": "is_safe_filters",
+    "template": "{{ a|lower }} {{ a|capfirst }} {{ a|ljust:'6' }}| {{ a|addslashes }} {{ a|slice:':2' }} {{ a|last }}",
+    "context": {
+      "a": {
+        "__safe__": "<B>'"
+      }
+    }
+  },
+  {
+    "name": "autoescape_off_filters",
+    "template": "{% autoescape off %}{{ items|join:'<br>' }} {{ t|linebreaksbr }} {{ t|linenumbers }} {{ items|unordered_list }}{% endautoescape %}",
+    "context": {
+      "items": [
+        "<a>",
+        "b"
+      ],
+      "t": "<b>\nc"
+    }
+  },
+  {
+    "name": "literal_safe",
+    "template": "{{ \"<b>\" }} {{ '<i>'|upper }} {% with x=\"<u>\" %}{{ x }}{% endwith %} {{ _(\"<s>\") }}",
+    "context": {}
+  },
+  {
+    "name": "verbatim_blocks",
+    "template": "{% verbatim %}{{ a }}{% if %}{% endverbatim %} {% verbatim x %}{% endverbatim %}{% endverbatim x %}",
+    "context": {
+      "a": 1
+    }
+  },
+  {
+    "name": "malformed_tags",
+    "template": "a {{ moo %} b {# c %} d {{ e\n }} f",
+    "context": {}
+  },
+  {
+    "name": "comment_multiline",
+    "template": "a{% comment %}\n{{ x }}\n{% if %}\n{% endcomment %}b{# c #}d",
+    "context": {}
+  },
+  {
+    "name": "widthratio_values",
+    "template": "{% widthratio a b 100 %} {% widthratio 1 0 100 %} [{% widthratio 'x' 2 100 %}] {% widthratio a b 100 as w %}{{ w }}",
+    "context": {
+      "a": "1.5",
+      "b": 3
+    }
+  },
+  {
+    "name": "urlize_entities",
+    "template": "{% autoescape off %}{{ a|urlize }}{% endautoescape %} {{ b|urlize }} {{ c|urlize }}",
+    "context": {
+      "a": "http://example.com/?x=&amp;y=&lt;2&gt;",
+      "b": "see test[at[example.com",
+      "c": "(see www.example.com)"
+    }
+  },
+  {
+    "name": "escapejs_chars",
+    "template": "{{ a|escapejs }}",
+    "context": {
+      "a": "a:b,c'd<e>\\f-g;h\n"
+    }
+  },
+  {
+    "name": "floatformat_nonfinite",
+    "template": "{{ a|floatformat }} {{ b|floatformat:2 }}",
+    "context": {
+      "a": "inf",
+      "b": "NaN"
+    }
+  },
+  {
+    "name": "for_unpack_string",
+    "template": "{% for x, y in items %}{{ x }}{{ y }};{% endfor %}",
+    "context": {
+      "items": [
+        "ab",
+        "cd"
+      ]
+    }
+  },
+  {
+    "name": "dictsort_invalid",
+    "template": "[{{ items|dictsort:'z' }}][{{ items|dictsort:'_n' }}]{{ items|dictsort:'n'|length }}",
+    "context": {
+      "items": [
+        {
+          "n": 2
+        },
+        {
+          "n": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "truncate_invalid",
+    "template": "{{ t|truncatechars:'x' }} {{ t|truncatewords:'x' }} [{{ t|truncatechars:0 }}]",
+    "context": {
+      "t": "hello world"
+    }
+  },
+  {
+    "name": "filter_tag_escape",
+    "template": "{% filter upper %}<b>{{ x }}</b>{% endfilter %}",
+    "context": {
+      "x": "<i>"
+    }
+  },
+  {
+    "name": "stringformat_float",
+    "template": "{{ a|stringformat:'s' }} {{ a|stringformat:'.2f' }}",
+    "context": {
+      "a": 1.5
+    }
+  },
+  {
+    "name": "urlize_bracket_punctuation",
+    "template": "{{ c|urlize }}",
+    "context": {
+      "c": "(see www.example.com)."
+    }
   }
 ]
