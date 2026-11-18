@@ -89,7 +89,9 @@ type Settings struct {
 	UseXForwardedPort bool `env:"USE_X_FORWARDED_PORT"`
 
 	// SessionEngine selects the session backend: SessionEngineDB (default) or
-	// SessionEngineSignedCookies (SESSION_ENGINE).
+	// SessionEngineSignedCookies (SESSION_ENGINE). The database engine needs
+	// a database and the installed sessions app; without them an
+	// Application keeps the sessions in signed cookies.
 	SessionEngine string `env:"SESSION_ENGINE"`
 	// SessionCookieName is the name of the session cookie (SESSION_COOKIE_NAME,
 	// default "sessionid").
@@ -188,13 +190,16 @@ type Settings struct {
 	// "SAMEORIGIN" (X_FRAME_OPTIONS).
 	XFrameOptions string `env:"X_FRAME_OPTIONS"`
 
-	// PasswordHashers lists password hashing algorithms by their identifier
-	// ("pbkdf2_sha256") in order of preference: the first one hashes new
-	// passwords, all of them verify (PASSWORD_HASHERS). Empty selects the
-	// defaults of the auth package.
+	// PasswordHashers lists password hashers in order of preference: the
+	// first one hashes new passwords, all of them verify (PASSWORD_HASHERS).
+	// An entry is the algorithm ("pbkdf2_sha256") or Django's class, with or
+	// without its module ("django.contrib.auth.hashers.PBKDF2PasswordHasher").
+	// Empty keeps the hashers of the auth package.
 	PasswordHashers []string `env:"PASSWORD_HASHERS"`
 	// AuthPasswordValidators lists the validators a new password must pass
-	// (AUTH_PASSWORD_VALIDATORS, default none).
+	// (AUTH_PASSWORD_VALIDATORS), by Django's class with or without its
+	// module. Empty keeps the validators of the auth package, the four of a
+	// new Django project.
 	AuthPasswordValidators []PasswordValidator
 
 	// defaulted records that the defaults were applied, so a false or empty
@@ -230,7 +235,10 @@ type Templates struct {
 	// (APP_DIRS, default true as in Django's project template).
 	AppDirs bool `env:"TEMPLATES_APP_DIRS"`
 	// ContextProcessors names the context processors run for every
-	// request-bound render (OPTIONS["context_processors"]).
+	// request-bound render (OPTIONS["context_processors"]), by Django's
+	// dotted path or its last segment: request, static, debug, auth,
+	// messages and csrf, which always runs. Nil selects those of a new Django
+	// project: request, auth when the auth app is installed, and messages.
 	ContextProcessors []string `env:"TEMPLATES_CONTEXT_PROCESSORS"`
 }
 

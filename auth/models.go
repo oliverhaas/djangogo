@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"strings"
 	"time"
 
@@ -237,3 +238,8 @@ func (App) Name() string { return "auth" }
 
 // Models returns the auth models (see AppModels).
 func (App) Models() []any { return AppModels() }
+
+// Templates returns the templates of the views (see the function Templates),
+// so that the template engine of an application finds them after the
+// project's own and in the order of the installed apps (Django's APP_DIRS).
+func (App) Templates() fs.FS { return Templates() }

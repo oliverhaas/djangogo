@@ -46,9 +46,11 @@ type Renderer interface {
 var embeddedTemplates embed.FS
 
 // Templates returns the default templates of the views, under "registration/".
-// They are plain pages without a base template. A project that renders the
-// views with its own engine adds this file system as its last template
-// source, so that its own templates of the same names take precedence.
+// They are plain pages without a base template. The engine of an Application
+// that installs App finds them through App.Templates. A project that renders
+// the views with an engine of its own adds this file system as its last
+// template source, so that its own templates of the same names take
+// precedence.
 func Templates() fs.FS {
 	sub, err := fs.Sub(embeddedTemplates, "templates")
 	if err != nil {

@@ -14,8 +14,10 @@ import (
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/checks"
 	"github.com/oliverhaas/djangogo/conf"
+	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/csrf"
 	"github.com/oliverhaas/djangogo/manage"
+	"github.com/oliverhaas/djangogo/messages"
 	"github.com/oliverhaas/djangogo/middleware"
 	"github.com/oliverhaas/djangogo/migrations"
 	"github.com/oliverhaas/djangogo/orm"
@@ -25,6 +27,7 @@ import (
 	"github.com/oliverhaas/djangogo/staticfiles"
 	"github.com/oliverhaas/djangogo/templates"
 	"github.com/oliverhaas/djangogo/urls"
+	"github.com/oliverhaas/djangogo/views"
 )
 
 // Application is the wired-up framework instance: settings, the app registry,
@@ -63,6 +66,10 @@ type Application struct {
 	MigrationsDir string               // base dir for generated migration files (default "migrations")
 
 	postMigrate []func(ctx context.Context, db *orm.DB) error // hooks run after a successful migrate
+
+	// sessions is the store of the session middleware, which clearsessions
+	// cleans.
+	sessions sessions.Store
 }
 
 // OnPostMigrate registers a hook that runs after the migrate command has
@@ -135,6 +142,16 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	}
 	app.DB = db
 
+	if err := app.configureAuth(); err != nil {
+		_ = app.Close()
+		return nil, err
+	}
+	// The receivers of post_migrate that contenttypes and auth connect when
+	// they are ready, so they run before the hooks of the project.
+	if appReg.IsInstalled(contenttypes.App{}.Name()) {
+		app.OnPostMigrate(app.syncContentTypes)
+	}
+
 	if err := app.start(); err != nil {
 		_ = app.Close()
 		return nil, err
@@ -148,6 +165,8 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	_ = app.Commands.Register(&showmigrationsCommand{app: app})
 	_ = app.Commands.Register(&sqlmigrateCommand{app: app})
 	_ = app.Commands.Register(&createsuperuserCommand{app: app})
+	_ = app.Commands.Register(&changepasswordCommand{app: app})
+	_ = app.Commands.Register(&clearsessionsCommand{app: app, store: app.sessions})
 	_ = app.Commands.Register(&startprojectCommand{app: app})
 	_ = app.Commands.Register(&startappCommand{app: app})
 	app.registerCoreCommands()
@@ -206,23 +225,33 @@ func (a *Application) start() error {
 
 // templateEngine builds the project's template engine over the template
 // directories of the settings and the template trees of the apps, searched
-// in this order as Django's DIRS and APP_DIRS are.
+// in this order as Django's DIRS and APP_DIRS are, with the models of the
+// project, the context processors of the settings and template caching off
+// under Debug. The router sets its resolver once it is built.
 func (a *Application) templateEngine() (*templates.Engine, error) {
-	t := a.Settings.Templates
-	sources := make([]staticfiles.Source, 0, len(t.Dirs))
+	s := a.Settings
+	t := s.Templates
+	sources := make([]templates.Source, 0, len(t.Dirs))
 	for _, dir := range t.Dirs {
-		sources = append(sources, staticfiles.DirSource(dir))
+		sources = append(sources, templates.DirSource(dir))
 	}
 	if t.AppDirs {
 		for _, tree := range a.Apps.TemplateFS() {
-			sources = append(sources, staticfiles.Source{Name: tree.App, FS: tree.FS})
+			sources = append(sources, templates.FSSource(tree.App, tree.FS))
 		}
 	}
-	// A Finder is an fs.FS over the merged sources, first match wins: the
-	// lookup order the template loaders need.
-	engine, err := templates.NewEngineFS(staticfiles.NewFinder(sources...))
+	engine := templates.New(sources...)
+	engine.SetModels(a.Models)
+	engine.SetDebug(s.Debug)
+	processors, err := a.contextProcessors()
 	if err != nil {
-		return nil, fmt.Errorf("djangogo: build template engine: %w", err)
+		return nil, err
+	}
+	engine.AddContextProcessor(processors...)
+	// {% static %} prefixes STATIC_URL. The prefix is global to the
+	// templates package; it is written only when it changes.
+	if s.StaticURL != "" && templates.StaticBase != s.StaticURL {
+		templates.StaticBase = s.StaticURL
 	}
 	return engine, nil
 }
@@ -248,11 +277,12 @@ func (a *Application) buildHandler() error {
 	if err != nil {
 		return err
 	}
+	a.root = root
 	stack, err := a.defaultMiddleware()
 	if err != nil {
 		return err
 	}
-	a.root, a.stack = root, stack
+	a.stack = stack
 	a.compose()
 	return nil
 }
@@ -269,12 +299,9 @@ func (a *Application) compose() {
 // security, sessions, common, CSRF, authentication, messages, clickjacking.
 // Recover comes before all of them, so a panic anywhere below it becomes a
 // 500 response, and host validation follows it, because Django validates the
-// host when the first middleware reads it.
-//
-// The comments SESSIONS, COMMON, CSRF and MESSAGES mark the places of the
-// session middleware built from Settings.SessionEngine and the SessionCookie*
-// settings, the APPEND_SLASH handling of CommonMiddleware, the CSRF
-// middleware built from the CSRF* settings, and the messages middleware.
+// host when the first middleware reads it. The APPEND_SLASH redirect of
+// CommonMiddleware is done by the router. It reads the root handler, so
+// buildHandler sets that first.
 func (a *Application) defaultMiddleware() ([]func(http.Handler) http.Handler, error) {
 	s := a.Settings
 	security, err := middleware.Security(middleware.SecurityOptions{
@@ -293,6 +320,7 @@ func (a *Application) defaultMiddleware() ([]func(http.Handler) http.Handler, er
 		return nil, fmt.Errorf("djangogo: security middleware: %w", err)
 	}
 
+	a.sessions = a.sessionStore()
 	stack := []func(http.Handler) http.Handler{
 		middleware.Recover(middleware.RecoverOptions{
 			Debug:             s.Debug,
@@ -306,20 +334,14 @@ func (a *Application) defaultMiddleware() ([]func(http.Handler) http.Handler, er
 			UseXForwardedPort: s.UseXForwardedPort,
 		}),
 		security,
-		// SESSIONS: a signed-cookie store under SESSION_COOKIE_NAME until the
-		// engine of Settings.SessionEngine and the SessionCookie* settings
-		// are wired.
-		sessions.Middleware(sessions.NewSignedCookieStore([]byte(s.SecretKey)), s.SessionCookieName),
-		// COMMON: APPEND_SLASH (Settings.AppendSlash) belongs here.
-		// CSRF: the CSRF* settings are not passed on yet.
-		csrf.Middleware,
+		sessions.MiddlewareWithOptions(a.sessions, a.sessionOptions()),
+		csrf.MiddlewareWithOptions(a.csrfOptions(a.resolveView())),
 	}
 	// Authentication loads the request user from the database.
 	if a.DB != nil {
 		stack = append(stack, auth.Middleware(a.DB))
 	}
-	// MESSAGES: the messages middleware belongs here.
-	stack = append(stack, middleware.XFrameOptions(s.XFrameOptions))
+	stack = append(stack, messages.Middleware, middleware.XFrameOptions(s.XFrameOptions))
 	return stack, nil
 }
 
@@ -348,8 +370,43 @@ func (a *Application) router() (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("djangogo: build router: %w", err)
 	}
+	router.AppendSlash = a.Settings.AppendSlash
+	router.Debug = a.Settings.Debug
+	if !a.Settings.Debug {
+		router.NotFoundHandler = http.HandlerFunc(a.notFound)
+	}
+	a.Templates.SetResolver(router.Reverse)
+	// The engines the admin and the auth views build for themselves use the
+	// global resolver.
 	templates.SetURLResolver(router.Reverse)
 	return router, nil
+}
+
+// resolveView returns the function the CSRF middleware asks for the view of
+// a request, so that a view marked with csrf.Exempt is not checked. It is nil
+// for a project without routes.
+func (a *Application) resolveView() func(*http.Request) http.Handler {
+	router, ok := a.root.(*urls.Router)
+	if !ok {
+		return nil
+	}
+	return func(r *http.Request) http.Handler {
+		m, err := router.Resolve(r.URL.Path)
+		if err != nil {
+			return nil
+		}
+		return m.Handler
+	}
+}
+
+// notFound answers a request no route matches with the 404.html of the
+// project, or Django's default page without one (handler404). A 404.html that
+// fails to render is an error of the server, as in Django.
+func (a *Application) notFound(w http.ResponseWriter, r *http.Request) {
+	if err := views.NotFoundPage(w, r, a.Templates, nil, ""); err != nil {
+		_, _ = fmt.Fprintf(a.errOut(), "djangogo: render the 404 page: %v\n", err)
+		http.Error(w, "Server Error (500)", http.StatusInternalServerError)
+	}
 }
 
 // Use adds project middleware, the project's own entries at the end of
