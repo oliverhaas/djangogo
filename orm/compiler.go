@@ -199,7 +199,8 @@ func (c *compiler) build(items []selectItem, ordered bool) (*selectStmt, error) 
 }
 
 // resolveOrder resolves the ORDER BY terms. A term is an annotation name or a
-// field key, which may span relations.
+// field key, which may span relations. An expression is ordered by once: its
+// first term wins, as in Django, because a later one could never matter.
 func (c *compiler) resolveOrder(items []selectItem) ([]orderItem, error) {
 	selected := make(map[string]bool, len(items))
 	for _, it := range items {
@@ -208,24 +209,34 @@ func (c *compiler) resolveOrder(items []selectItem) ([]orderItem, error) {
 		}
 	}
 	out := make([]orderItem, 0, len(c.q.orders))
+	seen := make(map[string]bool, len(c.q.orders))
 	for _, t := range c.q.orders {
 		if t.random {
 			out = append(out, orderItem{random: true})
 			continue
 		}
+		item := orderItem{desc: t.desc}
+		// An annotation is identified by its name: two of them may differ
+		// only in a bound value, which the SQL text does not show.
+		key := "annotation " + t.key
 		if n, ok := c.annots[t.key]; ok {
-			item := orderItem{node: n, desc: t.desc}
+			item.node = n
 			if selected[t.key] {
 				item.alias = t.key
 			}
-			out = append(out, item)
+		} else {
+			p, err := resolveFieldPath(c.q.model, t.key, c.annotNames)
+			if err != nil {
+				return nil, err
+			}
+			item.node = c.column(p)
+			key = nodeKey(c.d, item.node)
+		}
+		if seen[key] {
 			continue
 		}
-		p, err := resolveFieldPath(c.q.model, t.key, c.annotNames)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, orderItem{node: c.column(p), desc: t.desc})
+		seen[key] = true
+		out = append(out, item)
 	}
 	return out, nil
 }

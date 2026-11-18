@@ -85,8 +85,9 @@ func (qs *QuerySet[T]) AllAnnotated(ctx context.Context) ([]Annotated[T], error)
 }
 
 // Get returns the single row matching the queryset, with any arguments
-// applied as additional Filter conditions. It returns ErrDoesNotExist when no
-// row matches and ErrMultipleObjectsReturned when more than one does.
+// applied as additional Filter conditions. Its error matches ErrDoesNotExist
+// when no row matches and ErrMultipleObjectsReturned when more than one does,
+// and carries Django's message for either.
 //
 // The ordering of the queryset is dropped, as Django's get() drops it: the
 // order of at most one row does not matter. A queryset with a limit or an
@@ -97,9 +98,13 @@ func (qs *QuerySet[T]) Get(ctx context.Context, args ...any) (T, error) {
 	if !matching.q.sliced() {
 		matching = matching.OrderBy()
 	}
-	// Two rows are enough to tell "several" from "one".
-	if matching.q.limit < 0 || matching.q.limit > 2 {
-		matching = matching.Limit(2)
+	// A few rows more than one are fetched to say how many matched. A
+	// smaller limit of the caller stays: it hides no row from the count.
+	limit := maxGetResults
+	if own := matching.q.limit; own >= 0 && own <= maxGetResults {
+		limit = own + 1
+	} else {
+		matching = matching.Limit(maxGetResults)
 	}
 	rows, err := matching.All(ctx)
 	if err != nil {
@@ -107,11 +112,11 @@ func (qs *QuerySet[T]) Get(ctx context.Context, args ...any) (T, error) {
 	}
 	switch len(rows) {
 	case 0:
-		return zero, ErrDoesNotExist
+		return zero, doesNotExist(qs.q.model)
 	case 1:
 		return rows[0], nil
 	default:
-		return zero, ErrMultipleObjectsReturned
+		return zero, multipleObjects(qs.q.model, len(rows), limit)
 	}
 }
 
@@ -143,7 +148,7 @@ func first[T any](ctx context.Context, q *query) (T, error) {
 		return zero, err
 	}
 	if len(rows) == 0 {
-		return zero, ErrDoesNotExist
+		return zero, doesNotExist(q.model)
 	}
 	return rows[0], nil
 }

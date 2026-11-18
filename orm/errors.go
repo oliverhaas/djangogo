@@ -1,12 +1,55 @@
 package orm
 
-import "errors"
+import (
+	"errors"
+	"strconv"
+)
 
-// ErrDoesNotExist is returned by Get when no row matches.
+// ErrDoesNotExist is matched by the error of Get, First, and Last when no row
+// matches, like Django's DoesNotExist.
 var ErrDoesNotExist = errors.New("orm: object does not exist")
 
-// ErrMultipleObjectsReturned is returned by Get when more than one row matches.
+// ErrMultipleObjectsReturned is matched by the error of Get when more than
+// one row matches, like Django's MultipleObjectsReturned.
 var ErrMultipleObjectsReturned = errors.New("orm: multiple objects returned")
+
+// lookupError is the error of a single-object lookup. It carries Django's
+// message for the model and is matched by its sentinel through errors.Is.
+type lookupError struct {
+	msg      string
+	sentinel error
+}
+
+// Error returns Django's message.
+func (e *lookupError) Error() string { return e.msg }
+
+// Unwrap returns ErrDoesNotExist or ErrMultipleObjectsReturned.
+func (e *lookupError) Unwrap() error { return e.sentinel }
+
+// doesNotExist returns the error for a lookup on m that matched no row.
+func doesNotExist(m *Model) error {
+	return &lookupError{
+		msg:      "orm: " + m.Name() + " matching query does not exist.",
+		sentinel: ErrDoesNotExist,
+	}
+}
+
+// maxGetResults is the number of rows Get fetches to report how many matched,
+// Django's MAX_GET_RESULTS.
+const maxGetResults = 21
+
+// multipleObjects returns the error for a Get on m that matched n rows, of
+// which no more than limit were fetched.
+func multipleObjects(m *Model, n, limit int) error {
+	count := strconv.Itoa(n)
+	if n >= limit {
+		count = "more than " + strconv.Itoa(limit-1)
+	}
+	return &lookupError{
+		msg:      "orm: get() returned more than one " + m.Name() + " -- it returned " + count + "!",
+		sentinel: ErrMultipleObjectsReturned,
+	}
+}
 
 // ErrIntegrity is matched by every database constraint violation, like
 // Django's IntegrityError. The more specific errors below tell the violated
