@@ -247,9 +247,9 @@ func TestM6EndToEndAdminCRUD(t *testing.T) {
 	addToken := extractCSRF(t, body)
 	{
 		form := url.Values{}
-		form.Set("Name", "Widget")
-		form.Set("Price", "999")
-		form.Set("Active", "on")
+		form.Set("name", "Widget")
+		form.Set("price", "999")
+		form.Set("active", "on")
 		form.Set("csrfmiddlewaretoken", addToken)
 		st, loc, b := postForm(t, c, base+"/admin/product/add/", form)
 		if st != http.StatusFound {
@@ -279,9 +279,9 @@ func TestM6EndToEndAdminCRUD(t *testing.T) {
 	changeToken := extractCSRF(t, body)
 	{
 		form := url.Values{}
-		form.Set("Name", "Gadget")
-		form.Set("Price", "999")
-		form.Set("Active", "on")
+		form.Set("name", "Gadget")
+		form.Set("price", "999")
+		form.Set("active", "on")
 		form.Set("csrfmiddlewaretoken", changeToken)
 		st, loc, b := postForm(t, c, base+"/admin/product/1/change/", form)
 		if st != http.StatusFound {
@@ -334,8 +334,8 @@ func TestM6EndToEndAdminCRUD(t *testing.T) {
 	// 8. A POST without a valid CSRF token is rejected with 403.
 	{
 		form := url.Values{}
-		form.Set("Name", "NoCSRF")
-		form.Set("Price", "1")
+		form.Set("name", "NoCSRF")
+		form.Set("price", "1")
 		// No csrfmiddlewaretoken on purpose.
 		st, _, _ := postForm(t, c, base+"/admin/product/add/", form)
 		if st != http.StatusForbidden {

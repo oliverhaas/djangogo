@@ -228,14 +228,14 @@ func (s *AdminSite) populateChoices(ctx context.Context, form *forms.Form, e *en
 		present[fld.Name] = true
 	}
 	for _, mf := range e.model.Relations() {
-		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Name] {
+		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Attr] {
 			continue
 		}
 		opts, err := orm.LabeledRows(ctx, s.db, mf.Rel.Target)
 		if err != nil {
 			continue
 		}
-		form.SetChoices(mf.Name, opts)
+		form.SetChoices(mf.Attr, opts)
 	}
 }
 

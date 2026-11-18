@@ -324,8 +324,8 @@ func TestAddPOSTValidFKCreatesRow(t *testing.T) {
 	router := urls.NewRouter(site.Routes()...)
 
 	form := url.Values{}
-	form.Set("Title", "Hello")
-	form.Set("Author", strconv.FormatInt(ids[1], 10)) // Linus
+	form.Set("title", "Hello")
+	form.Set("author", strconv.FormatInt(ids[1], 10)) // Linus
 	form.Set(csrf.FormField, "ignored-by-handler")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/admin/post/add/", strings.NewReader(form.Encode()))
@@ -352,8 +352,8 @@ func TestAddPOSTInvalidFKReRendersNoRow(t *testing.T) {
 	router := urls.NewRouter(site.Routes()...)
 
 	form := url.Values{}
-	form.Set("Title", "Hello")
-	form.Set("Author", "999") // no such author -> not in the <select> option set
+	form.Set("title", "Hello")
+	form.Set("author", "999") // no such author -> not in the <select> option set
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/admin/post/add/", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -507,13 +507,13 @@ func TestAddGETRendersForm(t *testing.T) {
 	if !strings.Contains(body, `<form method="post"`) {
 		t.Errorf("add GET body missing post form:\n%s", body)
 	}
-	for _, name := range []string{`name="Title"`, `name="Views"`, `name="Published"`} {
+	for _, name := range []string{`name="title"`, `name="views"`, `name="published"`} {
 		if !strings.Contains(body, name) {
 			t.Errorf("add GET body missing input %q:\n%s", name, body)
 		}
 	}
 	// The auto PK must not be an editable input.
-	if strings.Contains(body, `name="ID"`) {
+	if strings.Contains(body, `name="id"`) {
 		t.Errorf("add GET body should not expose the auto PK input:\n%s", body)
 	}
 	if !strings.Contains(body, `name="csrfmiddlewaretoken"`) {
@@ -527,9 +527,9 @@ func TestAddPOSTValidCreatesAndRedirects(t *testing.T) {
 	router := urls.NewRouter(site.Routes()...)
 
 	form := url.Values{}
-	form.Set("Title", "Posted Title")
-	form.Set("Views", "42")
-	form.Set("Published", "on")
+	form.Set("title", "Posted Title")
+	form.Set("views", "42")
+	form.Set("published", "on")
 	form.Set(csrf.FormField, "ignored-by-handler")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/admin/article/add/", strings.NewReader(form.Encode()))
@@ -562,8 +562,8 @@ func TestAddPOSTInvalidReRendersNoRow(t *testing.T) {
 
 	form := url.Values{}
 	// Title exceeds max_length=200, so validation fails.
-	form.Set("Title", strings.Repeat("x", 201))
-	form.Set("Views", "1")
+	form.Set("title", strings.Repeat("x", 201))
+	form.Set("views", "1")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/admin/article/add/", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -628,8 +628,8 @@ func TestChangePOSTUpdatesAndRedirects(t *testing.T) {
 	router := urls.NewRouter(site.Routes()...)
 
 	form := url.Values{}
-	form.Set("Title", "Renamed")
-	form.Set("Views", "7")
+	form.Set("title", "Renamed")
+	form.Set("views", "7")
 	// Published omitted -> false.
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/admin/article/1/change/", strings.NewReader(form.Encode()))
@@ -791,7 +791,7 @@ func TestChangePOSTDoesNotClobberExcludedFields(t *testing.T) {
 
 	// POST a change that edits only EditTitle; Secret is absent from the form.
 	form := url.Values{}
-	form.Set("EditTitle", "updated title")
+	form.Set("edit_title", "updated title")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(
 		http.MethodPost,

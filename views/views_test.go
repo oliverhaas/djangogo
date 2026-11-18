@@ -134,15 +134,16 @@ func TestJSON(t *testing.T) {
 
 func TestDetailView(t *testing.T) {
 	db := newViewsDB(t)
+	// A model without app label has the default template "<model>_detail.html".
 	eng := newViewsEngine(t, map[string]string{
-		"article.html": "Title: {{ object.title }}",
+		"varticle_detail.html": "Title: {{ object.title }}",
 	})
 	art := vArticle{Title: "Hello"}
 	if err := orm.Query[vArticle](db).Create(context.Background(), &art); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	view := views.DetailView[vArticle]{DB: db, Engine: eng, Template: "article.html"}
+	view := views.DetailView[vArticle]{DB: db, Engine: eng}
 	mux := http.NewServeMux()
 	mux.Handle("GET /articles/{pk}/", view)
 
@@ -162,7 +163,7 @@ func TestDetailViewNotFound(t *testing.T) {
 	db := newViewsDB(t)
 	eng := newViewsEngine(t, map[string]string{"article.html": "{{ object.title }}"})
 
-	view := views.DetailView[vArticle]{DB: db, Engine: eng, Template: "article.html"}
+	view := views.DetailView[vArticle]{DB: db, Engine: eng, TemplateName: "article.html"}
 	mux := http.NewServeMux()
 	mux.Handle("GET /articles/{pk}/", view)
 
@@ -173,13 +174,18 @@ func TestDetailViewNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
+	// The engine reads a directory without 404.html, so the default page is
+	// served.
+	if body := rec.Body.String(); !strings.Contains(body, "<h1>Not Found</h1>") {
+		t.Errorf("body = %q, want Django's default 404 page", body)
+	}
 }
 
 func TestDetailViewBadPK(t *testing.T) {
 	db := newViewsDB(t)
 	eng := newViewsEngine(t, map[string]string{"article.html": "{{ object.title }}"})
 
-	view := views.DetailView[vArticle]{DB: db, Engine: eng, Template: "article.html"}
+	view := views.DetailView[vArticle]{DB: db, Engine: eng, TemplateName: "article.html"}
 	mux := http.NewServeMux()
 	mux.Handle("GET /articles/{pk}/", view)
 
@@ -203,12 +209,12 @@ func TestDetailViewCustomNames(t *testing.T) {
 	}
 
 	view := views.DetailView[vArticle]{
-		DB:          db,
-		Engine:      eng,
-		Template:    "article.html",
-		PKParam:     "id",
-		ContextName: "art",
-		Extra:       func(_ *http.Request) map[string]any { return map[string]any{"extra": "X"} },
+		DB:                db,
+		Engine:            eng,
+		TemplateName:      "article.html",
+		PKURLKwarg:        "id",
+		ContextObjectName: "art",
+		ExtraContext:      map[string]any{"extra": "X"},
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /articles/{id}/", view)
@@ -227,8 +233,9 @@ func TestDetailViewCustomNames(t *testing.T) {
 
 func TestListView(t *testing.T) {
 	db := newViewsDB(t)
+	// A model without app label has the default template "<model>_list.html".
 	eng := newViewsEngine(t, map[string]string{
-		"list.html": "{% for o in objects %}{{ o.title }};{% endfor %}",
+		"varticle_list.html": "{% for o in varticle_list %}{{ o.title }};{% endfor %}",
 	})
 	for _, title := range []string{"A", "B", "C"} {
 		art := vArticle{Title: title}
@@ -237,7 +244,7 @@ func TestListView(t *testing.T) {
 		}
 	}
 
-	view := views.ListView[vArticle]{DB: db, Engine: eng, Template: "list.html"}
+	view := views.ListView[vArticle]{DB: db, Engine: eng, Ordering: []string{"id"}}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/articles/", nil)
 	view.ServeHTTP(rec, req)
@@ -263,13 +270,11 @@ func TestListViewCustomQuery(t *testing.T) {
 	}
 
 	view := views.ListView[vArticle]{
-		DB:          db,
-		Engine:      eng,
-		Template:    "list.html",
-		ContextName: "rows",
-		Query: func(d *orm.DB) *orm.QuerySet[vArticle] {
-			return orm.Query[vArticle](d).Filter("title", "keep")
-		},
+		DB:                db,
+		Engine:            eng,
+		TemplateName:      "list.html",
+		ContextObjectName: "rows",
+		Queryset:          orm.Query[vArticle](db).Filter("title", "keep"),
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/articles/", nil)

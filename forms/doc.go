@@ -1,0 +1,103 @@
+// Package forms validates submitted data and renders HTML forms, following
+// django.forms: the same field classes, validation steps, error messages and
+// HTML output.
+//
+// # Declaring a form
+//
+// Django declares a form as a class; here a function builds it per request:
+//
+//	func newContactForm() *forms.Form {
+//		return forms.New(
+//			forms.F("subject", forms.NewCharField(forms.MaxLength(100))),
+//			forms.F("message", forms.NewCharField(forms.UseWidget(forms.Textarea{}))),
+//			forms.F("sender", forms.NewEmailField()),
+//			forms.F("cc_myself", forms.NewBooleanField(forms.Required(false))),
+//		)
+//	}
+//
+// The keyword arguments of a Django field are FieldOption values (Required,
+// Label, Initial, HelpText, UseWidget, ErrorMessages, Validators, MaxLength,
+// ...). The constructor arguments of a Django form are exported fields of Form
+// (Prefix, AutoID, Initial, LabelSuffix, ...).
+//
+// # Binding and validating
+//
+// Bind returns a bound copy, so the unbound form can be kept as a template:
+//
+//	form := newContactForm().Bind(r.PostForm)
+//	if form.IsValid() {
+//		data := form.CleanedData()
+//	}
+//
+// A field cleans a value in Django's three steps: ToGo (to_python), Validate
+// and RunValidators. The cleaned values are Go values:
+//
+//	CharField, EmailField, URLField, SlugField, RegexField  string
+//	IntegerField                                             int64
+//	FloatField                                               float64
+//	DecimalField                                             forms.Decimal
+//	BooleanField                                             bool
+//	NullBooleanField                                         bool or nil
+//	DateField, TimeField, DateTimeField                      time.Time
+//	DurationField                                            time.Duration
+//	UUIDField                                                canonical string
+//	ChoiceField                                              string
+//	TypedChoiceField                                         result of Coerce
+//	MultipleChoiceField                                      []string
+//	ModelChoiceField                                         *T
+//
+// An empty optional value is nil, except for the text fields ("") and the
+// boolean field (false).
+//
+// A clean_<name>() method is a function registered with Form.CleanFieldWith,
+// clean() one registered with Form.CleanWith; both report errors by returning
+// a *ValidationError or by calling Form.AddError. Form.Errors returns an
+// ErrorDict with Django's AsData, AsJSON, AsText and AsUL.
+//
+// # Rendering
+//
+// A form renders with AsDiv (the default, also String), AsP, AsTable and AsUL;
+// Form.Field returns a BoundField with LabelTag, Errors, IDForLabel and the
+// widget HTML. The HTML is Django's, with two differences that carry no
+// meaning: the white space between tags, and the order of attributes, which
+// is alphabetical followed by required, disabled, aria-invalid,
+// aria-describedby, id, multiple, checked and selected.
+//
+// In a template a form is used as in Django:
+//
+//	{{ form }}  {{ form.as_p }}  {{ form.non_field_errors }}
+//	{{ form.title }}  {{ form.title.label_tag }}  {{ form.title.errors }}
+//	{% for field in form.visible_fields %}{{ field.label_tag }} {{ field }}{% endfor %}
+//
+// views.Render converts a form in the context through TemplateValue. The
+// template engine cannot iterate a form itself, so {% for field in form %} is
+// written {% for field in form.fields %}.
+//
+// # Model forms
+//
+// NewModelForm derives a form from a registered model, validates unique
+// fields against the database and saves the instance:
+//
+//	form := forms.NewModelForm[Post](db, forms.WithFields("title", "slug")).Bind(r.PostForm)
+//	form.SetContext(r.Context())
+//	if form.IsValid() {
+//		post, err := form.Save(r.Context())
+//	}
+//
+// The Meta options of a Django ModelForm are ModelFormOption values. A field
+// is named after the attribute of its model field ("created_at"), is required
+// unless the model field allows blank, and takes label, help text, choices,
+// maximum length and default from it. A foreign key becomes a
+// ModelChoiceField over the rows of the related model. A new instance starts
+// with the defaults of the model, and a field with a default that the data
+// leaves out keeps it, as in Django's construct_instance. A name in WithFields
+// that the model does not have makes the form fail (Form.Err) with Django's
+// FieldError message.
+//
+// # Not covered
+//
+// File uploads (FileField, ImageField, ClearableFileInput), option groups in
+// choices, iteration over the inputs of a RadioSelect in a template,
+// MultiValueField and SplitDateTimeField, localized input formats and many-to-many
+// fields are not part of this package.
+package forms

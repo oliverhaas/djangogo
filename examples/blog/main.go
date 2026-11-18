@@ -125,12 +125,11 @@ func publicEngine() (*templates.Engine, error) {
 // method prefix and matches both GET (render) and POST (submit a comment).
 func publicRoutes(db *orm.DB, engine *templates.Engine) []urls.Route {
 	list := views.ListView[Post]{
-		DB:       db,
-		Engine:   engine,
-		Template: "post_list.html",
-		Query: func(db *orm.DB) *orm.QuerySet[Post] {
-			return orm.Query[Post](db).Filter("published", true).OrderBy("-created_at")
-		},
+		DB:                db,
+		Engine:            engine,
+		TemplateName:      "post_list.html",
+		ContextObjectName: "objects",
+		Queryset:          orm.Query[Post](db).Filter("published", true).OrderBy("-created_at"),
 	}
 	detail := postDetailView{db: db, engine: engine}
 	return []urls.Route{
