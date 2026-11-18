@@ -137,10 +137,9 @@ func TestM5LoginGatedExit(t *testing.T) {
 	})
 
 	detail := views.DetailView[Article]{
-		DB:       db,
-		Engine:   eng,
-		Template: "article.html",
-		PKParam:  "pk",
+		DB:           db,
+		Engine:       eng,
+		TemplateName: "article.html",
 	}
 	protected := auth.LoginRequired("/login/")(detail)
 

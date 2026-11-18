@@ -151,10 +151,17 @@ func (rd Redirector) redirect(w http.ResponseWriter, _ *http.Request, target str
 	if err != nil {
 		return err
 	}
+	writeRedirect(w, rd.status(), location)
+	return nil
+}
+
+// writeRedirect writes a redirect to a location that checkedLocation returned.
+// A view that changes data checks its target first and writes the redirect
+// after the change went through.
+func writeRedirect(w http.ResponseWriter, status int, location string) {
 	w.Header().Set("Location", location)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(rd.status())
-	return nil
+	w.WriteHeader(status)
 }
 
 // checkedLocation returns the Location header value for target after Django's

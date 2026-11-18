@@ -18,7 +18,8 @@
 //		return views.Render(w, r, engine, "blog/post_detail.html", map[string]any{"post": post})
 //	}))
 //
-// ServeError is the single mapping from errors to responses:
+// ServeError is the single mapping from errors to responses, used by Handler
+// and by the generic views:
 //
 //	raise Http404(msg)             return views.NotFound(msg), or any error wrapping
 //	                               views.ErrNotFound or orm.ErrDoesNotExist    404
@@ -67,5 +68,74 @@
 //	{% for post in page_obj.object_list %}...{% endfor %}
 //
 // Model instances reach templates through templates.ModelContext, so
-// {{ post.created_at }} and {{ post }} work as in Django.
+// {{ post.created_at }} reads a column and {{ post }} writes the label of the
+// model. The template engine escapes string values only: {{ post }} writes the
+// label without HTML escaping. For a model whose String method returns text
+// from a user, write the column instead ({{ post.title }}).
+//
+// # Generic views
+//
+// Django configures a class-based view by subclassing and by keyword arguments
+// to as_view(). A Go generic view is a struct value that implements
+// http.Handler: a class attribute is an exported field with Django's name in
+// Go case, and a method that a subclass would override is a function field.
+//
+//	View          dispatch by HTTP method: 405 with an Allow header for a
+//	              method without handler, HEAD served by Get, OPTIONS
+//	              answered with the allowed methods
+//	TemplateView  render a template with the path values in the context
+//	RedirectView  redirect to a URL or to a named route, 410 without target
+//	ListView[T]   object_list and <model>_list, with PaginateBy also
+//	              paginator, page_obj and is_paginated, default template
+//	              <app>/<model>_list.html
+//	DetailView[T] object and <model>, looked up by pk or slug, default
+//	              template <app>/<model>_detail.html
+//	DeleteView[T] confirmation page on GET, delete and redirect on POST and
+//	              DELETE, default template <app>/<model>_confirm_delete.html
+//
+// The fields, by Django attribute or method:
+//
+//	template_name, template_name_suffix   TemplateName, TemplateNameSuffix
+//	template_name_field                   TemplateNameField
+//	content_type, extra_context           ContentType, ExtraContext
+//	context_object_name                   ContextObjectName
+//	model                                 the type parameter T and DB
+//	queryset, ordering                    Queryset, Ordering
+//	allow_empty                           AllowEmpty (a *bool, nil means true)
+//	paginate_by, paginate_orphans         PaginateBy, PaginateOrphans
+//	page_kwarg                            PageKwarg
+//	pk_url_kwarg, slug_url_kwarg          PKURLKwarg, SlugURLKwarg
+//	slug_field, query_pk_and_slug         SlugField, QueryPKAndSlug
+//	success_url                           SuccessURL
+//	url, pattern_name                     URL, PatternName
+//	permanent, query_string               Permanent, QueryString
+//	preserve_request                      PreserveRequest
+//	get_context_data()                    GetContextData
+//	get_template_names()                  GetTemplateNames
+//	get_queryset(), get_object()          GetQueryset, GetObject
+//	get_paginator()                       GetPaginator
+//	get_success_url()                     GetSuccessURL
+//	get_redirect_url()                    GetRedirectURL
+//	delete() of the object                DeleteObject
+//
+// GetContextData receives the context the view has built and returns the one
+// to render, the Go form of calling super().get_context_data() and updating
+// the result. The values it sees are typed (T, []T, *Page[T], *Paginator[T]).
+// The view converts them to their template form after the hook.
+//
+// The keyword arguments of a Django URL are the path values of the route
+// pattern ({pk}, {slug}, {page}), and they are strings. Mount a generic view
+// on a pattern without a method ("/posts/{pk}/", not "GET /posts/{pk}/"),
+// because the view answers the other methods itself. Lookups and placeholders
+// use the column names of the model. A {name} placeholder in RedirectView.URL
+// or DeleteView.SuccessURL is filled percent-encoded.
+//
+// A model view reads the model name, the default template name and the
+// template form of its objects from the registry of DB, so set DB also when
+// Queryset is set. The Go ORM has no Meta.ordering: a paginated ListView needs
+// Ordering or an ordered Queryset for stable pages.
+//
+// A generic view answers a failure through ServeError: a missing object with
+// the 404 page, a configuration mistake (ErrImproperlyConfigured) with a
+// logged 500.
 package views

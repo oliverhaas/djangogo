@@ -65,6 +65,46 @@ func (l *logRecords) messages(level slog.Level) []string {
 	return out
 }
 
+// statuses returns the "status" attribute of the records logged at the given
+// level, the status_code Django attaches to its request log records.
+func (l *logRecords) statuses(level slog.Level) []int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []int64
+	for _, r := range l.records {
+		if r.Level != level {
+			continue
+		}
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "status" && a.Value.Kind() == slog.KindInt64 {
+				out = append(out, a.Value.Int64())
+			}
+			return true
+		})
+	}
+	return out
+}
+
+// errs returns the errors attached to the records logged at error level: the
+// causes of the 500 responses, which Django raises out of the test client.
+func (l *logRecords) errs() []error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []error
+	for _, r := range l.records {
+		if r.Level != slog.LevelError {
+			continue
+		}
+		r.Attrs(func(a slog.Attr) bool {
+			if err, ok := a.Value.Any().(error); ok && a.Key == "error" {
+				out = append(out, err)
+			}
+			return true
+		})
+	}
+	return out
+}
+
 // captureLogs routes the default slog logger into the returned collector for
 // the duration of the test. Tests using it must not run in parallel.
 func captureLogs(t *testing.T) *logRecords {
