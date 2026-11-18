@@ -57,6 +57,124 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   PostgreSQL when `DJANGOGO_TEST_POSTGRES_DSN` is set. Tests ported from
   Django's suite carry a `// Ported from Django: tests/<file>.py::<Class>.<test>`
   comment, and `LICENSE-DJANGO` holds Django's BSD 3-Clause license for them.
+- ORM queries: `Filter`, `Exclude`, `OrderBy` and `Get` accept Django attribute
+  names and `pk`, follow relations with `__`, and report an unknown name with
+  Django's "Cannot resolve keyword" message. New: `Q` objects (OR, AND, NOT),
+  `Values`, `ValuesList`, `Pluck`, `Distinct`, `Aggregate`, `Annotate` and `F`
+  expressions; the `iexact`, `istartswith`, `iendswith`, `range`, `regex` and
+  `iregex` lookups; `First`, `Last`, `GetOrCreate` (safe under concurrent
+  creates), `UpdateOrCreate`, `BulkCreate`, `Save` and `InBulk`; raw SQL (`Raw`,
+  `Exec`, `QueryRows`) that runs inside `Atomic` and counts in
+  `AssertNumQueries`; `AtomicDurable`; and `ErrUniqueViolation`,
+  `ErrForeignKeyViolation`, `ErrNotNullViolation` and `ErrCheckViolation` for
+  `errors.Is`.
+- Migrations: `makemigrations` asks whether a field or a model was renamed and
+  writes `RenameField` or `RenameModel`, so a rename keeps the column's data
+  (`--noinput` answers no and warns). Each app has its own history under
+  `migrations/<app>/` with dependencies across apps. `migrate <app> <name>` goes
+  forward or back to a migration, `migrate <app> zero` unapplies an app, and
+  each migration applies atomically. New commands `showmigrations` and
+  `sqlmigrate`; new flags `makemigrations --dry-run --check --name --empty
+  --noinput` and `migrate --fake --plan --noinput`; new operations `AddIndex`,
+  `RemoveIndex`, `AlterUniqueTogether`, `AlterModelTable`, `RunSQL` and `RunGo`.
+  A new required column on a table with rows is filled from the field default or
+  from a one-off value that `makemigrations` asks for. On PostgreSQL, `AlterField`
+  uses `ALTER COLUMN` instead of a table rebuild. `Application.OnPostMigrate`
+  registers hooks that run after `migrate`, as Django's post_migrate.
+- URLs and templates: Django URL dispatch with path converters, `re_path`,
+  namespaces, `reverse` and `resolve`, `APPEND_SLASH` and 404 and 405 handlers.
+  Template loading from several sources with `TemplateDoesNotExist`, the full
+  `{% url %}` tag (keyword arguments and `as`), context processors, model
+  contexts with relation attributes (`{{ post.author }}`, `{{ post.author_id }}`),
+  `resetcycle` and named cycles, and Django's lexer, escaping, filters and float
+  output.
+- Auth: users, groups, permissions, content types and sessions use Django's
+  tables (`auth_*`, `django_content_type`, `django_session`), so a Djan-Go-Go
+  project and a Django project can share a database. Passwords use Django's hash
+  formats (pbkdf2_sha256 at 1,200,000 iterations, argon2, bcrypt_sha256, scrypt)
+  and are hashed again at login when the algorithm or work factor is old.
+  Permissions are created for every model after `migrate`. New login, logout and
+  password change views with Django's templates and safe `next` handling, the
+  `LoginRequired`, `PermissionRequired`, `StaffRequired` and `UserPassesTest`
+  guards, and password validators with Django's messages. Login cycles the
+  session key and the CSRF token, and a password change logs out the other
+  sessions of the user. Templates can use `{{ user.username }}`,
+  `{% if user.is_authenticated %}` and `{% if perms.blog.add_post %}`.
+- Sessions and CSRF: sessions support Django's cookie settings, expiry,
+  expire-at-browser-close and save-every-request, and send `Vary: Cookie`. CSRF
+  uses masked tokens, trusted origins with wildcards and `csrf.Exempt`, and
+  answers a failure with Django's reason.
+- Messages: a messages framework (`messages.Info(r, "...")`) with a template
+  context processor, and `djangotest.AssertMessages`.
+- Forms and views: forms render and validate like Django (input names, ids,
+  labels, messages and HTML). A ModelForm keeps the defaults of omitted fields
+  and reports an unknown field name. Generic views (`TemplateView`,
+  `RedirectView`, `ListView`, `DetailView`, `FormView`, `CreateView`,
+  `UpdateView`, `DeleteView`), pagination, `GetObjectOr404`, `GetListOr404`,
+  Django-style 400, 403, 404 and 500 pages, and `djangotest.AssertFormError`.
+- Commands: `changepassword`, `clearsessions`, `check` (with Django's deploy
+  checks; checks also run before `runserver` and `migrate`), `collectstatic`,
+  `findstatic`, `dbshell` and `shell` (a query shell over the models).
+  `createsuperuser` validates the password, asks again after an invalid answer,
+  and supports `--noinput` with `DJANGO_SUPERUSER_PASSWORD`. `help` groups the
+  commands by app, and an unknown command suggests the closest one. `runserver`
+  accepts `8080` and `0.0.0.0:8000`, prints Django's banner and a notice about
+  unapplied migrations, logs requests and shuts down gracefully.
+- Settings and the application: settings carry Django's names and defaults,
+  and `DJANGOGO_*` environment variables and a `.env` file override them.
+  `djangogo.New` opens PostgreSQL (`postgres`, `postgresql`, `pgx`), reads
+  `DATABASE_URL`, and applies the settings to the components: sessions (the
+  database store when `SessionEngine` is `db` and the `sessions` app is
+  installed, else signed cookies), CSRF, auth (secret keys, login URLs,
+  password hashers and validators by Django name), template directories and app
+  templates, context processors by name, `APPEND_SLASH`, `DEBUG` and the
+  `404.html` page. An unknown hasher, validator or context processor makes `New`
+  fail with `ImproperlyConfigured`. The default middleware adds host validation,
+  security headers, X-Frame-Options, gzip, the messages middleware and a
+  technical 500 page in debug; `Application.Use` adds project middleware. Static
+  files are served under `STATIC_URL` in debug.
+- `startproject` generates a Django-style project: settings with an environment
+  overlay and a new secret key, the `auth`, `contenttypes` and `sessions` apps,
+  a sample app with a model, admin, views, namespaced URLs, templates, static
+  files and a djangotest test, and migration packages that `main.go` already
+  imports. `go run . makemigrations && go run . migrate` works without edits.
+
+### Changed
+
+- **BREAKING**: migrations generated by an earlier version must be generated
+  again. The `Operation` interface changed, `Migration.Dependencies` is now
+  `[]migrations.Key`, and `Application.MigrationsApp`, `migrations.Diff`,
+  `MakeMigrations`, `EnsureTable`, `AppliedSet` and `ErrNoChanges` are removed
+  (use `Recorder.EnsureSchema` and `Recorder.AppliedMigrations`). The tracking
+  table is now `django_migrations` with an `applied` column; an existing
+  `djangogo_migrations` table is renamed automatically.
+- **BREAKING**: the auth models match Django's tables and columns, so the auth
+  migrations must be generated again. `User.PasswordHash` is now
+  `User.Password`, `HasPerm` and `PermissionRequired` take
+  `"app_label.codename"`, `auth.Iterations` is replaced by
+  `PBKDF2Iterations`, and the fields of `sessions.Record` are now `SessionKey`,
+  `SessionData` and `ExpireDate`.
+- **BREAKING**: the default CSRF middleware keeps the secret in the
+  `csrftoken` cookie instead of the session, and `csrf.SessionKey` is now
+  `_csrftoken`.
+- **BREAKING**: form input names are the attribute names (`name="title"`), not
+  the Go field names (`name="Title"`). Update templates and clients that post
+  the old names. The old `forms.Field` API (`FieldKind`, `Errors()`,
+  `Fields()`, `AddError(string, string)`, `BoundValue` and the widget `Render`
+  methods) is replaced by Django's form, field and widget API.
+- **BREAKING**: `ListView` and `DetailView` use Django's field names:
+  `TemplateName`, `ContextObjectName`, `Queryset` or `GetQueryset`, `PKURLKwarg`
+  and `ExtraContext` or `GetContextData`. A list is in `object_list` and
+  `<model>_list`.
+- **BREAKING**: `QuerySet.Update` no longer sets `auto_now` fields, as Django's
+  `update()`. Use `Save` to set them.
+- **BREAKING**: `startapp <name>` creates `<name>/` instead of `<name>app/`, and
+  `scaffold.Project` takes `scaffold.Options`.
+- A command error prints as `CommandError: ...` without a stack trace. Exit
+  code 1 is a command error and 2 a usage error. The hints of `migrate` and
+  `makemigrations` name the program that runs. `startproject` and `startapp`
+  print nothing at the default verbosity (`-v 2` lists the files), and
+  `djangogo version` prints the bare version.
 
 ### Fixed
 
@@ -76,3 +194,19 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `SetURLResolver`/`URLResolverFunc`) rather than a plainly-mutated package var.
 - The admin no longer runs a full-table foreign-key option query for fields
   excluded from the form.
+- A change in the admin did not update `auto_now` fields and did not send
+  `pre_save` and `post_save`. The change view now saves through `Save`, as
+  Django's `save_model`.
+- Case-insensitive lookups such as `icontains` were case-sensitive on
+  PostgreSQL. They now ignore case on both databases. A `%` or `_` in the value
+  of `contains`, `startswith` or `endswith` matched any character; LIKE
+  wildcards are now escaped.
+- A template that made pongo2 panic now returns an error.
+- A savepoint that was rolled back was not released. It is now released.
+
+### Security
+
+- A value printed in a template through its `String` method was not
+  HTML-escaped. Model instances, the post titles of the example and any other
+  type with a `String` method are now escaped. Mark trusted HTML with
+  `templates.HTMLer` or `html/template.HTML`.

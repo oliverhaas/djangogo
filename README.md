@@ -112,6 +112,12 @@ list and detail pages and the admin together; run it with `go run ./examples/blo
 | `forms`           | Form fields, widgets, and `ModelForm` derived from model metadata.         |
 | `admin`           | The staff-gated admin site with add/change/delete views.                   |
 | `scaffold`        | Project and app scaffolding used by `startproject`/`startapp`.             |
+| `contenttypes`    | Content types of the installed models.                                     |
+| `messages`        | One-time messages for the next page, stored in the session.                |
+| `middleware`      | Host validation, security headers, X-Frame-Options, gzip, error pages.     |
+| `staticfiles`     | Static file finders, `collectstatic`, `findstatic` and debug serving.      |
+| `checks`          | The system check framework behind the `check` command.                     |
+| `djangotest`      | Django's test client, assertions and per-test databases.                   |
 | `fidelity`        | The Django-as-oracle template fidelity harness.                            |
 
 ## Django fidelity
@@ -125,65 +131,76 @@ skipped with a reason; divergences are catalogued in `fidelity/divergences.md`.
 
 ## Known limitations
 
-This is a proof of concept: it implements a vertical slice of Django's developer
-experience, not its full surface area. The notable slimmed or deferred areas are
-below. Where a Django behaviour is matched closely the parity is called out so the
-boundary is clear.
+Djan-Go-Go covers a large part of Django's developer experience, but not all of
+it. The known gaps are below. The template engine's divergences from Django are
+listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
 
-- **Relations:** only forward `FK[T]` is built, now carrying an `on_delete` action
-  (`orm:"on_delete=cascade|set_null|restrict"`, default no action) that is emitted
-  into the FK DDL on both dialects. One-to-one and many-to-many are still modelled
-  with explicit link models, not dedicated `O2O[T]`/`M2M[T]` types. Note that
-  `modernc.org/sqlite` does not enable the `foreign_keys` pragma, so `ON DELETE`
-  (and FK constraints generally) are enforced on PostgreSQL but not on SQLite.
-- **Querying:** `Filter`/`Exclude` support the `exact`, `gt`, `gte`, `lt`, `lte`,
-  `contains`, `icontains`, `startswith`, `endswith`, `in`, and `isnull` lookups,
-  plus `OrderBy`, `Limit`/`Offset`, `Count`, `SelectRelated` (FK join), and
-  `Atomic` transactions with savepoints. Not implemented: aggregation/annotation,
-  `Q`-object `OR` (predicates are combined with `AND`), `prefetch_related` for
-  reverse/M2M sets, and `values()`/`values_list()` projection. `icontains` folds
-  case via SQLite's ASCII-insensitive `LIKE`; on PostgreSQL it renders as a plain
-  case-sensitive `LIKE` rather than `ILIKE`.
-- **Pagination:** the query layer exposes `Limit`/`Offset`, but `ListView` and the
-  admin changelist render every row -- there is no page-number paginator or UI.
-- **Migrations:** generated migration files register via `init()`, so a separate
-  `migrate` process only sees migrations compiled into the binary (rebuild after
-  `makemigrations`); an in-process flow works without a rebuild. The autodetector
-  has no `RenameField` operation: a renamed field is emitted as drop + add, which
-  discards the column's data. `makemigrations` now prints a warning when it spots
-  a likely rename (a removed field and an added field of the same type) so you can
-  edit the migration to preserve the data. There are no data/`RunPython`-style
-  migrations and no interactive prompts.
-- **Admin:** `SearchFields`/`ListFilter`/inlines are not implemented (pagination is
-  covered above). Foreign keys render as a `<select>` of the related rows (with
-  Django's empty `---------` option), but there is no raw-id/autocomplete widget,
-  so the select loads the whole related table. `ReadonlyFields` are omitted from
-  the change form rather than rendered as disabled inputs.
-- **Forms:** a field's `required` is derived from the database `null`, not a
-  separate Django `blank` flag (the two are independent in Django). Rendered HTML
-  input names use the Go struct field name (e.g. `name="Title"`), not Django's
-  lowercase field name.
-- **Templates / URLs:** `{% url %}` takes positional arguments only (no `pk=...`
-  kwargs or `as var` capture), and `Reverse` substitutes them without
-  URL-escaping. The template model context exposes scalar columns under their
-  snake_case names and `{{ obj }}` as `__str__`, but relation fields
-  (`{{ obj.author }}` / `{{ obj.author_id }}`) are not exposed.
-- **ORM fields:** a declared `default=` overrides an explicitly-set Go zero value
-  (Django keeps an explicit zero), and `Update` stamps `auto_now` fields whereas
-  Django's `QuerySet.update()` does not (this ORM has no separate `save()` path).
-- **Auth:** users, groups, and group/user permissions are modelled, and `is_active`
-  is enforced the way Django's `ModelBackend` does -- a deactivated account holds
-  no permissions (not even a superuser) and is treated as anonymous when resolved
-  from the session. Not covered: per-object permissions and automatic permission
-  creation from models. `createsuperuser` prompts once (no re-prompt on an empty or
-  duplicate username), runs no password-strength validation, and reads input
-  line-based (unmasked).
-- **Sessions/CSRF:** unsafe requests are checked for a valid CSRF token and, like
-  Django, for an `Origin` header matching the host (falling back to a strict
-  `Referer` check over HTTPS). The session cookie sets `HttpOnly` and
-  `SameSite=Lax` but not `Secure`; enable `Secure` behind TLS in a real deployment.
-- **Fidelity:** the differential harness covers template rendering only. Query-SQL
-  and migration-SQL differential comparison are future work.
+- **Model fields:** there are no float, decimal, date, duration, file or JSON
+  field kinds, and no one-to-one or many-to-many fields: model these relations
+  with explicit link models. A foreign key can only target an integer primary
+  key. A nullable integer field reads NULL as 0 in a struct (`Values` returns
+  nil), and `Create` stores 0 for an unset one. A declared `default=` replaces an
+  explicit Go zero value, where Django keeps the explicit value. A Go field name
+  that ends in digits snake-cases without an underscore (`Parent1` becomes
+  `parent1`).
+- **Model options:** there is no `Meta` API yet, so no model-level indexes,
+  `unique_together`, default ordering, custom managers, model validators or
+  `full_clean`. The migration operations for indexes and unique-together sets
+  exist, but `makemigrations` does not read them from the models.
+- **Database:** one database per application. SQLite does not enforce foreign
+  keys, because `modernc.org/sqlite` does not enable the `foreign_keys` pragma;
+  PostgreSQL enforces them. Two models with foreign keys to each other cannot be
+  created on PostgreSQL.
+- **Querying:** no transforms (`__date`, `Length`), no `extra()`, no fetch modes
+  and no `select_related()` without arguments. `Raw` leaves the fields missing
+  from a result at their zero value, where Django defers and loads them.
+  Transactions have no `savepoint=False` or `set_rollback`, so on PostgreSQL a
+  failed statement inside `Atomic` aborts the transaction until the block ends.
+  `Pow` returns a float.
+- **Migrations:** generated migration files register through `init()`. A
+  separate `migrate` process sees them only after each `migrations/<app>` package
+  is blank-imported in the main package and the binary is rebuilt;
+  `makemigrations` prints the import line. `makemigrations` cannot write `RunGo`
+  operations: add them by hand, as with Django's `RunPython`. There is no
+  squashing and no `makemigrations --merge`: conflicts are reported only. A change
+  to the type of a primary key does not change the foreign keys that reference
+  it, and PostgreSQL rejects it.
+- **Templates:** the engine is built on pongo2. Missing tags: `regroup`,
+  `querystring`, `debug`, `partialdef`/`partial`, and the `i18n`, `l10n`, `tz` and
+  `cache` libraries. Missing filter: `pprint`. Output is English only. Lists and
+  maps print in Go syntax, not as Python's repr. `{% extends %}` takes only a
+  literal name, and `{% lorem %}` is pongo2's tag.
+- **Forms:** no formsets, file fields, option groups, `MultiValueField` or
+  `SplitDateTimeField`, no localization and no custom renderers. A template
+  cannot loop over a form with `{% for field in form %}`: use `form.fields`.
+  `ModelChoiceField` has no `to_field_name` or `label_from_instance`, and it loads
+  its options once per form, where Django loads them on each render.
+- **Admin:** no search (`SearchFields` is stored but not used), list filters,
+  inlines or changelist pagination. A foreign key renders as a `<select>` of the
+  whole related table, with no raw-id or autocomplete widget. `ReadonlyFields`
+  are left out of the change form instead of shown as read-only values.
+- **Auth:** no custom user model. The login, logout and password change views
+  are mounted by hand: there is no counterpart of `django.contrib.auth.urls`. No
+  `LoginRequiredMiddleware`. A user row that Django wrote with a NULL
+  `last_login` cannot be loaded yet. In templates, `perms` does not grant an
+  active superuser the permissions that are missing from the database, and
+  `user` has no related objects such as groups. `LoginRequired` escapes the
+  slashes of `next` (`%2F`), where Django keeps them.
+- **Sessions and messages:** no cache, cache_db or file session stores. The
+  database store needs a database and the installed `sessions` app; without
+  them, sessions use signed cookies. Messages use the session only: no cookie or
+  fallback storage and no safe messages. A message added after the response
+  headers are written is lost, and reading `messages` in a template, also in
+  `{% if messages %}`, marks them as read.
+- **contenttypes:** no `GenericForeignKey` and no removal of stale content types.
+- **Commands:** `runserver` has no autoreload, and `shell` is a query shell over
+  the models, not a Go REPL. `collectstatic` has no `--link` and no
+  post-processing (manifest or hashed names). `startproject` and `startapp` have
+  no `--template`, `--extension`, `--name` or `--exclude`. `createsuperuser`
+  does not suggest the system user name as the default, and it reads answers line
+  by line when stdin is not a terminal.
+- **Fidelity:** the differential harness compares template output only. The
+  query SQL and the migration SQL are not compared with Django's.
 
 ## Testing
 
