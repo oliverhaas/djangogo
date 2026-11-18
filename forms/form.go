@@ -65,6 +65,8 @@ type Form struct {
 
 	names  []string
 	fields map[string]Field
+	// boundFields caches the bound fields, as Django's _bound_fields_cache.
+	boundFields map[string]*BoundField
 
 	bound   bool
 	data    url.Values
@@ -101,6 +103,7 @@ func (f *Form) AddField(name string, field Field) {
 		f.names = append(f.names, name)
 	}
 	f.fields[name] = field
+	delete(f.boundFields, name)
 }
 
 // RemoveField drops a field from the form.
@@ -109,6 +112,7 @@ func (f *Form) RemoveField(name string) {
 		return
 	}
 	delete(f.fields, name)
+	delete(f.boundFields, name)
 	for i, n := range f.names {
 		if n == name {
 			f.names = append(f.names[:i:i], f.names[i+1:]...)
@@ -160,7 +164,7 @@ func (f *Form) clone() *Form {
 	}
 	c.cleaners = slices.Clone(f.cleaners)
 	c.postCleaners = slices.Clone(f.postCleaners)
-	c.errors, c.cleaned = nil, nil
+	c.errors, c.cleaned, c.boundFields = nil, nil, nil
 	return &c
 }
 
@@ -224,6 +228,7 @@ func (f *Form) resolve() {
 			continue
 		}
 		f.fields[name] = field
+		delete(f.boundFields, name)
 	}
 }
 
@@ -405,11 +410,19 @@ func (f *Form) HasChanged() bool { return len(f.ChangedData()) > 0 }
 // returns nil for an unknown name.
 func (f *Form) Field(name string) *BoundField {
 	f.resolve()
+	if bf, ok := f.boundFields[name]; ok {
+		return bf
+	}
 	field, ok := f.fields[name]
 	if !ok {
 		return nil
 	}
-	return &BoundField{Name: name, form: f, field: field}
+	bf := &BoundField{Name: name, form: f, field: field}
+	if f.boundFields == nil {
+		f.boundFields = map[string]*BoundField{}
+	}
+	f.boundFields[name] = bf
+	return bf
 }
 
 // Fields returns the bound fields in order, what iterating a Django form

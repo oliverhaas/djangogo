@@ -164,6 +164,20 @@ func (widgetDefaults) IsHidden() bool { return false }
 // UseFieldset reports false.
 func (widgetDefaults) UseFieldset() bool { return false }
 
+// SupportsMicroseconds reports true: the widget shows the fraction of a
+// second of an initial time.
+func (widgetDefaults) SupportsMicroseconds() bool { return true }
+
+// supportsMicroseconds reports whether w shows the fraction of a second of an
+// initial time, Django's Widget.supports_microseconds. A widget without the
+// SupportsMicroseconds method does.
+func supportsMicroseconds(w Widget) bool {
+	if s, ok := w.(interface{ SupportsMicroseconds() bool }); ok {
+		return s.SupportsMicroseconds()
+	}
+	return true
+}
+
 // TextInput is <input type="text">.
 type TextInput struct {
 	widgetDefaults
@@ -298,6 +312,9 @@ func (w DateInput) Render(name string, value any, attrs Attrs) string {
 // Attributes implements Widget.
 func (w DateInput) Attributes() Attrs { return w.Attrs }
 
+// SupportsMicroseconds reports false: the widget shows whole seconds.
+func (DateInput) SupportsMicroseconds() bool { return false }
+
 // DateTimeInput is a text input showing a date and time, by default as
 // 2006-01-02 15:04:05.
 type DateTimeInput struct {
@@ -316,6 +333,9 @@ func (w DateTimeInput) Render(name string, value any, attrs Attrs) string {
 // Attributes implements Widget.
 func (w DateTimeInput) Attributes() Attrs { return w.Attrs }
 
+// SupportsMicroseconds reports false: the widget shows whole seconds.
+func (DateTimeInput) SupportsMicroseconds() bool { return false }
+
 // TimeInput is a text input showing a time of day, by default as 15:04:05.
 type TimeInput struct {
 	widgetDefaults
@@ -332,6 +352,9 @@ func (w TimeInput) Render(name string, value any, attrs Attrs) string {
 
 // Attributes implements Widget.
 func (w TimeInput) Attributes() Attrs { return w.Attrs }
+
+// SupportsMicroseconds reports false: the widget shows whole seconds.
+func (TimeInput) SupportsMicroseconds() bool { return false }
 
 // Textarea is <textarea>, 40 columns by 10 rows unless Attrs say otherwise.
 type Textarea struct {

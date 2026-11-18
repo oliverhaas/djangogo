@@ -14,6 +14,9 @@ type BoundField struct {
 
 	form  *Form
 	field Field
+
+	initial    any
+	hasInitial bool
 }
 
 // Field returns the field definition.
@@ -88,8 +91,12 @@ func (bf *BoundField) Data() any {
 }
 
 // Initial returns the initial value of the field: the form's entry or the
-// field's own. A func() any is called.
+// field's own. A func() any is called once; the result is kept, as Django's
+// cached BoundField.initial.
 func (bf *BoundField) Initial() any {
+	if bf.hasInitial {
+		return bf.initial
+	}
 	value, ok := bf.form.Initial[bf.Name]
 	if !ok {
 		value = bf.field.Base().Initial
@@ -97,11 +104,12 @@ func (bf *BoundField) Initial() any {
 	if fn, ok := value.(func() any); ok {
 		value = fn()
 	}
-	// A widget shows whole seconds, so a fraction would make an unchanged
-	// value look changed.
-	if t, ok := value.(time.Time); ok {
+	// A date or time widget shows whole seconds, so a fraction would make an
+	// unchanged value look changed.
+	if t, ok := value.(time.Time); ok && !supportsMicroseconds(bf.field.Base().Widget) {
 		value = t.Truncate(time.Second)
 	}
+	bf.initial, bf.hasInitial = value, true
 	return value
 }
 
@@ -230,7 +238,7 @@ func (bf *BoundField) LabelTagWith(contents string, attrs Attrs, suffix *string,
 		return contents
 	}
 	tagAttrs := mergeAttrs(attrs)
-	if forID := bf.field.Base().Widget.IDForLabel(id); forID != "" {
+	if forID := bf.field.Base().Widget.IDForLabel(id); forID != "" && tag != "legend" {
 		tagAttrs["for"] = forID
 	}
 	if bf.field.Base().Required && bf.form.RequiredCSSClass != "" {
