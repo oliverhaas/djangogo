@@ -1,4 +1,3 @@
-// runserver_test.go
 package djangogo
 
 import (

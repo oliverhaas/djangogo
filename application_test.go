@@ -1,4 +1,3 @@
-// application_test.go
 package djangogo
 
 import (
@@ -98,8 +97,13 @@ func TestExecuteRunsCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	var buf bytes.Buffer
+	app.Out = &buf
 	if err := app.Execute([]string{"version"}); err != nil {
 		t.Errorf("Execute(version): %v", err)
+	}
+	if buf.String() == "" {
+		t.Error("version printed nothing to Out")
 	}
 }
 
@@ -160,9 +164,12 @@ func (wiredApp) RegisterAdmin(site *admin.AdminSite) {
 }
 
 func TestNewBuildsWiredHandler(t *testing.T) {
+	// httptest requests carry the host example.com, which the AllowedHosts
+	// middleware rejects unless it is allowed.
 	app, err := New(conf.Settings{
-		SecretKey: "k",
-		Database:  conf.Database{Driver: "sqlite", DSN: "file:wiredhandler?mode=memory&cache=shared"},
+		SecretKey:    "k",
+		AllowedHosts: []string{"example.com"},
+		Database:     conf.Database{Driver: "sqlite", DSN: "file:wiredhandler?mode=memory&cache=shared"},
 	}, wiredApp{}, auth.App{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -193,7 +200,7 @@ func TestNewBuildsWiredHandler(t *testing.T) {
 func TestNewWithoutURLProviderUsesLivenessHandler(t *testing.T) {
 	// testApp provides models but neither URLs nor an admin registration, so the
 	// handler falls back to the liveness stub.
-	app, err := New(conf.Settings{SecretKey: "k"}, testApp{name: "blog"})
+	app, err := New(conf.Settings{SecretKey: "k", AllowedHosts: []string{"example.com"}}, testApp{name: "blog"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

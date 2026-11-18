@@ -1,4 +1,3 @@
-// apps/registry_test.go
 package apps
 
 import "testing"

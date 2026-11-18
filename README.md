@@ -239,7 +239,7 @@ func TestCreatePost(t *testing.T) {
 
 `EachDB` always runs on SQLite. It also runs on PostgreSQL when
 `DJANGOGO_TEST_POSTGRES_DSN` is set. Each run gets its own database or schema,
-so tests may run in parallel.
+so tests can run in parallel.
 
 Django's test methods become plain Go test functions:
 

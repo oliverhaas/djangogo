@@ -117,7 +117,7 @@ func (c *changepasswordCommand) promptPassword(u *auth.User) (string, error) {
 		}
 		var perrs auth.PasswordErrors
 		if err := auth.ValidatePassword(p2, u, nil); errors.As(err, &perrs) {
-			_, _ = fmt.Fprintln(errWriter(c.stderr), strings.Join(perrs.Messages(), "\n"))
+			_, _ = fmt.Fprintln(stderrOr(c.stderr), strings.Join(perrs.Messages(), "\n"))
 			count++
 			continue
 		} else if err != nil {

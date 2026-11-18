@@ -1,0 +1,13 @@
+package [[.AppName]]
+
+import "github.com/oliverhaas/djangogo/urls"
+
+// URLs returns the routes of the app under /[[.AppName]]/, Django's
+// path("[[.AppName]]/", include("[[.AppName]].urls")). Templates reverse them
+// as "[[.AppName]]:post_list" and "[[.AppName]]:post_detail".
+func (a *App) URLs() []urls.Route {
+	return urls.Include("[[.AppName]]/", "[[.AppName]]",
+		urls.Path("GET /{$}", a.postList(), "post_list"),
+		urls.Path("GET /{pk}/{$}", a.postDetail(), "post_detail"),
+	)
+}

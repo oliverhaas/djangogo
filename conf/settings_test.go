@@ -1,41 +1,54 @@
-// conf/settings_test.go
-package conf
+package conf_test
 
-import "testing"
+import (
+	"testing"
+	"time"
 
-func TestSettingsApplyDefaults(t *testing.T) {
-	s := Settings{SecretKey: "x"}
-	s.applyDefaults()
+	"github.com/oliverhaas/djangogo/conf"
+	"github.com/oliverhaas/djangogo/djangotest"
+)
 
-	if s.Host != "127.0.0.1" {
-		t.Errorf("Host = %q, want 127.0.0.1", s.Host)
-	}
-	if s.Port != "8000" {
-		t.Errorf("Port = %q, want 8000", s.Port)
-	}
-	if len(s.AllowedHosts) == 0 {
-		t.Error("AllowedHosts should default to a non-empty list")
-	}
-	if s.Database.Driver != "sqlite" {
-		t.Errorf("Database.Driver = %q, want sqlite", s.Database.Driver)
-	}
+// Configure completes the settings and makes them the ones Active returns.
+func TestConfigureReturnsTheActiveSettings(t *testing.T) {
+	got := activate(t, conf.Settings{SecretKey: "k"})
+
+	djangotest.AssertEqual(t, conf.Active() == got, true)
+	djangotest.AssertEqual(t, got.SecretKey, "k")
+	// Configure completes the literal.
+	djangotest.AssertEqual(t, got.Host, "127.0.0.1")
+	djangotest.AssertEqual(t, got.Port, "8000")
+	djangotest.AssertEqual(t, len(got.AllowedHosts), 0)
 }
 
-func TestSettingsCheck(t *testing.T) {
-	if err := (&Settings{SecretKey: "set"}).Check(); err != nil {
-		t.Errorf("valid settings returned error: %v", err)
-	}
-	if err := (&Settings{}).Check(); err == nil {
-		t.Error("missing SecretKey should be an error")
-	}
+// DefaultDatabase also answers for settings that were not completed yet.
+func TestDefaultDatabaseOfALiteral(t *testing.T) {
+	var (
+		pg   = conf.Database{Driver: conf.DriverPostgres, DSN: "postgres://db.example/app"}
+		lite = conf.Database{Driver: conf.DriverSQLite, DSN: "app.db"}
+	)
+	field := conf.Settings{Database: lite}
+	djangotest.AssertEqual(t, field.DefaultDatabase(), lite)
+
+	alias := conf.Settings{Database: lite, Databases: map[string]conf.Database{"default": pg}}
+	djangotest.AssertEqual(t, alias.DefaultDatabase(), pg)
+
+	other := conf.Settings{Database: lite, Databases: map[string]conf.Database{"replica": pg}}
+	djangotest.AssertEqual(t, other.DefaultDatabase(), lite)
 }
 
-func TestConfigureAndActive(t *testing.T) {
-	got := Configure(Settings{SecretKey: "k"})
-	if got.Host != "127.0.0.1" {
-		t.Errorf("Configure should apply defaults; Host = %q", got.Host)
+// Location loads the zone that TimeZone names; no name is UTC.
+func TestLocation(t *testing.T) {
+	unset := conf.Settings{}
+	loc, err := unset.Location()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if Active() != got {
-		t.Error("Active() should return the configured settings")
+	djangotest.AssertEqual(t, loc, time.UTC)
+
+	berlin := conf.Settings{TimeZone: "Europe/Berlin"}
+	loc, err = berlin.Location()
+	if err != nil {
+		t.Fatal(err)
 	}
+	djangotest.AssertEqual(t, loc.String(), "Europe/Berlin")
 }

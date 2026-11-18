@@ -1,39 +1,54 @@
-# Release workflow -- ships DORMANT (every line commented out).
+# Release workflow.
 #
-# Go libraries are "released" simply by pushing a semver tag (vX.Y.Z): the Go
-# module proxy serves it automatically, no registry upload needed. This workflow
-# adds a test gate and a GitHub Release on tag. Uncomment when ready to cut v0.1.0.
-# For shipping `djangogo` CLI binaries too, add goreleaser (https://goreleaser.com).
-#
-# name: Release
-#
-# on:
-#   push:
-#     tags: ["v*"]
-#
-# permissions:
-#   contents: write
-#
-# jobs:
-#   test:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v6
-#       - uses: actions/setup-go@v6
-#         with:
-#           go-version-file: go.mod
-#       - run: go build ./...
-#       - run: go vet ./...
-#       - run: go test -race ./...
-#
-#   release:
-#     needs: [test]
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v6
-#         with:
-#           fetch-depth: 0
-#       - name: Create GitHub release
-#         run: gh release create "${GITHUB_REF_NAME}" --generate-notes
-#         env:
-#           GH_TOKEN: ${{ github.token }}
+# Go modules are published by the version tag itself: pushing vX.Y.Z makes the
+# module proxy serve it, no registry upload needed. This workflow adds a test
+# gate (including the PostgreSQL tests) and a GitHub release for the tag.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: djangogo
+          POSTGRES_PASSWORD: djangogo
+          POSTGRES_DB: djangogo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U djangogo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DJANGOGO_TEST_POSTGRES_DSN: postgres://djangogo:djangogo@localhost:5432/djangogo?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  release:
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag

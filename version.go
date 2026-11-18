@@ -2,18 +2,25 @@ package djangogo
 
 import (
 	"fmt"
-	"io"
 )
 
-// versionCommand prints the framework version.
+// versionCommand prints the framework version, as "manage.py version" and
+// "--version" print Django's.
 type versionCommand struct {
-	out io.Writer
+	app *Application
 }
 
-func (versionCommand) Name() string { return "version" }
-func (versionCommand) Help() string { return "Print the Djan-Go-Go version" }
+// Name returns the command name.
+func (*versionCommand) Name() string { return "version" }
 
-func (c versionCommand) Run(_ []string) error {
-	_, _ = fmt.Fprintf(c.out, "djangogo %s\n", Version)
+// Help returns the help text.
+func (*versionCommand) Help() string { return "Prints the Djan-Go-Go version." }
+
+// SkipSystemChecks reports that version runs no checks first.
+func (*versionCommand) SkipSystemChecks() bool { return true }
+
+// Run prints the version.
+func (c *versionCommand) Run(_ []string) error {
+	_, _ = fmt.Fprintln(c.app.out(), Version)
 	return nil
 }

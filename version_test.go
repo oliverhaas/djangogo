@@ -1,23 +1,27 @@
-// version_test.go
 package djangogo
 
 import (
 	"bytes"
-	"strings"
 	"testing"
+
+	"github.com/oliverhaas/djangogo/conf"
 )
 
+// TestVersionCommand checks that the version command and --version print the
+// same line: the bare version, as Django's do.
 func TestVersionCommand(t *testing.T) {
-	var buf bytes.Buffer
-	cmd := versionCommand{out: &buf}
-
-	if cmd.Name() != "version" {
-		t.Errorf("Name() = %q", cmd.Name())
+	app, err := New(conf.Settings{SecretKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
-	if err := cmd.Run(nil); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if !strings.Contains(buf.String(), Version) {
-		t.Errorf("output %q does not contain version %q", buf.String(), Version)
+	for _, args := range [][]string{{"version"}, {"--version"}} {
+		var buf bytes.Buffer
+		app.Out = &buf
+		if code := app.Run(args); code != 0 {
+			t.Fatalf("Run(%v) = %d, want 0", args, code)
+		}
+		if got, want := buf.String(), Version+"\n"; got != want {
+			t.Errorf("Run(%v) printed %q, want %q", args, got, want)
+		}
 	}
 }

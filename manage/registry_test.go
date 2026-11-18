@@ -1,4 +1,3 @@
-// manage/registry_test.go
 package manage
 
 import (
@@ -7,6 +6,8 @@ import (
 	"testing"
 )
 
+// fakeCmd records its runs; it implements none of the optional interfaces,
+// so its arguments reach it unparsed.
 type fakeCmd struct {
 	name string
 	ran  *[]string
@@ -19,6 +20,8 @@ func (c fakeCmd) Run(args []string) error {
 	return nil
 }
 
+// TestExecuteDispatches: a command without Flags gets its arguments as they
+// are on the command line.
 func TestExecuteDispatches(t *testing.T) {
 	var ran []string
 	r := NewRegistry()
@@ -34,6 +37,7 @@ func TestExecuteDispatches(t *testing.T) {
 	}
 }
 
+// TestExecuteUnknown: a name that is not registered is an error.
 func TestExecuteUnknown(t *testing.T) {
 	r := NewRegistry()
 	if err := r.Execute([]string{"nope"}); err == nil {
@@ -41,6 +45,8 @@ func TestExecuteUnknown(t *testing.T) {
 	}
 }
 
+// TestExecuteNoArgsPrintsUsage: without arguments Execute prints the main
+// help, which names the commands, and returns nil.
 func TestExecuteNoArgsPrintsUsage(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewRegistry()

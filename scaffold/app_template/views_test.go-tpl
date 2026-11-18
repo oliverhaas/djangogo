@@ -1,0 +1,65 @@
+package [[.AppName]]
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"path/filepath"
+	"testing"
+
+	"github.com/oliverhaas/djangogo"
+	"github.com/oliverhaas/djangogo/conf"
+	"github.com/oliverhaas/djangogo/djangotest"
+	"github.com/oliverhaas/djangogo/orm"
+)
+
+// newApp returns an application with this app over a new SQLite database
+// that has the tables of the models.
+func newApp(t *testing.T) *djangogo.Application {
+	t.Helper()
+	s := conf.Defaults()
+	s.SecretKey = "test"
+	s.AllowedHosts = []string{djangotest.DefaultHost}
+	s.Database = conf.Database{Driver: conf.DriverSQLite, DSN: filepath.Join(t.TempDir(), "test.sqlite3")}
+	app, err := djangogo.New(s, &App{})
+	if err != nil {
+		t.Fatalf("djangogo.New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+	for _, m := range app.Models.Models() {
+		if err := app.DB.CreateTable(context.Background(), m); err != nil {
+			t.Fatalf("create the table of %s: %v", m.Name(), err)
+		}
+	}
+	return app
+}
+
+// createPost saves p and returns it with its primary key.
+func createPost(t *testing.T, app *djangogo.Application, p Post) Post {
+	t.Helper()
+	if err := orm.Query[Post](app.DB).Create(context.Background(), &p); err != nil {
+		t.Fatalf("create the post %q: %v", p.Title, err)
+	}
+	return p
+}
+
+// TestPostList shows the published posts and hides the drafts.
+func TestPostList(t *testing.T) {
+	app := newApp(t)
+	createPost(t, app, Post{Title: "Hello, world", Published: true})
+	createPost(t, app, Post{Title: "A draft"})
+
+	resp := djangotest.NewClient(t, app.Handler).Get("/[[.AppName]]/")
+	djangotest.AssertContains(t, resp, "Hello, world")
+	djangotest.AssertNotContains(t, resp, "A draft")
+}
+
+// TestPostDetail shows a post and answers 404 for a missing one.
+func TestPostDetail(t *testing.T) {
+	app := newApp(t)
+	post := createPost(t, app, Post{Title: "Hello, world", Body: "The first post.", Published: true})
+
+	client := djangotest.NewClient(t, app.Handler)
+	djangotest.AssertContains(t, client.Get(fmt.Sprintf("/[[.AppName]]/%d/", post.ID)), "The first post.")
+	djangotest.AssertStatus(t, client.Get("/[[.AppName]]/999/"), http.StatusNotFound)
+}

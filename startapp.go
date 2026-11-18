@@ -1,31 +1,43 @@
 package djangogo
 
 import (
-	"errors"
-	"fmt"
-	"io"
+	"flag"
 
 	"github.com/oliverhaas/djangogo/scaffold"
 )
 
-// startappCommand generates an app package skeleton in the current module.
+// startappCommand creates an app, Django's startapp.
 type startappCommand struct {
-	out io.Writer
+	app       *Application
+	verbosity verbosityValue
 }
 
+// Name returns the command name.
 func (*startappCommand) Name() string { return "startapp" }
-func (*startappCommand) Help() string { return "Generate a new app package skeleton" }
 
-// Run scaffolds an app package into ./<name>app (or ./<name> when name already
-// ends in "app") within the current module.
+// Help returns Django's help text.
+func (*startappCommand) Help() string {
+	return "Creates a Djan-Go-Go app directory structure for the given app name in the " +
+		"current directory or optionally in the given directory."
+}
+
+// Usage returns the positional arguments.
+func (*startappCommand) Usage() string { return "name [directory]" }
+
+// Flags declares --verbosity.
+func (c *startappCommand) Flags(fs *flag.FlagSet) {
+	c.verbosity = 1
+	c.verbosity.declare(fs)
+}
+
+// Run creates the app named by the first argument in the directory of the
+// second, or in a new directory of that name. The name is the package and
+// the label of the app; install it by passing its App to djangogo.New.
 func (c *startappCommand) Run(args []string) error {
-	if len(args) < 1 || args[0] == "" {
-		return errors.New("startapp: usage: startapp <name>")
-	}
-	name := args[0]
-	if err := scaffold.App(".", name, ""); err != nil {
+	t := templateCommand{app: c.app, kind: "app", verbosity: c.verbosity}
+	top, err := t.prepare(args, "You must provide an application name.")
+	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(c.out, "Created app %q\n", name)
-	return nil
+	return t.result(scaffold.App(top, args[0], scaffold.Options{Created: t.created}))
 }

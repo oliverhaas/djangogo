@@ -70,7 +70,7 @@ with `python3 fidelity/oracle/render.py`.
   drops.
 - `truncatechars_html` and `truncatewords_html` find tags with a regular
   expression where Django uses `HTMLParser`. Well-formed markup gives the same
-  result; malformed markup may not.
+  result; malformed markup can give a different result.
 - Only English output: `date`, `timesince`, `filesizeformat`, `pluralize` and
   `yesno` are not localized.
 

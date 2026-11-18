@@ -390,11 +390,11 @@ func commandPrompts(app *Application, input, getpass func(string) (string, error
 
 // printErr writes msg and a line break to the command's error output.
 func (c *createsuperuserCommand) printErr(msg string) {
-	_, _ = fmt.Fprintln(errWriter(c.stderr), msg)
+	_, _ = fmt.Fprintln(stderrOr(c.stderr), msg)
 }
 
-// errWriter returns w, or os.Stderr when w is nil.
-func errWriter(w io.Writer) io.Writer {
+// stderrOr returns w, or os.Stderr when w is nil.
+func stderrOr(w io.Writer) io.Writer {
 	if w != nil {
 		return w
 	}
