@@ -87,6 +87,21 @@ type Field struct {
 	// Choices restricts a KindChar field to a fixed (value, label) set; it is nil
 	// when the field is unconstrained.
 	Choices []Choice
+	// Blank reports whether the field may be left empty in a form (Django's
+	// blank=True). It is a validation-level flag, independent of Null, which is
+	// the database-level one.
+	Blank bool
+	// Editable reports whether the field appears in a ModelForm and the admin
+	// (Django's editable). It defaults to true; an editable=false tag and the
+	// auto_now/auto_now_add options clear it.
+	Editable bool
+	// VerboseName is the human-readable field name (Django's verbose_name), or ""
+	// to derive one from Attr.
+	VerboseName string
+	// HelpText is descriptive text shown beside the field's form widget.
+	HelpText string
+	// DBIndex requests a single-column database index (Django's db_index=True).
+	DBIndex bool
 }
 
 // timeType is the reflect.Type for time.Time, used for KindDateTime inference.
@@ -107,10 +122,11 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 
 	// Step 2: infer Kind from the Go type.
 	f := &Field{
-		Name:   sf.Name,
-		Attr:   toSnakeCase(sf.Name),
-		Column: toSnakeCase(sf.Name),
-		Index:  index,
+		Name:     sf.Name,
+		Attr:     toSnakeCase(sf.Name),
+		Column:   toSnakeCase(sf.Name),
+		Index:    index,
+		Editable: true,
 	}
 
 	// Relation fields (e.g. FK[T]) are detected before the scalar type switch.
@@ -175,6 +191,12 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 	if f.AutoNow && f.AutoNowAdd {
 		return nil, false, fmt.Errorf("orm: field %s: auto_now and auto_now_add are mutually exclusive", sf.Name)
 	}
+	// Django marks auto-stamped fields editable=False (and blank=True): the ORM
+	// owns their value, so a form must neither show nor require them.
+	if f.AutoNow || f.AutoNowAdd {
+		f.Editable = false
+		f.Blank = true
+	}
 
 	return f, true, nil
 }
@@ -198,27 +220,54 @@ func toSnakeCase(s string) string {
 	return b.String()
 }
 
-// applyTagOption applies a single parsed tag token to the field.
-func applyTagOption(f *Field, fieldName, token string) error {
+// applyCommonTagOption applies a tag token that is valid on both scalar and
+// relation fields. It reports whether it recognized the token.
+func applyCommonTagOption(f *Field, fieldName, token string) (bool, error) {
 	switch {
-	case token == "pk":
-		f.PrimaryKey = true
 	case token == "null":
 		f.Null = true
 	case token == "unique":
 		f.Unique = true
+	case token == "blank":
+		f.Blank = true
+	case token == "index":
+		f.DBIndex = true
+	case token == "editable=false":
+		f.Editable = false
+	case token == "editable=true":
+		f.Editable = true
+	case strings.HasPrefix(token, "editable="):
+		return true, fmt.Errorf("orm: field %s: invalid %q: editable must be true or false", fieldName, token)
+	case strings.HasPrefix(token, "verbose_name="):
+		f.VerboseName = token[len("verbose_name="):]
+	case strings.HasPrefix(token, "help_text="):
+		f.HelpText = token[len("help_text="):]
+	case strings.HasPrefix(token, "column="):
+		name := token[len("column="):]
+		if name == "" {
+			return true, fmt.Errorf("orm: field %s: column name must not be empty", fieldName)
+		}
+		f.Column = name
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// applyTagOption applies a single parsed tag token to the field.
+func applyTagOption(f *Field, fieldName, token string) error {
+	if handled, err := applyCommonTagOption(f, fieldName, token); handled || err != nil {
+		return err
+	}
+	switch {
+	case token == "pk":
+		f.PrimaryKey = true
 	case token == "type=text":
 		if f.Kind != KindChar {
 			return fmt.Errorf("orm: field %s: type=text is only valid for string fields", fieldName)
 		}
 		f.Kind = KindText
 		f.MaxLength = 0
-	case strings.HasPrefix(token, "column="):
-		name := token[len("column="):]
-		if name == "" {
-			return fmt.Errorf("orm: field %s: column name must not be empty", fieldName)
-		}
-		f.Column = name
 	case strings.HasPrefix(token, "max_length="):
 		raw := token[len("max_length="):]
 		n, err := strconv.Atoi(raw)
@@ -280,20 +329,14 @@ func parseDefault(kind Kind, raw string) (any, error) {
 }
 
 // applyRelationTagOption applies a single parsed tag token to a relation field.
-// A relation field accepts null, unique, and column= but rejects scalar-only
-// options such as max_length, type=text, and pk.
+// A relation field accepts the common options (null, unique, blank, index,
+// editable=, verbose_name=, help_text=, column=) and on_delete=, but rejects
+// scalar-only options such as max_length, type=text, and pk.
 func applyRelationTagOption(f *Field, fieldName, token string) error {
+	if handled, err := applyCommonTagOption(f, fieldName, token); handled || err != nil {
+		return err
+	}
 	switch {
-	case token == "null":
-		f.Null = true
-	case token == "unique":
-		f.Unique = true
-	case strings.HasPrefix(token, "column="):
-		name := token[len("column="):]
-		if name == "" {
-			return fmt.Errorf("orm: field %s: column name must not be empty", fieldName)
-		}
-		f.Column = name
 	case strings.HasPrefix(token, "on_delete="):
 		od, err := ParseOnDelete(token[len("on_delete="):])
 		if err != nil {
