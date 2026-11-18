@@ -185,6 +185,9 @@ type predicate struct {
 	// empty reports that the predicate can match no row: an "in" lookup with
 	// no values, or a lookup against a queryset that is known to be empty.
 	empty bool
+	// null reports that the values of an "in" lookup held a nil. The list
+	// leaves it out, because NULL equals nothing.
+	null bool
 }
 
 // containsAggregate reports whether either side references an aggregate.
@@ -374,9 +377,11 @@ func (c *compiler) buildIn(p *predicate, field *Field, value any) error {
 		if err != nil {
 			return err
 		}
-		if n != nil {
-			p.rhs = append(p.rhs, n)
+		if n == nil {
+			p.null = true
+			continue
 		}
+		p.rhs = append(p.rhs, n)
 	}
 	p.empty = len(p.rhs) == 0
 	return nil

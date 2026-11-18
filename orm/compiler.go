@@ -52,6 +52,8 @@ func (q *query) compile() (*compiler, error) {
 	if err := c.addFilters(); err != nil {
 		return nil, err
 	}
+	// A limit of zero rows matches nothing, whatever the filters say.
+	c.empty = c.empty || q.limit == 0
 	return c, nil
 }
 

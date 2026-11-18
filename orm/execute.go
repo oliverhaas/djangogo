@@ -87,10 +87,21 @@ func (qs *QuerySet[T]) AllAnnotated(ctx context.Context) ([]Annotated[T], error)
 // Get returns the single row matching the queryset, with any arguments
 // applied as additional Filter conditions. It returns ErrDoesNotExist when no
 // row matches and ErrMultipleObjectsReturned when more than one does.
+//
+// The ordering of the queryset is dropped, as Django's get() drops it: the
+// order of at most one row does not matter. A queryset with a limit or an
+// offset keeps it, because there it decides which rows are looked at.
 func (qs *QuerySet[T]) Get(ctx context.Context, args ...any) (T, error) {
 	var zero T
+	matching := qs.Filter(args...)
+	if !matching.q.sliced() {
+		matching = matching.OrderBy()
+	}
 	// Two rows are enough to tell "several" from "one".
-	rows, err := qs.Filter(args...).Limit(2).All(ctx)
+	if matching.q.limit < 0 || matching.q.limit > 2 {
+		matching = matching.Limit(2)
+	}
+	rows, err := matching.All(ctx)
 	if err != nil {
 		return zero, err
 	}

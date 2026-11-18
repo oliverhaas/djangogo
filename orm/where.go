@@ -45,8 +45,12 @@ func (n *whereNode) empty() bool { return n == nil || len(n.children) == 0 }
 // query and reports what is then known about the node itself. A conjunction
 // matches nothing as soon as one child does and everything when all children
 // do; a disjunction is the mirror image, and a negation swaps the two
-// outcomes. It ports the counting of Django's WhereNode.as_sql.
+// outcomes. A node without children restricts nothing, negated or not. It
+// ports the counting of Django's WhereNode.as_sql.
 func (n *whereNode) simplify() matchKind {
+	if len(n.children) == 0 {
+		return matchAll
+	}
 	fullNeeded, emptyNeeded := len(n.children), 1
 	if n.conn == connOr {
 		fullNeeded, emptyNeeded = 1, len(n.children)
@@ -256,7 +260,8 @@ func (c *compiler) addQ(cond Cond, currentNegated bool) (*whereNode, []*join, er
 // test under a negation, since NOT must also keep the rows without a related
 // row. A negated test on a column that can be NULL also gets "AND col IS NOT
 // NULL", so that NOT turns the SQL unknown of a NULL comparison into a match,
-// as Django's exclude() does.
+// as Django's exclude() does. A negated "in" whose values hold a nil gets "OR
+// col IS NULL" instead, so that the nil excludes the rows that hold NULL.
 func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whereNode, []*join, error) {
 	parts := strings.Split(key, lookupSep)
 	c.used = c.used[:0]
@@ -304,7 +309,12 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 	if currentNegated && (!isNull || !pred.flag) {
 		requireOuter = true
 		if !isNull {
-			if path.field.Null || col.join.outer {
+			nullable := path.field.Null || col.join.outer
+			if nullable && pred.null {
+				orNull := &predicate{lookup: lookupIsNull, lhs: col, flag: true}
+				return &whereNode{conn: connOr, children: []whereChild{{pred: pred}, {pred: orNull}}}, nil, nil
+			}
+			if nullable {
 				node.children = append(node.children, whereChild{pred: &predicate{lookup: lookupIsNull, lhs: col}})
 			}
 			if len(pred.rhs) == 1 {
