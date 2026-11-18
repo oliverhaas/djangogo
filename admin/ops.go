@@ -66,20 +66,14 @@ func buildOps[T any](db *orm.DB, m *orm.Model) modelOps {
 		},
 
 		update: func(ctx context.Context, pk int64, obj any) error {
-			elem := reflect.ValueOf(obj).Elem()
-			pkField := m.PrimaryKey()
-			assignments := make([]any, 0, len(m.Fields())*2)
-			for _, f := range m.Fields() {
-				// Skip the auto primary key: it is never updated.
-				if pkField != nil && f == pkField && f.Kind == orm.KindAuto {
-					continue
+			// Django's ModelAdmin.save_model calls obj.save(): auto_now
+			// fields are stamped and the save signals fire.
+			if pkField := m.PrimaryKey(); pkField != nil {
+				if f := reflect.ValueOf(obj).Elem().Field(pkField.Index); f.CanInt() {
+					f.SetInt(pk)
 				}
-				// FK fields are orm.FK[..] values (driver.Valuer); passing
-				// them as-is binds the related PK. Scalars pass directly.
-				assignments = append(assignments, f.Column, elem.Field(f.Index).Interface())
 			}
-			_, err := orm.Query[T](db).Filter("id", pk).Update(ctx, assignments...)
-			return err
+			return orm.Query[T](db).Save(ctx, obj.(*T))
 		},
 
 		del: func(ctx context.Context, pk int64) error {

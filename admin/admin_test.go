@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/auth"
@@ -473,6 +474,67 @@ func TestOpsUpdate(t *testing.T) {
 	}
 	if got.Title != "Updated" || got.Views != 999 {
 		t.Errorf("after update = {Title:%q Views:%d}, want {Updated 999}", got.Title, got.Views)
+	}
+}
+
+// StampedNote has an auto_now field, which a change in the admin stamps.
+type StampedNote struct {
+	ID      int64
+	Text    string    `orm:"max_length=50"`
+	Updated time.Time `orm:"auto_now"`
+}
+
+// TestOpsUpdateSavesTheObject saves a change as Django's save_model does with
+// obj.save(): the auto_now field is stamped and post_save fires. The object of
+// the form gets the primary key of the row it changes.
+func TestOpsUpdateSavesTheObject(t *testing.T) {
+	ctx := context.Background()
+	reg := orm.NewRegistry()
+	if _, err := reg.Register(&StampedNote{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := reg.Resolve(); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	reg.Freeze()
+	sdb, err := sqlite.Open("file:" + t.Name() + "?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = sdb.Close() })
+	db := orm.NewDB(sdb, sqlite.New(), reg)
+	model, _ := reg.Get("StampedNote")
+	if err := db.CreateTable(ctx, model); err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	note := StampedNote{Text: "a"}
+	if err := orm.Query[StampedNote](db).Create(ctx, &note); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	saved := 0
+	cancel := orm.OnPostSave(func(context.Context, *StampedNote) error { saved++; return nil })
+	t.Cleanup(cancel)
+
+	// The object of the form has no stamp; a write without one would store
+	// the zero time.
+	if err := admin.OpsFor[StampedNote](db).Update(ctx, note.ID, &StampedNote{Text: "b"}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, err := orm.Query[StampedNote](db).Get(ctx, "id", note.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.Text != "b" {
+		t.Errorf("Text = %q, want b", got.Text)
+	}
+	if got.Updated.IsZero() {
+		t.Error("Updated is zero, want the time of the change")
+	}
+	if saved != 1 {
+		t.Errorf("post_save fired %d times, want 1", saved)
+	}
+	if n, err := orm.Query[StampedNote](db).Count(ctx); err != nil || n != 1 {
+		t.Errorf("Count = %d, %v; want 1 row", n, err)
 	}
 }
 
