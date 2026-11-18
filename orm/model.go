@@ -7,17 +7,33 @@ import "reflect"
 // All mutation happens during Register; after Freeze the registry and its
 // models are read-only by convention (no exported setters exist).
 type Model struct {
+	app      string
 	name     string
 	table    string
 	fields   []*Field
 	pk       *Field
 	byName   map[string]*Field
+	byAttr   map[string]*Field
 	byColumn map[string]*Field
 	goType   reflect.Type
 }
 
 // Name returns the Go struct type name (e.g. "Author").
 func (m *Model) Name() string { return m.name }
+
+// App returns the label of the app the model was registered under (Django's
+// app_label, e.g. "blog"), or "" when it was registered without one.
+func (m *Model) App() string { return m.app }
+
+// Label returns the model's registry key: "<app>.<Name>" (e.g. "blog.Post") for
+// a model registered under an app, and the bare Name otherwise. It is unique
+// within a Registry.
+func (m *Model) Label() string {
+	if m.app == "" {
+		return m.name
+	}
+	return m.app + "." + m.name
+}
 
 // Table returns the database table name.
 func (m *Model) Table() string { return m.table }
@@ -49,6 +65,19 @@ func (m *Model) Relations() []*Field {
 // FieldByName looks up a field by its Go struct name.
 func (m *Model) FieldByName(name string) (*Field, bool) {
 	f, ok := m.byName[name]
+	return f, ok
+}
+
+// FieldByAttr looks up a field by its snake_case attribute name (Field.Attr),
+// e.g. "created_at" or, for a foreign key, "author".
+func (m *Model) FieldByAttr(attr string) (*Field, bool) {
+	f, ok := m.byAttr[attr]
+	return f, ok
+}
+
+// FieldByColumn looks up a field by its database column name, e.g. "author_id".
+func (m *Model) FieldByColumn(column string) (*Field, bool) {
+	f, ok := m.byColumn[column]
 	return f, ok
 }
 

@@ -74,7 +74,7 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 			continue
 		}
 		for _, m := range mp.Models() {
-			if _, err := modelReg.Register(m); err != nil {
+			if _, err := modelReg.RegisterApp(c.Name(), m); err != nil {
 				return nil, fmt.Errorf("djangogo: app %q: %w", c.Name(), err)
 			}
 		}

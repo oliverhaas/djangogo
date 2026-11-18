@@ -51,6 +51,11 @@ func (k Kind) String() string {
 type Field struct {
 	// Name is the Go struct field name, e.g. "Title".
 	Name string
+	// Attr is the snake_case attribute name of the field, the analog of Django's
+	// field name: "created_at" for CreatedAt, and "author" for an Author FK whose
+	// Column is "author_id". Unlike Column it is never overridden by a column= tag.
+	// It is the key forms and templates use, and one filters accept.
+	Attr string
 	// Column is the database column name, e.g. "title".
 	Column string
 	// Kind is the logical type of the field.
@@ -103,6 +108,7 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 	// Step 2: infer Kind from the Go type.
 	f := &Field{
 		Name:   sf.Name,
+		Attr:   toSnakeCase(sf.Name),
 		Column: toSnakeCase(sf.Name),
 		Index:  index,
 	}

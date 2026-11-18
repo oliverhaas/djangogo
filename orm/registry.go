@@ -9,22 +9,27 @@ import (
 // Registry holds all registered model descriptors and is safe for concurrent
 // reads after Freeze is called.
 type Registry struct {
-	models []*Model
-	byType map[reflect.Type]*Model
-	byName map[string]*Model
-	frozen bool
+	models  []*Model
+	byType  map[reflect.Type]*Model
+	byLabel map[string]*Model   // keyed by Model.Label()
+	byName  map[string][]*Model // keyed by the bare Go type name
+	byTable map[string]*Model
+	frozen  bool
 }
 
 // NewRegistry returns an empty, unfrozen Registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		byType: make(map[reflect.Type]*Model),
-		byName: make(map[string]*Model),
+		byType:  make(map[reflect.Type]*Model),
+		byLabel: make(map[string]*Model),
+		byName:  make(map[string][]*Model),
+		byTable: make(map[string]*Model),
 	}
 }
 
 // Register inspects the struct type pointed to by model, builds a Model
-// descriptor, and stores it in the registry.
+// descriptor, and stores it in the registry without an app label. It is
+// RegisterApp with an empty app.
 //
 // model must be a non-nil pointer to a struct.
 // Register returns an error if the registry is frozen, if model is not a
@@ -32,6 +37,16 @@ func NewRegistry() *Registry {
 // struct contains tag errors, or if no unambiguous primary key can be
 // resolved.
 func (r *Registry) Register(model any) (*Model, error) {
+	return r.RegisterApp("", model)
+}
+
+// RegisterApp is Register for a model that belongs to the app labeled app
+// (Django's app_label, e.g. "blog"). The label scopes the model: its registry
+// key becomes "<app>.<Name>", so two apps may each declare a model with the same
+// Go type name, and its default table name becomes "<app>_<name>" (Django's
+// "blog_post") instead of the bare lowercased type name. A Meta().Table override
+// still wins. An empty app behaves exactly like Register.
+func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 	// Step 1: reject if frozen.
 	if r.frozen {
 		name := nameOf(model)
@@ -50,9 +65,17 @@ func (r *Registry) Register(model any) (*Model, error) {
 	}
 	name := st.Name()
 
-	// Step 3: duplicate check.
-	if _, exists := r.byName[name]; exists {
-		return nil, fmt.Errorf("orm: model %s already registered", name)
+	// Step 3: duplicate check. A Go type is registered at most once, and a label
+	// ("<app>.<Name>", or the bare name without an app) is unique.
+	label := name
+	if app != "" {
+		label = app + "." + name
+	}
+	if _, exists := r.byType[st]; exists {
+		return nil, fmt.Errorf("orm: model %s already registered", label)
+	}
+	if _, exists := r.byLabel[label]; exists {
+		return nil, fmt.Errorf("orm: model %s already registered", label)
 	}
 
 	// Step 4: collect fields.
@@ -68,12 +91,19 @@ func (r *Registry) Register(model any) (*Model, error) {
 		}
 	}
 
-	// Step 5: resolve table name.
+	// Step 5: resolve table name. The default is Django's "<app>_<model>" for a
+	// model registered under an app, and the bare lowercased type name otherwise.
 	table := strings.ToLower(name)
+	if app != "" {
+		table = app + "_" + table
+	}
 	if wm, ok := model.(withMeta); ok {
 		if t := wm.Meta().Table; t != "" {
 			table = t
 		}
+	}
+	if other, exists := r.byTable[table]; exists {
+		return nil, fmt.Errorf("orm: model %s: table %q is already used by model %s", label, table, other.Label())
 	}
 
 	// Step 6: primary key resolution.
@@ -114,9 +144,14 @@ func (r *Registry) Register(model any) (*Model, error) {
 
 	// Step 7: build lookup maps and check for duplicate column names.
 	byName := make(map[string]*Field, len(fields))
+	byAttr := make(map[string]*Field, len(fields))
 	byColumn := make(map[string]*Field, len(fields))
 	for _, f := range fields {
 		byName[f.Name] = f
+		if other, dup := byAttr[f.Attr]; dup {
+			return nil, fmt.Errorf("orm: model %s: fields %s and %s share the attribute name %s", name, other.Name, f.Name, f.Attr)
+		}
+		byAttr[f.Attr] = f
 		if _, dup := byColumn[f.Column]; dup {
 			return nil, fmt.Errorf("orm: model %s has duplicate column %s", name, f.Column)
 		}
@@ -141,17 +176,21 @@ func (r *Registry) Register(model any) (*Model, error) {
 
 	// Step 8: construct and store the Model.
 	m := &Model{
+		app:      app,
 		name:     name,
 		table:    table,
 		fields:   fields,
 		pk:       pkField,
 		byName:   byName,
+		byAttr:   byAttr,
 		byColumn: byColumn,
 		goType:   st,
 	}
 	r.models = append(r.models, m)
 	r.byType[st] = m
-	r.byName[name] = m
+	r.byLabel[label] = m
+	r.byName[name] = append(r.byName[name], m)
+	r.byTable[table] = m
 	return m, nil
 }
 
@@ -189,10 +228,30 @@ func (r *Registry) Resolve() error {
 // an error.
 func (r *Registry) Freeze() { r.frozen = true }
 
-// Get returns the Model registered under the given Go type name.
+// Get returns the Model registered under name, which is either a label
+// ("blog.Post") or a bare Go type name ("Post"). A bare name resolves only when
+// exactly one registered model carries it; when two apps declare the same type
+// name it is ambiguous and Get reports false, so use the label.
 func (r *Registry) Get(name string) (*Model, bool) {
-	m, ok := r.byName[name]
-	return m, ok
+	if m, ok := r.byLabel[name]; ok {
+		return m, true
+	}
+	if ms := r.byName[name]; len(ms) == 1 {
+		return ms[0], true
+	}
+	return nil, false
+}
+
+// AppModels returns the models registered under the app labeled app, in
+// registration order.
+func (r *Registry) AppModels(app string) []*Model {
+	var out []*Model
+	for _, m := range r.models {
+		if m.app == app {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // ModelOf returns the Model for the concrete type of v.

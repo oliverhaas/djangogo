@@ -389,13 +389,17 @@ func TestNewResolvesRelations(t *testing.T) {
 	if err := app.DB.CreateTable(context.Background(), article); err != nil {
 		t.Fatalf("CreateTable(blogArticle): %v", err)
 	}
-	rows, err := app.DB.SQL().QueryContext(context.Background(), `PRAGMA foreign_key_list("blogarticle")`)
+	// Models registered through an app get Django's "<app>_<model>" table name.
+	if got, want := article.Table(), "blog_blogarticle"; got != want {
+		t.Fatalf("article table = %q, want %q", got, want)
+	}
+	rows, err := app.DB.SQL().QueryContext(context.Background(), `PRAGMA foreign_key_list("blog_blogarticle")`)
 	if err != nil {
 		t.Fatalf("PRAGMA foreign_key_list: %v", err)
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
-		t.Fatal("blogarticle table has no foreign key after CreateTable")
+		t.Fatal("blog_blogarticle table has no foreign key after CreateTable")
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("foreign_key_list rows err: %v", err)
