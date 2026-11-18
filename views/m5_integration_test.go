@@ -111,8 +111,8 @@ func TestM5LoginGatedExit(t *testing.T) {
 	// Build the router. Reverse is wired into the template {% url %} resolver below.
 	var router *urls.Router
 
-	loginGet := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = views.Render(w, eng, "login.html", map[string]any{})
+	loginGet := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = views.Render(w, r, eng, "login.html", map[string]any{})
 	})
 	loginPost := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -124,7 +124,7 @@ func TestM5LoginGatedExit(t *testing.T) {
 		u, err := orm.Query[auth.User](db).Get(r.Context(), "username", username)
 		if err != nil || !u.CheckPassword(password) {
 			w.WriteHeader(http.StatusUnauthorized)
-			_ = views.Render(w, eng, "login.html", map[string]any{"error": "invalid credentials"})
+			_ = views.Render(w, r, eng, "login.html", map[string]any{"error": "invalid credentials"})
 			return
 		}
 		sess, ok := sessions.FromContext(r.Context())

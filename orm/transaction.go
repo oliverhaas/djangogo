@@ -40,12 +40,14 @@ func depthFromContext(ctx context.Context) int {
 	return d
 }
 
-// conn returns the active transaction bound to ctx, or the underlying *sql.DB.
+// conn returns the active transaction bound to ctx, or the underlying *sql.DB,
+// wrapped so that every statement is reported to the DB's query hooks.
 func (db *DB) conn(ctx context.Context) querier {
+	var q querier = db.sqlDB
 	if tx, ok := txFromContext(ctx); ok {
-		return tx
+		q = tx
 	}
-	return db.sqlDB
+	return hookedQuerier{db: db, q: q}
 }
 
 // Atomic runs fn inside a database transaction bound to the context it passes to
@@ -94,17 +96,20 @@ func (db *DB) atomicSavepoint(ctx context.Context, tx *sql.Tx, fn func(ctx conte
 	depth := depthFromContext(ctx) + 1
 	name := fmt.Sprintf("sp_%d", depth)
 
-	if _, err := tx.ExecContext(ctx, "SAVEPOINT "+name); err != nil {
+	// Savepoint control statements go through the hooked querier so query hooks
+	// observe them, as Django's query log does.
+	q := hookedQuerier{db: db, q: tx}
+	if _, err := q.ExecContext(ctx, "SAVEPOINT "+name); err != nil {
 		return fmt.Errorf("orm: savepoint %s: %w", name, err)
 	}
 	released := false
 	defer func() {
 		if r := recover(); r != nil {
-			_, _ = tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+name)
+			_, _ = q.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+name)
 			panic(r)
 		}
 		if !released {
-			_, _ = tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+name)
+			_, _ = q.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+name)
 		}
 	}()
 
@@ -112,7 +117,7 @@ func (db *DB) atomicSavepoint(ctx context.Context, tx *sql.Tx, fn func(ctx conte
 	if err := fn(innerCtx); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT "+name); err != nil {
+	if _, err := q.ExecContext(ctx, "RELEASE SAVEPOINT "+name); err != nil {
 		return fmt.Errorf("orm: release savepoint %s: %w", name, err)
 	}
 	released = true

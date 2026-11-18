@@ -10,11 +10,14 @@ import (
 	"github.com/oliverhaas/djangogo/templates"
 )
 
-// Render renders the named template with ctx to w as text/html (200), or writes a
-// 500 and returns the error on failure. It buffers via the engine so a render error
-// does not emit a partially written 200 body.
-func Render(w http.ResponseWriter, e *templates.Engine, name string, ctx map[string]any) error {
-	out, err := e.Render(name, ctx)
+// Render renders the named template with ctx for the request r and writes it to
+// w as text/html (200), the counterpart of Django's render(request, template,
+// context). The engine's context processors are applied and, under the test
+// client, the template name and context are recorded on the response. On
+// failure it writes a 500 and returns the error; output is buffered so a render
+// error never emits a partially written 200 body.
+func Render(w http.ResponseWriter, r *http.Request, e *templates.Engine, name string, ctx map[string]any) error {
+	out, err := e.RenderRequest(r, name, ctx)
 	if err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return err

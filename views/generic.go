@@ -51,7 +51,7 @@ func (v DetailView[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := mergeExtra(r, v.Extra)
 	ctx[contextName] = wrapObject(v.DB, obj)
 
-	_ = Render(w, v.Engine, v.Template, ctx)
+	_ = Render(w, r, v.Engine, v.Template, ctx)
 }
 
 // ListView renders all T (optionally filtered) into a template.
@@ -91,7 +91,7 @@ func (v ListView[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx["object_list"] = wrapped
 	}
 
-	_ = Render(w, v.Engine, v.Template, ctx)
+	_ = Render(w, r, v.Engine, v.Template, ctx)
 }
 
 // wrapObject returns obj as a templates.ModelMap (snake_case fields plus the

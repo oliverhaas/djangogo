@@ -14,8 +14,9 @@ import (
 
 // Engine renders pongo2 templates loaded from one or more directories or an fs.FS.
 type Engine struct {
-	set      *pongo2.TemplateSet
-	resolver Resolver
+	set        *pongo2.TemplateSet
+	resolver   Resolver
+	processors []ContextProcessor
 }
 
 // SetResolver sets the URL resolver injected into every render context, so this

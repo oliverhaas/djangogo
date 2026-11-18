@@ -89,7 +89,7 @@ func (v postDetailView) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"form_html":  form.Render(),
 		"csrf_token": csrf.Token(r.Context()),
 	}
-	_ = views.Render(w, v.engine, "post_detail.html", ctx)
+	_ = views.Render(w, r, v.engine, "post_detail.html", ctx)
 }
 
 // wrapComments turns each comment into a templates.ModelMap so the detail

@@ -395,10 +395,16 @@ func (s *AdminSite) changelistURL(e *entry) string {
 	return s.Prefix + "/" + e.slug + "/"
 }
 
-// render writes the named template with ctx, reporting a 500 on failure.
-func (s *AdminSite) render(w http.ResponseWriter, _ *http.Request, name string, ctx map[string]any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.engine.RenderTo(w, name, ctx); err != nil {
+// render writes the named template with ctx, reporting a 500 on failure. It
+// renders through the request so context processors apply and the test client
+// can observe the template and context. The output is buffered, so a render
+// error never emits a partially written 200 body.
+func (s *AdminSite) render(w http.ResponseWriter, r *http.Request, name string, ctx map[string]any) {
+	out, err := s.engine.RenderRequest(r, name, ctx)
+	if err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(out))
 }

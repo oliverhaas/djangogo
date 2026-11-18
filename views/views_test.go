@@ -72,7 +72,8 @@ func TestRender(t *testing.T) {
 		"hello.html": "Hello {{ name }}!",
 	})
 	rec := httptest.NewRecorder()
-	if err := views.Render(rec, eng, "hello.html", map[string]any{"name": "world"}); err != nil {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	if err := views.Render(rec, req, eng, "hello.html", map[string]any{"name": "world"}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	if rec.Code != http.StatusOK {
@@ -89,7 +90,8 @@ func TestRender(t *testing.T) {
 func TestRenderMissingTemplate(t *testing.T) {
 	eng := newViewsEngine(t, map[string]string{"a.html": "ok"})
 	rec := httptest.NewRecorder()
-	err := views.Render(rec, eng, "missing.html", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	err := views.Render(rec, req, eng, "missing.html", nil)
 	if err == nil {
 		t.Fatal("Render: want error for missing template")
 	}

@@ -14,6 +14,8 @@ type DB struct {
 	// nil, now() returns time.Now().UTC(). It is a per-handle field (not a global)
 	// so parallel tests can each set a deterministic clock without racing.
 	Now func() time.Time
+	// hooks holds the registered query observers (see AddQueryHook).
+	hooks queryHooks
 }
 
 // NewDB returns a DB that pairs the given *sql.DB with a Dialect and Registry.

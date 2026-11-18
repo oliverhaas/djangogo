@@ -37,6 +37,26 @@ func Token(ctx context.Context) string {
 	return t
 }
 
+// skipKey is the context key marking a request whose CSRF checks are skipped.
+type skipKey struct{}
+
+// WithoutEnforcement returns a copy of ctx that tells Middleware to skip the
+// origin and token checks for the request carrying it, while still seeding the
+// token. It is the counterpart of the flag Django's test client sets unless it
+// is built with enforce_csrf_checks=True. A context value can only be set by
+// server-side code, never by a remote client, so this is not a bypass an
+// attacker can reach; it exists for the test client and for views that are
+// deliberately exempt.
+func WithoutEnforcement(ctx context.Context) context.Context {
+	return context.WithValue(ctx, skipKey{}, true)
+}
+
+// enforcementSkipped reports whether ctx was marked by WithoutEnforcement.
+func enforcementSkipped(ctx context.Context) bool {
+	skip, _ := ctx.Value(skipKey{}).(bool)
+	return skip
+}
+
 // safeMethods lists the HTTP methods that do not mutate server state and
 // therefore do not require CSRF validation.
 var safeMethods = map[string]bool{
@@ -74,7 +94,7 @@ func Middleware(next http.Handler) http.Handler {
 			r = r.WithContext(context.WithValue(r.Context(), tokenContextKey{}, sessionToken))
 		}
 
-		if safeMethods[r.Method] {
+		if safeMethods[r.Method] || enforcementSkipped(r.Context()) {
 			next.ServeHTTP(w, r)
 			return
 		}

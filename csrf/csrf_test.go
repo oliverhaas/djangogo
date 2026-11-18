@@ -405,3 +405,36 @@ func TestPOSTSecureRefererChecked(t *testing.T) {
 		})
 	}
 }
+
+// TestWithoutEnforcementSkipsChecks verifies that a request whose context was
+// marked with csrf.WithoutEnforcement passes an unsafe method without a token
+// (the test client's default), still sees a seeded token, and that an unmarked
+// request is still rejected.
+func TestWithoutEnforcementSkipsChecks(t *testing.T) {
+	store := sessions.NewSignedCookieStore([]byte("test-secret"))
+
+	var gotToken string
+	h := chain(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = csrf.Token(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("a=b"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.ServeHTTP(rec, req.WithContext(csrf.WithoutEnforcement(req.Context())))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("marked POST status = %d, want 200", rec.Code)
+	}
+	if gotToken == "" {
+		t.Error("marked POST did not see a seeded token")
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/", strings.NewReader("a=b"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("unmarked POST status = %d, want 403", rec.Code)
+	}
+}
