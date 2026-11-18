@@ -8,6 +8,7 @@ import (
 
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/conf"
+	_ "github.com/oliverhaas/djangogo/djangotest" // makes the fast MD5 hasher the preferred one
 	"github.com/oliverhaas/djangogo/orm"
 )
 

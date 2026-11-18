@@ -10,6 +10,12 @@ type Config struct {
 	// Backends is the ordered list of authentication backends (Django's
 	// AUTHENTICATION_BACKENDS). Nil means ModelBackend alone.
 	Backends []Backend
+
+	// PasswordHashers is the ordered list of password hashers (Django's
+	// PASSWORD_HASHERS). The first one hashes new passwords; the others
+	// only verify, and a password they verify is hashed again with the
+	// first one at login. Empty means DefaultPasswordHashers.
+	PasswordHashers []Hasher
 }
 
 // current is the active configuration. It is replaced as a whole, so a reader

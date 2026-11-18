@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/flosch/pongo2/v6 v6.1.0
 	github.com/jackc/pgx/v5 v5.13.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/net v0.63.0
 	modernc.org/sqlite v1.62.0
 )

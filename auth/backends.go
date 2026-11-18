@@ -204,7 +204,19 @@ func modelAuthenticate(ctx context.Context, db *orm.DB, username, password strin
 	if err != nil {
 		return nil, fmt.Errorf("auth: load user: %w", err)
 	}
-	if !u.CheckPassword(password) {
+	// A correct password stored with an outdated hasher or work factor is
+	// hashed again and saved, as AbstractBaseUser.check_password does.
+	ok, err := CheckPasswordAndUpgrade(password, u.Password, func(raw string) error {
+		if err := u.SetPassword(raw); err != nil {
+			return err
+		}
+		_, err := orm.Query[User](db).Filter("id", u.ID).Update(ctx, "password", u.Password)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("auth: upgrade password hash: %w", err)
+	}
+	if !ok {
 		return nil, nil
 	}
 	if !allowInactive && !u.IsActive {
