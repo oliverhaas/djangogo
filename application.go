@@ -1,6 +1,7 @@
 package djangogo
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,8 +34,17 @@ type Application struct {
 	DB            *orm.DB              // nil if no database configured
 	Models        *orm.Registry        // frozen registry built from app models
 	Migrations    *migrations.Registry // known migrations, seeded from the default registry
-	MigrationsApp string               // the app name migrations are attributed to
 	MigrationsDir string               // base dir for generated migration files (default "migrations")
+
+	postMigrate []func(ctx context.Context, db *orm.DB) error // hooks run after a successful migrate
+}
+
+// OnPostMigrate registers a hook that runs after the migrate command has
+// brought the database to its target, the counterpart of a receiver of
+// Django's post_migrate signal. Hooks run in the order of registration; the
+// first error stops the command.
+func (a *Application) OnPostMigrate(hook func(ctx context.Context, db *orm.DB) error) {
+	a.postMigrate = append(a.postMigrate, hook)
 }
 
 // New configures settings, registers and readies apps, registers built-in
@@ -85,8 +95,6 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	modelReg.Freeze()
 	app.Models = modelReg
 
-	app.MigrationsApp = migrationsApp(appConfigs)
-
 	// Seed the migration registry from the process-global default so migrations
 	// registered by generated files' init() are present.
 	app.Migrations = migrations.NewRegistry()
@@ -120,6 +128,8 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	_ = app.Commands.Register(&runserverCommand{app: app})
 	_ = app.Commands.Register(&makemigrationsCommand{app: app})
 	_ = app.Commands.Register(&migrateCommand{app: app})
+	_ = app.Commands.Register(&showmigrationsCommand{app: app})
+	_ = app.Commands.Register(&sqlmigrateCommand{app: app})
 	_ = app.Commands.Register(&createsuperuserCommand{app: app})
 	_ = app.Commands.Register(&startprojectCommand{out: app.Out})
 	_ = app.Commands.Register(&startappCommand{out: app.Out})
@@ -197,23 +207,6 @@ func (a *Application) adminSite(appConfigs []apps.Config) (*admin.AdminSite, err
 		ar.RegisterAdmin(site)
 	}
 	return site, nil
-}
-
-// migrationsApp determines the app name migrations are attributed to. If exactly
-// one app declares models it uses that app's name; otherwise it falls back to "app".
-func migrationsApp(appConfigs []apps.Config) string {
-	name := "app"
-	count := 0
-	for _, c := range appConfigs {
-		if _, ok := c.(apps.ModelProvider); ok {
-			count++
-			name = c.Name()
-		}
-	}
-	if count == 1 {
-		return name
-	}
-	return "app"
 }
 
 // Execute dispatches the given CLI arguments (typically os.Args[1:]).
