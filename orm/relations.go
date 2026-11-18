@@ -190,7 +190,7 @@ func (f *FK[T]) Fetch(ctx context.Context, db *DB) (*T, error) {
 	if f.loaded {
 		return f.obj, nil
 	}
-	v, err := Query[T](db).Get(ctx, "id", f.pk)
+	v, err := Query[T](db).Get(ctx, "pk", f.pk)
 	if err != nil {
 		return nil, err
 	}

@@ -31,8 +31,9 @@ func (Dialect) Quote(ident string) string {
 }
 
 // SupportsReturning reports whether the backend supports a RETURNING clause.
-// SQLite supports it from 3.35.0, but for simplicity this backend returns false.
-func (Dialect) SupportsReturning() bool { return false }
+// SQLite has it since 3.35.0, which the bundled engine exceeds; a multi-row
+// INSERT relies on it to hand back the generated primary keys.
+func (Dialect) SupportsReturning() bool { return true }
 
 // ColumnType returns the SQL column definition for f, excluding the leading
 // quoted column name.
@@ -106,6 +107,9 @@ func (d Dialect) CreateTableSQL(m *orm.Model) string {
 // shared across queries. This covers both the ":memory:" form and the named
 // shared form "file:name?mode=memory&cache=shared" (dsn containing "mode=memory").
 func Open(dsn string) (*sql.DB, error) {
+	if regexpRegistration != nil {
+		return nil, fmt.Errorf("sqlite: register regexp function: %w", regexpRegistration)
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

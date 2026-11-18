@@ -230,8 +230,9 @@ func TestSelectRelatedPostgres(t *testing.T) {
 	runSelectRelated(t, db)
 }
 
-// TestSelectRelatedCompilesJoin asserts the compiled SQL is a single LEFT JOIN
-// query (not an N+1 follow-up fetch).
+// TestSelectRelatedCompilesJoin asserts the compiled SQL is a single JOIN
+// query (not an N+1 follow-up fetch). The foreign key is not nullable, so the
+// join is an INNER JOIN, as in Django.
 func TestSelectRelatedCompilesJoin(t *testing.T) {
 	reg := newSelectRelatedRegistry(t)
 	sdb, err := sqlite.Open("file::memory:?cache=shared")
@@ -245,8 +246,8 @@ func TestSelectRelatedCompilesJoin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if !strings.Contains(sql, "LEFT JOIN") {
-		t.Fatalf("expected LEFT JOIN in select_related SQL, got:\n%s", sql)
+	if !strings.Contains(sql, `INNER JOIN "srauthor" ON ("srarticle"."author_id" = "srauthor"."id")`) {
+		t.Fatalf("expected an INNER JOIN in select_related SQL, got:\n%s", sql)
 	}
 	if strings.Count(sql, "SELECT") != 1 {
 		t.Fatalf("expected a single SELECT (one JOIN query, not N+1), got:\n%s", sql)

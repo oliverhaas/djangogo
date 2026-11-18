@@ -94,7 +94,9 @@ func TestCreateAutoNowStampsBoth(t *testing.T) {
 	}
 }
 
-func TestUpdateTouchesAutoNowButNotAutoNowAdd(t *testing.T) {
+// TestSaveTouchesAutoNowButNotAutoNowAdd checks that saving an existing object
+// advances auto_now and leaves auto_now_add alone, like Django's Model.save().
+func TestSaveTouchesAutoNowButNotAutoNowAdd(t *testing.T) {
 	db := newWp3WidgetDB(t)
 	created := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
 	db.Now = func() time.Time { return created }
@@ -105,6 +107,39 @@ func TestUpdateTouchesAutoNowButNotAutoNowAdd(t *testing.T) {
 
 	updated := time.Date(2022, 2, 2, 0, 0, 0, 0, time.UTC)
 	db.Now = func() time.Time { return updated }
+	w.Name = "y"
+	if err := orm.Query[wp3Widget](db).Save(context.Background(), w); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if !w.UpdatedAt.Equal(updated) {
+		t.Errorf("on obj: UpdatedAt = %v, want %v", w.UpdatedAt, updated)
+	}
+
+	got := reloadWp3Widget(t, db, w.ID)
+	if got.Name != "y" {
+		t.Errorf("Name = %q, want y", got.Name)
+	}
+	if got.UpdatedAt.Unix() != updated.Unix() {
+		t.Errorf("UpdatedAt = %v, want %v (auto_now should advance)", got.UpdatedAt, updated)
+	}
+	if got.CreatedAt.Unix() != created.Unix() {
+		t.Errorf("CreatedAt = %v, want %v (auto_now_add must not change on save)", got.CreatedAt, created)
+	}
+}
+
+// TestUpdateDoesNotTouchAutoNow checks that the queryset-level Update writes
+// only what it is given, like Django's QuerySet.update(), which does not call
+// pre_save() and so leaves auto_now fields alone.
+func TestUpdateDoesNotTouchAutoNow(t *testing.T) {
+	db := newWp3WidgetDB(t)
+	created := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
+	db.Now = func() time.Time { return created }
+	w := &wp3Widget{Name: "x"}
+	if err := orm.Query[wp3Widget](db).Create(context.Background(), w); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	db.Now = func() time.Time { return time.Date(2022, 2, 2, 0, 0, 0, 0, time.UTC) }
 	n, err := orm.Query[wp3Widget](db).Filter("id", w.ID).Update(context.Background(), "name", "y")
 	if err != nil {
 		t.Fatalf("Update: %v", err)
@@ -114,11 +149,14 @@ func TestUpdateTouchesAutoNowButNotAutoNowAdd(t *testing.T) {
 	}
 
 	got := reloadWp3Widget(t, db, w.ID)
-	if got.UpdatedAt.Unix() != updated.Unix() {
-		t.Errorf("UpdatedAt = %v, want %v (auto_now should advance)", got.UpdatedAt, updated)
+	if got.Name != "y" {
+		t.Errorf("Name = %q, want y", got.Name)
+	}
+	if got.UpdatedAt.Unix() != created.Unix() {
+		t.Errorf("UpdatedAt = %v, want %v (Update must not stamp auto_now)", got.UpdatedAt, created)
 	}
 	if got.CreatedAt.Unix() != created.Unix() {
-		t.Errorf("CreatedAt = %v, want %v (auto_now_add must not change on update)", got.CreatedAt, created)
+		t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, created)
 	}
 }
 

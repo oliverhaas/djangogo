@@ -2,147 +2,159 @@ package orm
 
 import (
 	"fmt"
-	"strings"
 )
 
-// whereClause is a single filter or exclude condition awaiting compilation.
-type whereClause struct {
-	key    string
-	value  any
-	negate bool // true for Exclude
-}
-
-// orderClause is a single ORDER BY term.
-type orderClause struct {
-	column string
-	desc   bool
-}
-
 // QuerySet is a lazy, immutable, clone-per-method query builder for model T.
-// Chain methods never mutate their receiver; each returns a fresh clone.
+// Chain methods never mutate their receiver; each returns a fresh clone. No
+// SQL runs until a terminal method (All, Get, Count, ...) is called, and an
+// error made while building, such as an unknown field, is reported there.
+//
+// A field is named by a key: the attribute name (Field.Attr, "created_at"),
+// the column name, or "pk" for the primary key. A foreign key is addressed by
+// its attribute ("author") or its column ("author_id") alike. A key follows
+// relations with a double underscore ("author__name"), and a filter key may
+// end with a lookup ("author__name__icontains").
 type QuerySet[T any] struct {
-	db            *DB
-	model         *Model
-	wheres        []whereClause
-	orders        []orderClause
-	selectRelated []string // FK field NAMES to eager-load via LEFT JOIN
-	limit         int      // -1 means no limit
-	offset        int      // 0 means no offset
-	err           error
+	q *query
 }
 
 // Query starts a new QuerySet for model T resolved from db's registry.
 func Query[T any](db *DB) *QuerySet[T] {
 	var zero T
-	q := &QuerySet[T]{db: db, limit: -1}
 	m, ok := db.Registry().ModelOf(zero)
+	q := newQuery(db, m)
 	if !ok {
 		q.err = fmt.Errorf("orm: no model registered for %T", zero)
-		return q
 	}
-	q.model = m
-	return q
+	return &QuerySet[T]{q: q}
 }
 
-// clone returns a deep copy of q with fresh backing slices so that mutating the
-// clone can never affect the receiver.
-func (q *QuerySet[T]) clone() *QuerySet[T] {
-	cp := &QuerySet[T]{
-		db:     q.db,
-		model:  q.model,
-		limit:  q.limit,
-		offset: q.offset,
-		err:    q.err,
-	}
-	if len(q.wheres) > 0 {
-		cp.wheres = make([]whereClause, len(q.wheres))
-		copy(cp.wheres, q.wheres)
-	}
-	if len(q.orders) > 0 {
-		cp.orders = make([]orderClause, len(q.orders))
-		copy(cp.orders, q.orders)
-	}
-	if len(q.selectRelated) > 0 {
-		cp.selectRelated = make([]string, len(q.selectRelated))
-		copy(cp.selectRelated, q.selectRelated)
-	}
-	return cp
-}
+// subquery exposes the query, so that a QuerySet can be the value of an "in"
+// lookup: Filter("author__in", orm.Query[Author](db).Filter(...)).
+func (qs *QuerySet[T]) subquery() *query { return qs.q }
 
-// SelectRelated returns a clone that eager-loads the named forward-FK fields via
-// a single LEFT JOIN, populating each FK's loaded object during the read. Each
-// name must identify a forward-FK field on the model; an unknown or non-FK name
-// is reported as an error when the queryset is compiled or executed.
-func (q *QuerySet[T]) SelectRelated(fields ...string) *QuerySet[T] {
-	cp := q.clone()
+// SelectRelated returns a clone that loads the named foreign keys in the same
+// query, with a JOIN, and stores each related object on its FK field. A name
+// is the attribute of a forward foreign key ("author"); a double underscore
+// follows further relations ("author__publisher"). The Go field name
+// ("Author") is accepted for a single relation. A name that is not a forward
+// foreign key is reported when the queryset runs.
+//
+// The JOIN is INNER for a non-null foreign key and LEFT OUTER for a nullable
+// one, so a row without a related object is kept and its FK stays unloaded.
+func (qs *QuerySet[T]) SelectRelated(fields ...string) *QuerySet[T] {
+	cp := qs.q.clone()
 	cp.selectRelated = append(cp.selectRelated, fields...)
-	return cp
+	return &QuerySet[T]{q: cp}
 }
 
-// Filter returns a clone with additional equality/lookup conditions.
-// pairs must be alternating string keys and values.
-func (q *QuerySet[T]) Filter(pairs ...any) *QuerySet[T] {
-	return q.addWheres(pairs, false)
+// Filter returns a clone restricted to the rows matching every condition. The
+// arguments are alternating keys and values, conditions built with Q, or a mix
+// of both:
+//
+//	Filter("name", "x")                       name = 'x'
+//	Filter("age__gte", 18, "name__in", names) both conditions
+//	Filter("author__name__icontains", "ada")  across a relation, with a JOIN
+//	Filter(orm.Q("a", 1).Or(orm.Q("b", 2)))   a = 1 OR b = 2
+//
+// The lookups are exact (the default), iexact, gt, gte, lt, lte, contains,
+// icontains, startswith, istartswith, endswith, iendswith, in, range, isnull,
+// regex, and iregex. A nil value with exact means IS NULL. The value of a
+// foreign key may be a primary key, an orm.FK[T], or a model instance. A value
+// may also be an Expr, to compare with another column: Filter("a__gt",
+// orm.F("b")).
+func (qs *QuerySet[T]) Filter(args ...any) *QuerySet[T] {
+	return &QuerySet[T]{q: qs.q.filter(args, false)}
 }
 
-// Exclude returns a clone with additional negated conditions.
-// pairs must be alternating string keys and values.
-func (q *QuerySet[T]) Exclude(pairs ...any) *QuerySet[T] {
-	return q.addWheres(pairs, true)
+// Exclude returns a clone without the rows matching the conditions, which take
+// the same form as in Filter. Several conditions in one call are negated
+// together: Exclude("a", 1, "b", 2) drops the rows where both hold, as
+// Django's exclude(a=1, b=2) does. A row whose compared column is NULL is
+// kept, also as in Django.
+func (qs *QuerySet[T]) Exclude(args ...any) *QuerySet[T] {
+	return &QuerySet[T]{q: qs.q.filter(args, true)}
 }
 
-// addWheres appends one whereClause per key/value pair to a clone, validating
-// arity and key types. The first build error is preserved.
-func (q *QuerySet[T]) addWheres(pairs []any, negate bool) *QuerySet[T] {
-	cp := q.clone()
-	if len(pairs)%2 != 0 {
-		cp.setErr(fmt.Errorf("orm: Filter requires alternating string keys and values"))
-		return cp
-	}
-	for i := 0; i < len(pairs); i += 2 {
-		key, ok := pairs[i].(string)
-		if !ok {
-			cp.setErr(fmt.Errorf("orm: Filter requires alternating string keys and values"))
-			return cp
-		}
-		cp.wheres = append(cp.wheres, whereClause{key: key, value: pairs[i+1], negate: negate})
-	}
-	return cp
+// OrderBy returns a clone ordered by the given keys, after any ordering it
+// already has. A leading "-" requests descending order, a key may span
+// relations ("author__name") or name an annotation, and "?" orders randomly.
+// Calling OrderBy without arguments clears the ordering.
+//
+// Django's order_by replaces the previous ordering; OrderBy appends to it, so
+// that orderings can be built up step by step.
+func (qs *QuerySet[T]) OrderBy(fields ...string) *QuerySet[T] {
+	return &QuerySet[T]{q: qs.q.orderBy(fields)}
 }
 
-// setErr records err only if no error has been recorded yet (first error wins).
-func (q *QuerySet[T]) setErr(err error) {
-	if q.err == nil {
-		q.err = err
-	}
-}
-
-// OrderBy returns a clone ordered by the given fields. A leading "-" requests
-// descending order. Column validity is checked at compile time.
-func (q *QuerySet[T]) OrderBy(fields ...string) *QuerySet[T] {
-	cp := q.clone()
-	for _, field := range fields {
-		desc := false
-		col := field
-		if strings.HasPrefix(col, "-") {
-			desc = true
-			col = col[1:]
-		}
-		cp.orders = append(cp.orders, orderClause{column: col, desc: desc})
-	}
-	return cp
+// Reverse returns a clone with the ordering reversed. A queryset without an
+// ordering is ordered by descending primary key.
+func (qs *QuerySet[T]) Reverse() *QuerySet[T] {
+	return &QuerySet[T]{q: qs.q.reversed()}
 }
 
 // Limit returns a clone capped to at most n rows.
-func (q *QuerySet[T]) Limit(n int) *QuerySet[T] {
-	cp := q.clone()
+func (qs *QuerySet[T]) Limit(n int) *QuerySet[T] {
+	cp := qs.q.clone()
 	cp.limit = n
-	return cp
+	return &QuerySet[T]{q: cp}
 }
 
 // Offset returns a clone that skips the first n rows.
-func (q *QuerySet[T]) Offset(n int) *QuerySet[T] {
-	cp := q.clone()
+func (qs *QuerySet[T]) Offset(n int) *QuerySet[T] {
+	cp := qs.q.clone()
 	cp.offset = n
-	return cp
+	return &QuerySet[T]{q: cp}
+}
+
+// Distinct returns a clone that removes duplicate rows (SELECT DISTINCT).
+func (qs *QuerySet[T]) Distinct() *QuerySet[T] {
+	cp := qs.q.clone()
+	cp.distinct = true
+	return &QuerySet[T]{q: cp}
+}
+
+// SelectForUpdate returns a clone whose rows are locked until the end of the
+// transaction (SELECT ... FOR UPDATE). It only has an effect inside Atomic,
+// and none on a dialect without row locks, such as SQLite.
+func (qs *QuerySet[T]) SelectForUpdate() *QuerySet[T] {
+	cp := qs.q.clone()
+	cp.forUpdate = true
+	return &QuerySet[T]{q: cp}
+}
+
+// Annotate returns a clone with named expressions added to every row. The
+// arguments are alternating names and expressions; an aggregate over a plain
+// field may be passed without a name and is then named "<key>__<function>":
+//
+//	Annotate("n", orm.Count("id"))
+//	Annotate(orm.Max("age"))               named "age__max"
+//	Annotate("total", orm.F("a").Add(orm.F("b")))
+//
+// An annotation can be used as a key in Filter, Exclude, OrderBy, Values, and
+// ValuesList. An aggregate annotation groups the rows: by the row itself, or
+// by the Values keys when Values was called first, which is Django's
+// values().annotate() idiom for GROUP BY:
+//
+//	Query[Book](db).Values("author").Annotate("n", orm.Count("id"))
+//
+// The model struct has no place for an annotation value; read it with Values,
+// ValuesList, or AllAnnotated.
+func (qs *QuerySet[T]) Annotate(args ...any) *QuerySet[T] {
+	return &QuerySet[T]{q: qs.q.annotate(args)}
+}
+
+// Values returns a queryset of rows as maps from key to value instead of
+// model structs. Without keys every field of the model is included, under its
+// attribute name, or "<attribute>_id" for a foreign key, followed by the
+// annotations. A key may span relations ("author__name") or name an
+// annotation; the map uses the key as it was given.
+func (qs *QuerySet[T]) Values(keys ...string) *ValuesQuerySet {
+	return &ValuesQuerySet{q: qs.q.withValues(keys)}
+}
+
+// ValuesList returns a queryset of rows as slices of values, in key order,
+// instead of model structs. The keys are those of Values.
+func (qs *QuerySet[T]) ValuesList(keys ...string) *ValuesListQuerySet {
+	return &ValuesListQuerySet{q: qs.q.withValues(keys)}
 }

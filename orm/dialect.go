@@ -9,3 +9,42 @@ type Dialect interface {
 	CreateTableSQL(m *Model) string
 	SupportsReturning() bool
 }
+
+// Features describes the optional SQL capabilities of a dialect. The zero
+// value is plain standard SQL.
+type Features struct {
+	// NoLimitValue is the LIMIT a statement needs when it has an OFFSET but no
+	// limit: "-1" on SQLite, which cannot write OFFSET alone. Empty means that
+	// OFFSET can stand alone.
+	NoLimitValue string
+	// MaxQueryParams caps the bound parameters of one statement; BulkCreate
+	// splits its INSERT to stay below it. Zero means no cap.
+	MaxQueryParams int
+	// SelectForUpdate reports that SELECT ... FOR UPDATE is supported. On a
+	// dialect without it SelectForUpdate is a no-op.
+	SelectForUpdate bool
+}
+
+// FeatureDialect is an optional capability of a Dialect: it reports the
+// dialect's Features. A dialect that does not implement it gets the zero
+// Features.
+type FeatureDialect interface {
+	Features() Features
+}
+
+// LiteralDialect is an optional capability of a Dialect that cannot tell the
+// type of a bound parameter where the statement gives no hint, as in
+// "SELECT MAX($1)". LiteralSQL returns the SQL for the placeholder of a
+// literal of an expression (orm.Value, or the number in F("n").Add(1)), which
+// the dialect may wrap in a cast that fits the Go type of v.
+type LiteralDialect interface {
+	LiteralSQL(placeholder string, v any) string
+}
+
+// dialectFeatures returns the features of d.
+func dialectFeatures(d Dialect) Features {
+	if fd, ok := d.(FeatureDialect); ok {
+		return fd.Features()
+	}
+	return Features{}
+}

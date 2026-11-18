@@ -58,7 +58,8 @@ func (db *DB) notify(ctx context.Context, query string, args []any) {
 }
 
 // hookedQuerier wraps a querier so that every statement is reported to the DB's
-// query hooks before it runs.
+// query hooks before it runs, and a constraint violation comes back as an
+// *IntegrityError.
 type hookedQuerier struct {
 	db *DB
 	q  querier
@@ -67,13 +68,15 @@ type hookedQuerier struct {
 // ExecContext reports the statement to the hooks and executes it.
 func (h hookedQuerier) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	h.db.notify(ctx, query, args)
-	return h.q.ExecContext(ctx, query, args...)
+	result, err := h.q.ExecContext(ctx, query, args...)
+	return result, h.db.classify(err)
 }
 
 // QueryContext reports the statement to the hooks and runs the query.
 func (h hookedQuerier) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	h.db.notify(ctx, query, args)
-	return h.q.QueryContext(ctx, query, args...)
+	rows, err := h.q.QueryContext(ctx, query, args...)
+	return rows, h.db.classify(err)
 }
 
 // QueryRowContext reports the statement to the hooks and runs the single-row query.
