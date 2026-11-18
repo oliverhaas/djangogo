@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/templates"
 )
@@ -85,14 +86,22 @@ func successURL[T any](db *orm.DB, explicit string, obj T) (string, error) {
 	if u, ok := any(&obj).(AbsoluteURLer); ok {
 		return u.GetAbsoluteURL(), nil
 	}
-	return "", improperlyConfigured(
+	return "", errNoAbsoluteURL()
+}
+
+// errNoAbsoluteURL is the configuration error of a view that saves an object
+// and has neither a success URL nor a model with a GetAbsoluteURL method.
+func errNoAbsoluteURL() error {
+	return improperlyConfigured(
 		"No URL to redirect to. Either provide a SuccessURL or define a GetAbsoluteURL method on the model.")
 }
 
 // DeleteView deletes one object of model T, Django's DeleteView. GET and HEAD
 // render a confirmation page from "<app>/<model>_confirm_delete.html", with
-// the same context and the same lookup as DetailView. POST and DELETE delete
-// the object and redirect to SuccessURL with status 302.
+// the same context and the same lookup as DetailView, and the confirmation
+// form under "form". POST validates the form and, when it is valid, deletes
+// the object and redirects to SuccessURL with status 302. A form with errors
+// renders the page again. DELETE deletes without a form, as in Django.
 //
 //	mux.Handle("/posts/{pk}/delete/", views.DeleteView[Post]{
 //		DB: db, Engine: engine, SuccessURL: "/posts/",
@@ -157,12 +166,16 @@ type DeleteView[T any] struct {
 	// object as deleted instead of removing its row. Nil deletes the row with
 	// the primary key of the object.
 	DeleteObject func(r *http.Request, obj T) error
+	// Form returns a new unbound confirmation form for the request
+	// (form_class), which a POST must pass before anything is deleted. Nil
+	// uses a form without fields, which is always valid.
+	Form func(r *http.Request) (*forms.Form, error)
 }
 
 // ServeHTTP renders the confirmation page for GET and HEAD and deletes the
 // object for POST and DELETE.
 func (v DeleteView[T]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	dispatch(w, r, v.Engine, methodHandlers{get: v.get, post: v.delete, delete: v.delete})
+	dispatch(w, r, v.Engine, methodHandlers{get: v.get, post: v.post, delete: v.delete})
 }
 
 // core maps the exported fields to the shared single-object machinery.
@@ -190,6 +203,30 @@ func (v DeleteView[T]) core() objectView[T] {
 	}
 }
 
+// form returns the confirmation form, bound to the submitted data of a POST,
+// Django's FormMixin.get_form with the form_class Form of BaseDeleteView.
+func (v DeleteView[T]) form(r *http.Request) (*forms.Form, error) {
+	form := forms.New()
+	if v.Form != nil {
+		var err error
+		if form, err = v.Form(r); err != nil {
+			return nil, err
+		}
+		if form == nil {
+			return nil, improperlyConfigured("DeleteView.Form returned no form")
+		}
+	}
+	prepareForm(form, r, nil, "")
+	data, bound, err := formData(r)
+	if err != nil {
+		return nil, err
+	}
+	if bound {
+		form = form.Bind(data)
+	}
+	return form, nil
+}
+
 // get renders the confirmation page.
 func (v DeleteView[T]) get(w http.ResponseWriter, r *http.Request) error {
 	core := v.core()
@@ -197,17 +234,54 @@ func (v DeleteView[T]) get(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return core.render(w, r, obj, core.context(obj))
+	form, err := v.form(r)
+	if err != nil {
+		return err
+	}
+	return v.render(w, r, obj, form)
 }
 
-// delete removes the object and redirects to the success URL. The URL is
-// resolved and checked first, so a view without a valid target deletes
-// nothing.
+// render writes the confirmation page with the form.
+func (v DeleteView[T]) render(w http.ResponseWriter, r *http.Request, obj T, form *forms.Form) error {
+	core := v.core()
+	ctx := core.context(obj)
+	ctx["form"] = form
+	return core.render(w, r, obj, ctx)
+}
+
+// post validates the confirmation form, Django's BaseDeleteView.post: valid
+// data deletes the object, data with errors renders the page again.
+func (v DeleteView[T]) post(w http.ResponseWriter, r *http.Request) error {
+	obj, err := v.core().object(r)
+	if err != nil {
+		return err
+	}
+	form, err := v.form(r)
+	if err != nil {
+		return err
+	}
+	if !form.IsValid() {
+		if err := form.Err(); err != nil {
+			return err
+		}
+		return v.render(w, r, obj, form)
+	}
+	return v.deleteAndRedirect(w, r, obj)
+}
+
+// delete removes the object without a form, Django's DeletionMixin.delete.
 func (v DeleteView[T]) delete(w http.ResponseWriter, r *http.Request) error {
 	obj, err := v.core().object(r)
 	if err != nil {
 		return err
 	}
+	return v.deleteAndRedirect(w, r, obj)
+}
+
+// deleteAndRedirect removes obj and redirects to the success URL. The URL is
+// resolved and checked first, so a view without a valid target deletes
+// nothing.
+func (v DeleteView[T]) deleteAndRedirect(w http.ResponseWriter, r *http.Request, obj T) error {
 	target, err := v.successURL(r, obj)
 	if err != nil {
 		return err
@@ -236,7 +310,7 @@ func (v DeleteView[T]) successURL(r *http.Request, obj T) (string, error) {
 		return v.GetSuccessURL(r, obj)
 	}
 	if v.SuccessURL == "" {
-		return "", improperlyConfigured("No URL to redirect to. Provide a SuccessURL.")
+		return "", errNoSuccessURL()
 	}
 	return objectURL(v.DB, v.SuccessURL, obj)
 }

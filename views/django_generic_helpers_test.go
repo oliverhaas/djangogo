@@ -20,6 +20,10 @@ type Artist struct {
 	Name string `orm:"max_length=100"`
 }
 
+// GetAbsoluteURL returns the URL of the artist detail view, the
+// get_absolute_url of Django's Artist (reverse("artist_detail")).
+func (a Artist) GetAbsoluteURL() string { return fmt.Sprintf("/detail/artist/%d/", a.ID) }
+
 // Author is the Author model of Django's tests/generic_views/models.py. The Go
 // ORM has no Meta.ordering, so the list views of the ports order by name
 // themselves.
@@ -74,6 +78,9 @@ func genericEngine(t *testing.T) *templates.Engine {
 		"generic_views/page_template.html":         "{{ object.content }}",
 		"generic_views/confirm_delete.html":        object,
 		"generic_views/author_confirm_delete.html": object,
+		"generic_views/author_form.html":           "A form: {{ form }}",
+		"generic_views/artist_form.html":           "A form: {{ form }}",
+		"generic_views/form.html":                  "A generic form: {{ form }}",
 	})
 }
 

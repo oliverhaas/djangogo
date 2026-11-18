@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/oliverhaas/djangogo/djangotest"
+	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/views"
 )
@@ -74,16 +75,14 @@ func TestDeleteViewByDelete(t *testing.T) {
 }
 
 // Ported from Django: tests/generic_views/test_edit.py::DeleteViewTests.test_delete_with_redirect
-//
-// The target is Django's author create view, which this package does not have
-// yet, so the redirect is asserted without loading the target.
 func TestDeleteViewWithRedirect(t *testing.T) {
 	eachDeleteDB(t, func(t *testing.T, db *orm.DB, author Author) {
 		view := authorDelete(t, db)
 		view.SuccessURL = "/edit/authors/create/"
-		c := mount(t, "/edit/author/{pk}/delete/redirect/{$}", view)
+		c := mountEdit(t, db, "/edit/author/{pk}/delete/redirect/{$}", view)
 		resp := c.Post(fmt.Sprintf("/edit/author/%d/delete/redirect/", author.ID), nil)
-		djangotest.AssertRedirects(t, resp, "/edit/authors/create/", djangotest.FetchRedirectResponse(false))
+		djangotest.AssertStatus(t, resp, http.StatusFound)
+		djangotest.AssertRedirects(t, resp, "/edit/authors/create/")
 		assertAuthorCount(t, db, 0)
 	})
 }
@@ -95,22 +94,22 @@ func TestDeleteViewWithInterpolatedRedirect(t *testing.T) {
 		view.SuccessURL = "/edit/authors/create/?deleted={id}"
 		nonASCII := authorDelete(t, db)
 		nonASCII.SuccessURL = "/%C3%A9dit/authors/create/?deleted={id}"
-		c := mount(t,
+		c := mountEdit(t, db,
 			"/edit/author/{pk}/delete/interpolate_redirect/{$}", view,
 			"/edit/author/{pk}/delete/interpolate_redirect_nonascii/{$}", nonASCII,
 		)
 
 		resp := c.Post(fmt.Sprintf("/edit/author/%d/delete/interpolate_redirect/", author.ID), nil)
-		djangotest.AssertRedirects(t, resp, fmt.Sprintf("/edit/authors/create/?deleted=%d", author.ID),
-			djangotest.FetchRedirectResponse(false))
+		djangotest.AssertStatus(t, resp, http.StatusFound)
+		djangotest.AssertRedirects(t, resp, fmt.Sprintf("/edit/authors/create/?deleted=%d", author.ID))
 		assertAuthorCount(t, db, 0)
 
 		// Also test with escaped chars in URL.
 		a := Author{Name: "Randall Munroe", Slug: "randall-munroe"}
 		create(t, db, &a)
 		resp = c.Post(fmt.Sprintf("/edit/author/%d/delete/interpolate_redirect_nonascii/", a.ID), nil)
-		djangotest.AssertRedirects(t, resp, fmt.Sprintf("/%%C3%%A9dit/authors/create/?deleted=%d", a.ID),
-			djangotest.FetchRedirectResponse(false))
+		djangotest.AssertStatus(t, resp, http.StatusFound)
+		djangotest.AssertRedirects(t, resp, fmt.Sprintf("/%%C3%%A9dit/authors/create/?deleted=%d", a.ID))
 	})
 }
 
@@ -159,10 +158,85 @@ func TestDeleteViewWithoutRedirect(t *testing.T) {
 	})
 }
 
+// confirmDeleteForm is ConfirmDeleteForm of Django's
+// tests/generic_views/forms.py.
+func confirmDeleteForm(*http.Request) (*forms.Form, error) {
+	form := forms.New(forms.F("confirm", forms.NewBooleanField()))
+	form.CleanWith(func(form *forms.Form) error {
+		if _, ok := form.CleanedData()["confirm"]; !ok {
+			return forms.NewValidationError("You must confirm the delete.", "")
+		}
+		return nil
+	})
+	return form, nil
+}
+
+// authorDeleteForm is AuthorDeleteFormView of Django's
+// tests/generic_views/views.py.
+func authorDeleteForm(t *testing.T, db *orm.DB) views.DeleteView[Author] {
+	t.Helper()
+	view := authorDelete(t, db)
+	view.Form = confirmDeleteForm
+	return view
+}
+
 // Ported from Django: tests/generic_views/test_edit.py::DeleteViewTests.test_delete_with_form_as_post
-// Ported from Django: tests/generic_views/test_edit.py::DeleteViewTests.test_delete_with_form_as_post_with_validation_error
 func TestDeleteViewWithFormAsPost(t *testing.T) {
-	t.Skip("DeleteView has no form_class yet: the form support of the edit views lands with FormView")
+	eachDeleteDB(t, func(t *testing.T, db *orm.DB, author Author) {
+		c := mountEdit(t, db, "/edit/author/{pk}/delete/form/{$}", authorDeleteForm(t, db))
+		path := fmt.Sprintf("/edit/author/%d/delete/form/", author.ID)
+		resp := c.Get(path)
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		assertContextObject(t, db, resp, "object", author)
+		assertContextObject(t, db, resp, "author", author)
+		djangotest.AssertTemplateUsed(t, resp, "generic_views/author_confirm_delete.html")
+
+		resp = c.Post(path, map[string]string{"confirm": "True"})
+		djangotest.AssertStatus(t, resp, http.StatusFound)
+		djangotest.AssertRedirects(t, resp, "/list/authors/")
+		assertAuthorCount(t, db, 0)
+	})
+}
+
+// Ported from Django: tests/generic_views/test_edit.py::DeleteViewTests.test_delete_with_form_as_post_with_validation_error
+func TestDeleteViewWithFormAsPostWithValidationError(t *testing.T) {
+	eachDeleteDB(t, func(t *testing.T, db *orm.DB, author Author) {
+		c := mountEdit(t, db, "/edit/author/{pk}/delete/form/{$}", authorDeleteForm(t, db))
+		path := fmt.Sprintf("/edit/author/%d/delete/form/", author.ID)
+		resp := c.Get(path)
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		assertContextObject(t, db, resp, "object", author)
+		assertContextObject(t, db, resp, "author", author)
+		djangotest.AssertTemplateUsed(t, resp, "generic_views/author_confirm_delete.html")
+
+		resp = c.Post(path, nil)
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		errs := contextForm(t, resp).Errors()
+		djangotest.AssertEqual(t, errs.Len(), 2)
+		djangotest.AssertEqual(t, errs.Messages(), map[string][]string{
+			"__all__": {"You must confirm the delete."},
+			"confirm": {"This field is required."},
+		})
+		assertAuthorCount(t, db, 1)
+	})
+}
+
+// TestDeleteViewFormInContext asserts that the confirmation page of a view
+// without Form has an unbound form without fields under "form", the Form of
+// Django's BaseDeleteView, and that DELETE deletes without the form.
+func TestDeleteViewFormInContext(t *testing.T) {
+	eachDeleteDB(t, func(t *testing.T, db *orm.DB, author Author) {
+		c := mountDelete(t, db, authorDelete(t, db))
+		resp := c.Get(fmt.Sprintf("/edit/author/%d/delete/", author.ID))
+		form := contextForm(t, resp)
+		djangotest.AssertEqual(t, form.IsBound(), false)
+		djangotest.AssertEqual(t, len(form.FieldNames()), 0)
+
+		c = mount(t, "/edit/author/{pk}/delete/form/{$}", authorDeleteForm(t, db), "/list/authors/{$}", authorList(t, db))
+		resp = c.Delete(fmt.Sprintf("/edit/author/%d/delete/form/", author.ID), nil)
+		djangotest.AssertRedirects(t, resp, "/list/authors/")
+		assertAuthorCount(t, db, 0)
+	})
 }
 
 // TestDeleteViewMissingObject asserts that POST for an object that does not

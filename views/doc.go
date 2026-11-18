@@ -90,6 +90,12 @@
 //	              <app>/<model>_list.html
 //	DetailView[T] object and <model>, looked up by pk or slug, default
 //	              template <app>/<model>_detail.html
+//	FormView      form on GET, validation on POST and PUT: redirect for
+//	              valid data, the form with its errors otherwise
+//	CreateView[T] form for a new object, saved on valid POST and PUT data,
+//	              default template <app>/<model>_form.html
+//	UpdateView[T] form for an object looked up as by DetailView, saved on
+//	              valid data, default template <app>/<model>_form.html
 //	DeleteView[T] confirmation page on GET, delete and redirect on POST and
 //	              DELETE, default template <app>/<model>_confirm_delete.html
 //
@@ -107,6 +113,11 @@
 //	pk_url_kwarg, slug_url_kwarg          PKURLKwarg, SlugURLKwarg
 //	slug_field, query_pk_and_slug         SlugField, QueryPKAndSlug
 //	success_url                           SuccessURL
+//	fields                                Fields ([]string{forms.AllFields}
+//	                                      for "__all__")
+//	form_class, get_form_class()          Form, a function that returns a
+//	                                      new unbound form
+//	initial, prefix                       Initial, Prefix
 //	url, pattern_name                     URL, PatternName
 //	permanent, query_string               Permanent, QueryString
 //	preserve_request                      PreserveRequest
@@ -115,20 +126,30 @@
 //	get_queryset(), get_object()          GetQueryset, GetObject
 //	get_paginator()                       GetPaginator
 //	get_success_url()                     GetSuccessURL
+//	form_valid()                          FormValid
 //	get_redirect_url()                    GetRedirectURL
 //	delete() of the object                DeleteObject
 //
 // GetContextData receives the context the view has built and returns the one
 // to render, the Go form of calling super().get_context_data() and updating
-// the result. The values it sees are typed (T, []T, *Page[T], *Paginator[T]).
-// The view converts them to their template form after the hook.
+// the result. The values it sees are typed (T, []T, *Page[T], *Paginator[T],
+// *forms.Form, *forms.ModelForm[T]). The view converts them to their template
+// form after the hook.
+//
+// FormValid runs for valid data before a form view saves and redirects, the
+// Go form of overriding form_valid and calling super().form_valid(). It can
+// change the object of a model form (form.Instance()) or do the work of a
+// FormView. An error it adds to the form (form.AddError) turns the request
+// into form_invalid: the form is rendered again and nothing is saved. A form
+// view binds the form to the body of a POST or a PUT, url-encoded or
+// multipart.
 //
 // The keyword arguments of a Django URL are the path values of the route
 // pattern ({pk}, {slug}, {page}), and they are strings. Mount a generic view
 // on a pattern without a method ("/posts/{pk}/", not "GET /posts/{pk}/"),
 // because the view answers the other methods itself. Lookups and placeholders
 // use the column names of the model. A {name} placeholder in RedirectView.URL
-// or DeleteView.SuccessURL is filled percent-encoded.
+// or in the SuccessURL of a model view is filled percent-encoded.
 //
 // A model view reads the model name, the default template name and the
 // template form of its objects from the registry of DB, so set DB also when

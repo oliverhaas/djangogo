@@ -1,6 +1,8 @@
 package forms
 
 import (
+	"slices"
+
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -36,9 +38,14 @@ type modelFormConfig struct {
 	factories     map[string]fieldFactory
 }
 
+// AllFields is the name list entry that selects every editable field of the
+// model, Django's ALL_FIELDS ("__all__"): WithFields(AllFields).
+const AllFields = "__all__"
+
 // WithFields restricts the form to the named fields, in the given order
 // (Meta.fields). A name that is unknown, or that belongs to a field that is
-// not editable, is ignored.
+// not editable, is ignored. AllFields selects every editable field, in the
+// order of the model.
 func WithFields(names ...string) ModelFormOption {
 	return func(c *modelFormConfig) { c.only = append(c.only, names...) }
 }
@@ -169,7 +176,7 @@ func renamed[V any](m *orm.Model, in map[string]V) map[string]V {
 // the excluded names.
 func (c *modelFormConfig) includedNames(all []string) []string {
 	source := all
-	if len(c.only) > 0 {
+	if len(c.only) > 0 && !slices.Contains(c.only, AllFields) {
 		source = c.only
 	}
 	out := make([]string, 0, len(source))
