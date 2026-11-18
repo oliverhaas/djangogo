@@ -125,3 +125,10 @@ type SystemCheckError struct {
 func (e *SystemCheckError) Error() string {
 	return strings.TrimSuffix(e.Report.Text, "\n")
 }
+
+// Formatted returns the text a command line prints for the error, as Django's
+// run_from_argv writes a SystemCheckError: "SystemCheckError: " and the
+// report. manage.Registry.Run prints it this way.
+func (e *SystemCheckError) Formatted() string {
+	return "SystemCheckError: " + e.Report.Text
+}

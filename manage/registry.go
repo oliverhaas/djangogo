@@ -150,8 +150,9 @@ func (r *Registry) Execute(args []string) error {
 // usage line of the command followed by the message, and an unknown command
 // as Django's message followed by "Type 'prog help' for usage.". An error
 // that implements interface{ Quiet() bool } and returns true is not printed:
-// its source has reported it already. Any other error is printed as
-// "error: <msg>".
+// its source has reported it already. An error that implements
+// interface{ Formatted() string } is printed as that text. Any other error
+// is printed as "error: <msg>".
 func (r *Registry) Run(args []string) int {
 	err := r.Execute(args)
 	if err != nil {
@@ -168,11 +169,14 @@ func (r *Registry) report(err error) {
 	}
 	w := r.stderr()
 	var (
-		unknown  *unknownCommandError
-		usageErr *UsageError
-		cmdErr   *CommandError
+		formatted interface{ Formatted() string }
+		unknown   *unknownCommandError
+		usageErr  *UsageError
+		cmdErr    *CommandError
 	)
 	switch {
+	case errors.As(err, &formatted):
+		_, _ = io.WriteString(w, formatted.Formatted())
 	case errors.As(err, &unknown):
 		_, _ = fmt.Fprintf(w, "%s\nType '%s help' for usage.\n", unknown.Error(), r.prog())
 	case errors.As(err, &usageErr):

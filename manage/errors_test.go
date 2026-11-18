@@ -21,6 +21,14 @@ func (*checkError) Error() string   { return "System check identified some issue
 func (e *checkError) ExitCode() int { return e.code }
 func (e *checkError) Quiet() bool   { return e.quiet }
 
+// formattedError stands in for checks.SystemCheckError, which prints itself.
+type formattedError struct{}
+
+func (formattedError) Error() string { return "System check identified some issues:" }
+func (formattedError) Formatted() string {
+	return "SystemCheckError: System check identified some issues:\n"
+}
+
 // TestExitCode covers the mapping from an error to an exit code, for the
 // error itself and for an error that wraps it.
 func TestExitCode(t *testing.T) {
@@ -99,6 +107,11 @@ func TestRunReportsErrors(t *testing.T) {
 			"error that is not quiet",
 			&checkError{code: 1},
 			"error: System check identified some issues\n", 1,
+		},
+		{
+			"error that formats itself",
+			fmt.Errorf("check: %w", formattedError{}),
+			"SystemCheckError: System check identified some issues:\n", 1,
 		},
 	}
 	for _, tt := range tests {
