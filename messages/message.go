@@ -149,21 +149,27 @@ func (m Message) Repr() string {
 
 // TemplateMessage is a message as templates see it: a map with Django's
 // attribute names "message", "level", "tags", "extra_tags" and "level_tag",
-// so that {{ message.tags }} works. Its String method returns the escaped
-// text, so {{ message }} prints it. Apply filters to message.message rather
-// than to message, which would escape the text twice.
+// so that {{ message.tags }} works. {{ message }} prints the text escaped for
+// HTML. Apply filters to message.message rather than to message, which may
+// escape the text twice.
 type TemplateMessage map[string]any
 
-// htmlEscaper escapes text as pongo2's escape filter does.
-var htmlEscaper = strings.NewReplacer("&", "&amp;", ">", "&gt;", "<", "&lt;", `"`, "&quot;", "'", "&#39;")
+// htmlEscaper escapes the five characters Django's escape() does, with
+// Django's entities.
+var htmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#x27;")
 
-// String returns the text of the message, HTML-escaped. pongo2 escapes only
-// values of a string type and prints any other Stringer as it is, so the
-// escaping happens here, as Django escapes {{ message }}.
-func (t TemplateMessage) String() string {
+// HTML returns the text of the message escaped for HTML. A template engine
+// that prints a value with an HTML method as it is (Django's __html__
+// protocol) prints this.
+func (t TemplateMessage) HTML() string {
 	s, _ := t["message"].(string)
 	return htmlEscaper.Replace(s)
 }
+
+// String returns the same text as HTML, so that a template engine that prints
+// a fmt.Stringer without escaping it, as pongo2 does, still prints escaped
+// text.
+func (t TemplateMessage) String() string { return t.HTML() }
 
 // templateMessage returns the template view of m.
 func templateMessage(m Message) TemplateMessage {
