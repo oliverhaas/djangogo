@@ -36,38 +36,42 @@ func (db *DB) Rebind(query string) string {
 	if db.dialect.Placeholder(1) == "?" || !strings.Contains(query, "?") {
 		return query
 	}
+	return replaceParams(query, db.dialect.Placeholder)
+}
+
+// replaceParams returns query with its n-th "?" parameter (counted from 1)
+// replaced by sub(n). A question mark inside a quoted string, a quoted
+// identifier, or a comment is not a parameter.
+func replaceParams(query string, sub func(n int) string) string {
 	var b strings.Builder
 	n := 0
 	for i := 0; i < len(query); i++ {
 		ch := query[i]
+		end := -1
 		switch {
 		case ch == '?':
 			n++
-			b.WriteString(db.dialect.Placeholder(n))
+			b.WriteString(sub(n))
 			continue
 		case ch == '\'' || ch == '"':
-			end := skipQuoted(query, i)
-			b.WriteString(query[i:end])
-			i = end - 1
-			continue
+			end = skipQuoted(query, i)
 		case ch == '-' && strings.HasPrefix(query[i:], "--"):
-			end := len(query)
+			end = len(query)
 			if nl := strings.IndexByte(query[i:], '\n'); nl >= 0 {
 				end = i + nl
 			}
-			b.WriteString(query[i:end])
-			i = end - 1
-			continue
 		case ch == '/' && strings.HasPrefix(query[i:], "/*"):
-			end := len(query)
+			end = len(query)
 			if stop := strings.Index(query[i+2:], "*/"); stop >= 0 {
 				end = i + 2 + stop + 2
 			}
-			b.WriteString(query[i:end])
-			i = end - 1
+		}
+		if end < 0 {
+			b.WriteByte(ch)
 			continue
 		}
-		b.WriteByte(ch)
+		b.WriteString(query[i:end])
+		i = end - 1
 	}
 	return b.String()
 }
@@ -92,11 +96,12 @@ func skipQuoted(s string, start int) int {
 // RawQuerySet maps the rows of a hand-written SELECT to model T, the
 // counterpart of Django's Manager.raw(). Build one with Raw.
 type RawQuerySet[T any] struct {
-	db    *DB
-	model *Model
-	query string
-	args  []any
-	err   error
+	db           *DB
+	model        *Model
+	query        string
+	args         []any
+	translations map[string]string
+	err          error
 }
 
 // Raw prepares a hand-written SELECT whose rows are mapped to model T by
@@ -106,9 +111,10 @@ type RawQuerySet[T any] struct {
 //		"SELECT * FROM author WHERE age > ? ORDER BY name", 30).All(ctx)
 //
 // A result column is matched to the field with that column name or attribute
-// name. The primary key must be selected. A field without a column in the
-// result keeps its zero value, and a column that matches no field is ignored
-// by All and returned by AllAnnotated.
+// name; Translations maps other column names to fields. The primary key must
+// be selected. A field without a column in the result keeps its zero value,
+// where Django would load it on first access, and a column that matches no
+// field is ignored by All and returned by AllAnnotated.
 //
 // Values must be passed as args, written as "?" in the SQL; see DB.Exec. The
 // query runs in the transaction of an enclosing Atomic block and is seen by
@@ -122,6 +128,39 @@ func Raw[T any](db *DB, query string, args ...any) *RawQuerySet[T] {
 	}
 	r.model = m
 	return r
+}
+
+// Translations returns a copy of r that maps the result columns named by the
+// keys of columns to the fields named by their values, like the translations
+// argument of Django's raw(). A value is a field key as in Filter, without
+// lookups or relation hops. A translation of a column the result does not
+// have is ignored.
+func (r *RawQuerySet[T]) Translations(columns map[string]string) *RawQuerySet[T] {
+	out := *r
+	out.translations = make(map[string]string, len(r.translations)+len(columns))
+	for k, v := range r.translations {
+		out.translations[k] = v
+	}
+	for k, v := range columns {
+		out.translations[k] = v
+	}
+	return &out
+}
+
+// String returns the query with its parameters filled in, for logs and
+// debugging, as Django's repr of a RawQuerySet shows it:
+//
+//	<RawQuerySet: SELECT * FROM author WHERE last_name = foo>
+//
+// The text is not quoted SQL and must never be executed.
+func (r *RawQuerySet[T]) String() string {
+	filled := replaceParams(r.query, func(n int) string {
+		if n > len(r.args) {
+			return "?"
+		}
+		return fmt.Sprint(r.args[n-1])
+	})
+	return "<RawQuerySet: " + filled + ">"
 }
 
 // errRawPrimaryKey is returned when a raw query does not select the model's
@@ -172,7 +211,11 @@ func (r *RawQuerySet[T]) fetch(ctx context.Context, each func(row reflect.Value,
 	fields := make([]*Field, len(columns))
 	hasPK := false
 	for i, col := range columns {
-		if f, ok := lookupField(m, col); ok {
+		name := col
+		if to, ok := r.translations[col]; ok {
+			name = to
+		}
+		if f, ok := lookupField(m, name); ok {
 			fields[i] = f
 			hasPK = hasPK || f == m.pk
 		}
