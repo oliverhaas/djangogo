@@ -351,6 +351,9 @@ func newCommand(t *testing.T, db *orm.DB, migs []migrations.Migration, configs .
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	// The hints of the commands name the program where Django writes
+	// "manage.py" or "python manage.py"; the tests expect manage.py.
+	app.Commands.Prog = "manage.py"
 	c := &command{t: t, app: app, out: &bytes.Buffer{}}
 	app.Out = c.out
 	app.In = strings.NewReader("")

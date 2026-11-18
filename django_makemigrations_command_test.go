@@ -59,7 +59,7 @@ func TestMakemigrationsConflictExit(t *testing.T) {
 	assertCommandError(t, err,
 		"Conflicting migrations detected; multiple leaf nodes in the migration graph: "+
 			"(0002_conflicting_second, 0002_second in migrations).\n"+
-			"To fix them run 'python manage.py makemigrations --merge'", 1)
+			"To fix them run 'manage.py makemigrations --merge'", 1)
 }
 
 // Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_empty_no_app_specified

@@ -99,7 +99,7 @@ func (c *makemigrationsCommand) Run(args []string) error {
 			}
 		}
 	}
-	if err := conflictError(conflicts); err != nil {
+	if err := conflictError(conflicts, c.app.prog()); err != nil {
 		return err
 	}
 

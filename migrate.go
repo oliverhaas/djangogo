@@ -61,8 +61,9 @@ func (a *Application) checkAppLabels(loader *migrations.Loader, labels []string,
 }
 
 // conflictError returns Django's error for apps with more than one leaf
-// migration, or nil when there is none.
-func conflictError(conflicts map[string][]string) error {
+// migration, or nil when there is none. prog is the program name the hint
+// names in place of "python manage.py".
+func conflictError(conflicts map[string][]string, prog string) error {
 	if len(conflicts) == 0 {
 		return nil
 	}
@@ -76,7 +77,7 @@ func conflictError(conflicts map[string][]string) error {
 		parts[i] = fmt.Sprintf("%s in %s", strings.Join(conflicts[app], ", "), app)
 	}
 	return commandError(1, "Conflicting migrations detected; multiple leaf nodes in the migration graph: (%s).\n"+
-		"To fix them run 'python manage.py makemigrations --merge'", strings.Join(parts, "; "))
+		"To fix them run '%s makemigrations --merge'", strings.Join(parts, "; "), prog)
 }
 
 // findMigration resolves a migration name prefix with Django's error
@@ -175,7 +176,7 @@ func (c *migrateCommand) Run(args []string) error {
 	if err := loader.CheckConsistentHistory(); err != nil {
 		return err
 	}
-	if err := conflictError(loader.DetectConflicts()); err != nil {
+	if err := conflictError(loader.DetectConflicts(), c.app.prog()); err != nil {
 		return err
 	}
 
@@ -207,8 +208,9 @@ func (c *migrateCommand) Run(args []string) error {
 			}
 			c.println("  Your models in app(s): " + strings.Join(quoted, ", ") +
 				" have changes that are not yet reflected in a migration, and so won't be applied.")
-			c.println("  Run 'manage.py makemigrations' to make new migrations, and then re-run " +
-				"'manage.py migrate' to apply them.")
+			prog := c.app.prog()
+			c.println("  Run '" + prog + " makemigrations' to make new migrations, and then re-run '" +
+				prog + " migrate' to apply them.")
 		}
 	}
 

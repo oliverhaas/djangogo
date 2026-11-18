@@ -84,7 +84,7 @@ func TestMigrateConflictExit(t *testing.T) {
 	assertCommandError(t, err,
 		"Conflicting migrations detected; multiple leaf nodes in the migration graph: "+
 			"(0002_conflicting_second, 0002_second in migrations).\n"+
-			"To fix them run 'python manage.py makemigrations --merge'", 1)
+			"To fix them run 'manage.py makemigrations --merge'", 1)
 }
 
 // Go prints neither colors nor, without a verbosity option, the time at which
