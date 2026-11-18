@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 
@@ -31,83 +30,11 @@ func redirectToLogin(w http.ResponseWriter, r *http.Request, loginURL string) {
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-// HasPerm reports whether u holds the permission identified by codename.
-// Superusers always pass. Otherwise the permission is granted when u has it
-// directly (via UserPermission) or through any of u's groups (via UserGroup then
-// GroupPermission).
-func HasPerm(ctx context.Context, db *orm.DB, u *User, codename string) (bool, error) {
-	// An inactive user holds no permissions, even a superuser. This matches
-	// Django, where ModelBackend.has_perm is "user_obj.is_active and ..." and
-	// PermissionsMixin.has_perm only short-circuits when is_active and is_superuser.
-	if !u.IsActive {
-		return false, nil
-	}
-	if u.IsSuperuser {
-		return true, nil
-	}
-
-	permIDs, err := permissionIDs(ctx, db, codename)
-	if err != nil {
-		return false, err
-	}
-	if len(permIDs) == 0 {
-		return false, nil
-	}
-
-	// Direct user permissions.
-	direct, err := orm.Query[UserPermission](db).
-		Filter("user_id", u.ID, "permission_id__in", permIDs).
-		Exists(ctx)
-	if err != nil {
-		return false, err
-	}
-	if direct {
-		return true, nil
-	}
-
-	// Group permissions: collect the user's groups, then look for a grant.
-	groupIDs, err := userGroupIDs(ctx, db, u.ID)
-	if err != nil {
-		return false, err
-	}
-	if len(groupIDs) == 0 {
-		return false, nil
-	}
-	return orm.Query[GroupPermission](db).
-		Filter("group_id__in", groupIDs, "permission_id__in", permIDs).
-		Exists(ctx)
-}
-
-// permissionIDs returns the ids of every Permission whose codename matches.
-func permissionIDs(ctx context.Context, db *orm.DB, codename string) ([]int64, error) {
-	perms, err := orm.Query[Permission](db).Filter("codename", codename).All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]int64, len(perms))
-	for i := range perms {
-		ids[i] = perms[i].ID
-	}
-	return ids, nil
-}
-
-// userGroupIDs returns the ids of every Group the user belongs to.
-func userGroupIDs(ctx context.Context, db *orm.DB, userID int64) ([]int64, error) {
-	links, err := orm.Query[UserGroup](db).Filter("user_id", userID).All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]int64, len(links))
-	for i := range links {
-		ids[i] = links[i].Group.PK()
-	}
-	return ids, nil
-}
-
-// PermissionRequired returns middleware that guards the wrapped handler by
-// codename: anonymous requests are redirected to loginURL, an authenticated user
-// lacking the permission gets a 403, and a user holding it proceeds.
-func PermissionRequired(db *orm.DB, codename, loginURL string) func(http.Handler) http.Handler {
+// PermissionRequired returns middleware that guards the wrapped handler by the
+// permission perm ("<app_label>.<codename>"): anonymous requests are redirected
+// to loginURL, an authenticated user lacking the permission gets a 403, and a
+// user holding it proceeds.
+func PermissionRequired(db *orm.DB, perm, loginURL string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
@@ -116,7 +43,7 @@ func PermissionRequired(db *orm.DB, codename, loginURL string) func(http.Handler
 				redirectToLogin(w, r, loginURL)
 				return
 			}
-			allowed, err := HasPerm(ctx, db, u, codename)
+			allowed, err := HasPerm(ctx, db, u, perm)
 			if err != nil {
 				http.Error(w, "permission check failed", http.StatusInternalServerError)
 				return

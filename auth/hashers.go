@@ -11,6 +11,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -23,6 +24,51 @@ const keyLen = 32
 
 // algoPBKDF2SHA256 is the algorithm identifier in the encoded hash's first field.
 const algoPBKDF2SHA256 = "pbkdf2_sha256"
+
+// unusablePasswordPrefix marks a password that no input matches. It never
+// occurs at the start of an encoded hash (Django's UNUSABLE_PASSWORD_PREFIX).
+const unusablePasswordPrefix = "!"
+
+// unusablePasswordSuffixLength is the number of random characters after the
+// prefix. They keep a password reset token of one user from working for
+// another user without a password.
+const unusablePasswordSuffixLength = 40
+
+// randomChars is the alphabet of generated salts and tokens (Django's
+// RANDOM_STRING_CHARS).
+const randomChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+// randomString returns n characters drawn uniformly from randomChars with the
+// system's secure random source (Django's get_random_string).
+func randomString(n int) (string, error) {
+	out := make([]byte, n)
+	for i := range out {
+		idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(randomChars))))
+		if err != nil {
+			return "", fmt.Errorf("auth: read random data: %w", err)
+		}
+		out[i] = randomChars[idx.Int64()]
+	}
+	return string(out), nil
+}
+
+// MakeUnusablePassword returns a value for the password column that
+// CheckPassword never accepts: "!" followed by random characters (Django's
+// make_password(None)).
+func MakeUnusablePassword() (string, error) {
+	suffix, err := randomString(unusablePasswordSuffixLength)
+	if err != nil {
+		return "", err
+	}
+	return unusablePasswordPrefix + suffix, nil
+}
+
+// IsPasswordUsable reports whether encoded may hold a password hash, that is,
+// whether it was not made by MakeUnusablePassword (Django's
+// is_password_usable). An empty value is not usable.
+func IsPasswordUsable(encoded string) bool {
+	return encoded != "" && !strings.HasPrefix(encoded, unusablePasswordPrefix)
+}
 
 // MakePassword hashes raw into the Django format "pbkdf2_sha256$<iter>$<salt>$<b64hash>".
 // It draws a fresh 16-byte random salt and derives the key with Iterations rounds

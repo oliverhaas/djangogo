@@ -20,8 +20,8 @@ func TestCreateUserHashesPasswordAndPersists(t *testing.T) {
 	if u.ID == 0 {
 		t.Error("CreateUser did not assign a primary key")
 	}
-	if u.PasswordHash == "s3cret" || u.PasswordHash == "" {
-		t.Errorf("password was not hashed: %q", u.PasswordHash)
+	if u.Password == "s3cret" || u.Password == "" {
+		t.Error("password was not hashed")
 	}
 	if !u.CheckPassword("s3cret") {
 		t.Error("CheckPassword failed for the created user")
