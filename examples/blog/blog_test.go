@@ -131,8 +131,8 @@ func TestPostDetailShowsCommentForm(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`name="csrfmiddlewaretoken"`,
-		`name="Name"`,
-		`name="Body"`,
+		`name="name"`,
+		`name="body"`,
 		"No comments yet",
 	} {
 		if !strings.Contains(body, want) {
@@ -158,8 +158,8 @@ func TestCommentSubmissionCreatesComment(t *testing.T) {
 	}
 
 	form := url.Values{
-		"Name":                {"Alice"},
-		"Body":                {"Great write-up!"},
+		"name":                {"Alice"},
+		"body":                {"Great write-up!"},
 		"csrfmiddlewaretoken": {m[1]},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/posts/1/", strings.NewReader(form.Encode()))
