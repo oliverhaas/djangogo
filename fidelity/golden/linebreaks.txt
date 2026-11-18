@@ -1,0 +1,3 @@
+<p>line 1<br>line &lt;2&gt;</p>
+
+<p>para 2</p>
