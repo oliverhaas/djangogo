@@ -91,8 +91,8 @@ func TestProjectWritesExpectedFiles(t *testing.T) {
 	if err := Project(dir, "myproj", Options{}); err != nil {
 		t.Fatalf("Project: %v", err)
 	}
-	want := make([]string, 0, 4+len(appFiles))
-	want = append(want, "go.mod", "main.go", "migrations/myprojapp/doc.go", "settings.go")
+	want := make([]string, 0, 5+len(appFiles))
+	want = append(want, "go.mod", "main.go", "migrations/auth/doc.go", "migrations/myprojapp/doc.go", "settings.go")
 	for _, f := range appFiles {
 		want = append(want, "myprojapp/"+strings.ReplaceAll(f, "blog", "myprojapp"))
 	}
@@ -139,6 +139,7 @@ func TestProjectMainWiresAppAndMigrations(t *testing.T) {
 	for _, want := range []string{
 		`"myproj/myprojapp"`,
 		`_ "myproj/migrations/myprojapp"`,
+		`_ "myproj/migrations/auth"`,
 		"&myprojapp.App{}",
 		"auth.App{}",
 		"settings()",

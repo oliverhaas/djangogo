@@ -1,6 +1,7 @@
 // Command [[.Module]] runs the management commands of the project, the
 // counterpart of Django's manage.py:
 //
+//	go run . makemigrations
 //	go run . migrate
 //	go run . createsuperuser
 //	go run . runserver
@@ -17,8 +18,10 @@ import (
 	"github.com/oliverhaas/djangogo/auth"
 
 	"[[.Module]]/[[.AppName]]"
+
 	// Importing the migrations of an app registers them with migrate.
 	_ "[[.Module]]/migrations/[[.AppName]]"
+	_ "[[.Module]]/migrations/auth"
 )
 
 func main() {
