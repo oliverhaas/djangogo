@@ -25,7 +25,8 @@ func (e *Engine) AddContextProcessor(processors ...ContextProcessor) {
 // earlier ones) and then data, whose keys win over processor keys, exactly as
 // the context passed to Django's render() overrides processor output. When the
 // request context carries a Recorder (see WithRecorder), the render is
-// recorded with its template name and final context.
+// recorded with its template name and final context, followed by the
+// templates it extends and the ones it includes.
 func (e *Engine) RenderRequest(r *http.Request, name string, data map[string]any) (string, error) {
 	if r == nil {
 		return "", fmt.Errorf("templates: RenderRequest %q: request must not be nil", name)
@@ -35,18 +36,40 @@ func (e *Engine) RenderRequest(r *http.Request, name string, data map[string]any
 		maps.Copy(merged, p(r))
 	}
 	maps.Copy(merged, data)
-	out, err := e.Render(name, merged)
+	rec, recording := RecorderFromContext(r.Context())
+	st := &renderState{request: r, recording: recording}
+	out, err := e.render(name, merged, st)
 	if err != nil {
 		return "", err
 	}
-	if rec, ok := RecorderFromContext(r.Context()); ok {
+	if recording {
 		rec.record(Rendered{Name: name, Context: merged})
+		for _, parent := range e.loader.chain(name) {
+			rec.record(Rendered{Name: parent, Context: merged})
+		}
+		for _, inc := range st.included {
+			rec.record(inc)
+		}
 	}
 	return out, nil
 }
 
+// currentAppKey is the context key of WithCurrentApp.
+type currentAppKey struct{}
+
+// WithCurrentApp returns a copy of ctx that names the current application,
+// Django's request.current_app. {% url %} uses it to choose between the
+// instances of a namespaced app; without it the namespace the request
+// resolved to decides.
+func WithCurrentApp(ctx context.Context, app string) context.Context {
+	return context.WithValue(ctx, currentAppKey{}, app)
+}
+
 // Rendered describes one template render observed by a Recorder: the template
-// name as requested and the final context it was rendered with.
+// name as requested and the final context it was rendered with. A template
+// reached through {% extends %} is recorded with the context of the template
+// that extends it; one reached through {% include %} with the variables the
+// include made visible to it.
 type Rendered struct {
 	Name    string
 	Context map[string]any

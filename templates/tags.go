@@ -13,7 +13,10 @@ import (
 var StaticBase = "/static/"
 
 // Resolver reverses a named route to a URL path, the signature behind {% url %}.
-// It matches urls.Router.Reverse so a router can be wired in directly.
+// It matches urls.Router.Reverse so a router can be wired in directly. The
+// positional arguments of the tag arrive as args; keyword arguments follow as
+// one urls.Kwargs value, and the current application, when the request has
+// one, as a urls.CurrentApp value.
 type Resolver func(name string, args ...any) (string, error)
 
 // resolverContextKey is the context key under which an Engine injects its
@@ -56,15 +59,22 @@ func URLResolverFunc() Resolver {
 // engines are created.
 var registerOnce sync.Once
 
-func init() { registerOnce.Do(registerTags) }
+func init() {
+	registerOnce.Do(func() {
+		registerTags()
+		registerFilters()
+	})
+}
 
 // registerTags registers the Django-style {% static %}, {% url %} and
 // {% csrf_token %} tags with pongo2. pongo2 deliberately omits these (they are
-// web-framework specific), so they are implemented as real tags here.
+// web-framework specific), so they are implemented as real tags here. The
+// pongo2 tags that behave differently from Django's are replaced.
 func registerTags() {
 	mustRegister("static", staticTagParser)
 	mustRegister("url", urlTagParser)
 	mustRegister("csrf_token", csrfTokenTagParser)
+	mustReplace("include", includeTagParser)
 }
 
 // mustRegister registers a tag and panics if pongo2 rejects it. A rejection means
@@ -72,6 +82,14 @@ func registerTags() {
 func mustRegister(name string, fn pongo2.TagParser) {
 	if err := pongo2.RegisterTag(name, fn); err != nil {
 		panic(fmt.Sprintf("templates: register tag %q: %v", name, err))
+	}
+}
+
+// mustReplace replaces a pongo2 tag and panics if pongo2 does not have it, which
+// means the pongo2 version changed under this package.
+func mustReplace(name string, fn pongo2.TagParser) {
+	if err := pongo2.ReplaceTag(name, fn); err != nil {
+		panic(fmt.Sprintf("templates: replace tag %q: %v", name, err))
 	}
 }
 
@@ -109,69 +127,6 @@ func staticTagParser(_ *pongo2.Parser, _ *pongo2.Token, args *pongo2.Parser) (po
 		return nil, args.Error("templates: 'static' takes exactly one argument", nil)
 	}
 	return &staticTagNode{pathExpr: pathExpr}, nil
-}
-
-// urlTagNode implements {% url <name-expr> [arg-expr ...] %}.
-type urlTagNode struct {
-	nameExpr pongo2.IEvaluator
-	argExprs []pongo2.IEvaluator
-}
-
-// Execute resolves the route name and arguments against the context and writes the
-// reversed URL. It prefers a per-render Resolver injected into the context (by
-// Engine.SetResolver), falling back to the process-global resolver. A resolver
-// error is surfaced as a template error.
-func (n *urlTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter) *pongo2.Error {
-	nameVal, err := n.nameExpr.Evaluate(ctx)
-	if err != nil {
-		return err
-	}
-	args := make([]any, 0, len(n.argExprs))
-	for _, expr := range n.argExprs {
-		val, verr := expr.Evaluate(ctx)
-		if verr != nil {
-			return verr
-		}
-		args = append(args, val.Interface())
-	}
-	resolve := resolverFrom(ctx)
-	resolved, rerr := resolve(nameVal.String(), args...)
-	if rerr != nil {
-		return ctx.OrigError(fmt.Errorf("templates: url %q: %w", nameVal.String(), rerr), nil)
-	}
-	if _, werr := w.WriteString(resolved); werr != nil {
-		return ctx.OrigError(werr, nil)
-	}
-	return nil
-}
-
-// resolverFrom returns the per-render Resolver carried in the context, or the
-// process-global resolver (URLResolverFunc) when none is present.
-func resolverFrom(ctx *pongo2.ExecutionContext) Resolver {
-	if v, ok := ctx.Public[resolverContextKey]; ok {
-		if r, ok := v.(Resolver); ok && r != nil {
-			return r
-		}
-	}
-	return URLResolverFunc()
-}
-
-// urlTagParser parses {% url "route-name" arg1 arg2 %}. The name and each argument
-// are pongo2 expressions evaluated against the context.
-func urlTagParser(_ *pongo2.Parser, _ *pongo2.Token, args *pongo2.Parser) (pongo2.INodeTag, *pongo2.Error) {
-	nameExpr, err := args.ParseExpression()
-	if err != nil {
-		return nil, err
-	}
-	node := &urlTagNode{nameExpr: nameExpr}
-	for args.Remaining() > 0 {
-		argExpr, aerr := args.ParseExpression()
-		if aerr != nil {
-			return nil, aerr
-		}
-		node.argExprs = append(node.argExprs, argExpr)
-	}
-	return node, nil
 }
 
 // csrfTokenTagNode implements {% csrf_token %}.
