@@ -3,6 +3,7 @@ package postgres
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -44,6 +45,27 @@ func (Dialect) LookupSQL(lookup, lhs, rhs string) (string, bool) {
 		return lhs + "::text ~* " + rhs, true
 	default:
 		return "", false
+	}
+}
+
+// LiteralSQL casts the placeholder of an expression literal to the SQL type
+// of its Go value. Without the cast the server has to infer the type of the
+// parameter, and where nothing gives a hint, as in "SELECT MAX($1)", it
+// assumes text and the driver then cannot send a number.
+func (Dialect) LiteralSQL(placeholder string, v any) string {
+	switch v.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return placeholder + "::bigint"
+	case float32, float64:
+		return placeholder + "::double precision"
+	case bool:
+		return placeholder + "::boolean"
+	case string:
+		return placeholder + "::text"
+	case time.Time:
+		return placeholder + "::timestamptz"
+	default:
+		return placeholder
 	}
 }
 

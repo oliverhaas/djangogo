@@ -87,6 +87,17 @@ func (w *sqlWriter) param(v any) {
 	w.b.WriteString(w.d.Placeholder(len(w.args)))
 }
 
+// literal binds v, the literal of an expression, and appends its placeholder,
+// typed by a dialect that needs that.
+func (w *sqlWriter) literal(v any) {
+	w.args = append(w.args, v)
+	placeholder := w.d.Placeholder(len(w.args))
+	if ld, ok := w.d.(LiteralDialect); ok {
+		placeholder = ld.LiteralSQL(placeholder, v)
+	}
+	w.b.WriteString(placeholder)
+}
+
 // ident appends a quoted identifier.
 func (w *sqlWriter) ident(name string) { w.b.WriteString(w.d.Quote(name)) }
 
@@ -138,13 +149,21 @@ func (n colNode) vtype() valueType { return fieldValueType(n.field) }
 // aggregate is false: a column is not an aggregate.
 func (colNode) aggregate() bool { return false }
 
-// paramNode is a literal bound as a query parameter.
+// paramNode is a value bound as a query parameter. literal marks the literal
+// of an expression, which has no column next to it that gives it a type.
 type paramNode struct {
-	value any
+	value   any
+	literal bool
 }
 
 // render binds the value.
-func (n paramNode) render(w *sqlWriter) { w.param(n.value) }
+func (n paramNode) render(w *sqlWriter) {
+	if n.literal {
+		w.literal(n.value)
+		return
+	}
+	w.param(n.value)
+}
 
 // vtype follows the Go type of the value.
 func (n paramNode) vtype() valueType { return goValueType(n.value) }

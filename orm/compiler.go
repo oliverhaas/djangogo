@@ -64,6 +64,7 @@ func (c *compiler) column(p fieldPath) colNode {
 	if len(joins) > 0 {
 		j = joins[len(joins)-1]
 	}
+	c.used = append(c.used, c.joins.reserve(j, p.trimmed)...)
 	return colNode{join: j, field: p.field}
 }
 
@@ -93,7 +94,7 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		return paramNode{value: v}, nil
+		return paramNode{value: v, literal: v != nil}, nil
 	case exprBinary:
 		left, err := c.resolveExpr(*e.left)
 		if err != nil {
@@ -128,19 +129,18 @@ func (c *compiler) resolveAggregate(e Expr) (sqlNode, error) {
 		return nil, err
 	}
 	if arg.aggregate() {
-		return nil, fmt.Errorf("orm: cannot compute %s: its argument is an aggregate", aggregateName(e))
+		// Django's wording: Cannot compute Avg('n'): 'n' is an aggregate.
+		fn := e.fn[:1] + strings.ToLower(e.fn[1:])
+		name := "its argument"
+		if e.arg.kind == exprField {
+			name = "'" + e.arg.key + "'"
+		}
+		return nil, &FieldError{
+			Model:   c.q.model.Name(),
+			Message: fmt.Sprintf("cannot compute %s(%s): %s is an aggregate", fn, name, name),
+		}
 	}
 	return aggNode{fn: e.fn, arg: arg, distinct: e.distinct}, nil
-}
-
-// aggregateName describes an aggregate for an error message, in Django's
-// form: Avg('age').
-func aggregateName(e Expr) string {
-	name := e.fn[:1] + strings.ToLower(e.fn[1:])
-	if e.arg != nil && e.arg.kind == exprField {
-		return name + "('" + e.arg.key + "')"
-	}
-	return name + "(...)"
 }
 
 // selectItem is one entry of a SELECT list, with an optional output alias.
@@ -374,6 +374,9 @@ func (s *selectStmt) renderOrder(w *sqlWriter) {
 func (c *compiler) renderFrom(w *sqlWriter) {
 	w.ident(c.joins.base.model.Table())
 	for _, j := range c.joins.joins {
+		if !j.read {
+			continue
+		}
 		if j.outer {
 			w.write(" LEFT OUTER JOIN ")
 		} else {

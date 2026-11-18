@@ -140,7 +140,7 @@ func (q *query) reversed() *query {
 // their default alias.
 func (q *query) annotate(args []any) *query {
 	cp := q.clone()
-	annots, err := parseAnnotations(args)
+	annots, err := parseAnnotations(args, "annotations")
 	if err != nil {
 		cp.setErr(err)
 		return cp
@@ -148,7 +148,7 @@ func (q *query) annotate(args []any) *query {
 	for _, a := range annots {
 		if cp.model != nil {
 			if _, _, ok := lookupName(cp.model, a.name); ok {
-				cp.setErr(fmt.Errorf("orm: the annotation %q conflicts with a field on the model", a.name))
+				cp.setErr(fmt.Errorf("orm: the annotation '%s' conflicts with a field on the model", a.name))
 				return cp
 			}
 		}
@@ -188,8 +188,9 @@ func (q *query) withValues(keys []string) *query {
 
 // parseAnnotations reads the arguments of Annotate and Aggregate: a string
 // name followed by its Expr, or a bare aggregate that takes Django's default
-// alias "<key>__<function>".
-func parseAnnotations(args []any) ([]annotation, error) {
+// alias "<key>__<function>". what names the arguments in an error:
+// "annotations" or "aggregates".
+func parseAnnotations(args []any, what string) ([]annotation, error) {
 	var out []annotation
 	for i := 0; i < len(args); i++ {
 		switch a := args[i].(type) {
@@ -209,7 +210,7 @@ func parseAnnotations(args []any) ([]annotation, error) {
 		case Expr:
 			name, ok := a.defaultAlias()
 			if !ok {
-				return nil, errors.New("orm: complex annotations require an alias")
+				return nil, errors.New("orm: complex " + what + " require an alias")
 			}
 			out = append(out, annotation{name: name, expr: a})
 		default:

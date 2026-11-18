@@ -36,7 +36,7 @@ func (q *query) deleteSQL() (string, []any, error) {
 // statements cannot join, so a query whose filters span relations selects the
 // matching primary keys in a subquery instead.
 func (c *compiler) renderRestriction(w *sqlWriter) error {
-	if len(c.joins.joins) == 0 && !c.q.hasAggregates() {
+	if c.joins.used() == 0 && !c.q.hasAggregates() {
 		if !c.where.empty() {
 			w.write(" WHERE ")
 			c.where.render(w)
@@ -79,7 +79,7 @@ func (q *query) updateSQL(pairs []any) (string, []any, error) {
 		field *Field
 		value sqlNode
 	}
-	filterJoins := len(c.joins.joins)
+	filterJoins := c.joins.used()
 	sets := make([]assignment, 0, len(pairs)/2)
 	for i := 0; i < len(pairs); i += 2 {
 		key, ok := pairs[i].(string)
@@ -99,7 +99,7 @@ func (q *query) updateSQL(pairs []any) (string, []any, error) {
 		}
 		sets = append(sets, assignment{field: f, value: value})
 	}
-	if len(c.joins.joins) != filterJoins {
+	if c.joins.used() != filterJoins {
 		return "", nil, errors.New("orm: joined field references are not permitted in this query")
 	}
 	if c.empty {

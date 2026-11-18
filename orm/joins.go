@@ -15,6 +15,9 @@ type join struct {
 	// outer selects LEFT OUTER JOIN over INNER JOIN. It is always false for
 	// the base table.
 	outer bool
+	// read reports that the statement reads a column of the table. A join that
+	// is only reserved is left out of the FROM clause.
+	read bool
 }
 
 // joinSet is the set of tables a query reads. A relation traversed by several
@@ -41,8 +44,33 @@ func newJoinSet(m *Model) *joinSet {
 // hop is nullable or its parent is LEFT OUTER, and INNER otherwise, as in
 // Django's Query.join.
 func (js *joinSet) setup(hops []hop) []*join {
+	return js.follow(js.base, hops, true)
+}
+
+// reserve records the joins of hops from parent without reading from them. A
+// condition on a foreign-key column is answered by the column itself, but it
+// still says something about the relation: the join takes part in the votes
+// on the join types, so that a later key which does read the table finds it
+// with the right type. This is the join Django creates and then trims.
+func (js *joinSet) reserve(parent *join, hops []hop) []*join {
+	return js.follow(parent, hops, false)
+}
+
+// used returns the number of joins the statement reads from.
+func (js *joinSet) used() int {
+	n := 0
+	for _, j := range js.joins {
+		if j.read {
+			n++
+		}
+	}
+	return n
+}
+
+// follow returns the join of each hop from parent, creating the missing ones
+// and marking them as read when read is set.
+func (js *joinSet) follow(parent *join, hops []hop, read bool) []*join {
 	out := make([]*join, 0, len(hops))
-	parent := js.base
 	for _, h := range hops {
 		j := js.find(parent, h)
 		if j == nil {
@@ -57,6 +85,7 @@ func (js *joinSet) setup(hops []hop) []*join {
 			}
 			js.joins = append(js.joins, j)
 		}
+		j.read = j.read || read
 		out = append(out, j)
 		parent = j
 	}

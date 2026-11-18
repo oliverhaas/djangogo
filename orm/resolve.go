@@ -148,6 +148,9 @@ type fieldPath struct {
 	// relation reports that the key ended on a relation rather than on a
 	// plain field.
 	relation bool
+	// trimmed holds the hops of a trailing relation whose join is not needed,
+	// because field already holds the key of its target.
+	trimmed []hop
 }
 
 // resolvePath walks the parts of a key from model m, following relations for
@@ -180,6 +183,7 @@ func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 			if pending.local != nil && rel == nil && f == pending.target.PrimaryKey() {
 				// "author__id" is the local "author_id" column.
 				p.field = pending.local
+				p.trimmed = pending.hops
 				p.rest = parts[i+1:]
 				return p, nil
 			}
@@ -202,6 +206,7 @@ func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 	p.relation = true
 	if pending.local != nil {
 		p.field = pending.local
+		p.trimmed = pending.hops
 		return p, nil
 	}
 	p.hops = append(p.hops, pending.hops...)

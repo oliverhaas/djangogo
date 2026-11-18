@@ -40,6 +40,9 @@ func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, err
 			}
 			items[i] = selectItem{node: n, alias: a.name}
 			types[i] = n.vtype()
+			// A later aggregate of the call may refer to this one by name.
+			c.annots[a.name] = n
+			c.annotNames = append(c.annotNames, a.name)
 		}
 		if skip {
 			return "", nil, nil, errEmptyResultSet
@@ -206,7 +209,7 @@ func (q *query) runAggregate(ctx context.Context, args []any) (map[string]any, e
 	if q.err != nil {
 		return nil, q.err
 	}
-	aggs, err := parseAnnotations(args)
+	aggs, err := parseAnnotations(args, "aggregates")
 	if err != nil {
 		return nil, err
 	}
