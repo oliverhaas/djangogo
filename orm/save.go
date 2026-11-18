@@ -228,7 +228,8 @@ func (db *DB) insert(ctx context.Context, m *Model, objs []reflect.Value, ignore
 			w.write(")")
 		}
 	}
-	if ignoreConflicts {
+	// A row of defaults has no value that could conflict.
+	if ignoreConflicts && len(fields) > 0 {
 		w.write(" ON CONFLICT DO NOTHING")
 	}
 

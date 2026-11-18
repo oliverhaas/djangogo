@@ -274,6 +274,21 @@ func (n subColNode) vtype() valueType { return n.typ }
 // aggregate is false: the aggregate, if any, was computed inside the subquery.
 func (subColNode) aggregate() bool { return false }
 
+// readsJoin reports whether n reads a column of a joined table, as opposed to
+// the base table of the query.
+func readsJoin(n sqlNode) bool {
+	switch n := n.(type) {
+	case colNode:
+		return n.join.parent != nil
+	case binaryNode:
+		return readsJoin(n.left) || readsJoin(n.right)
+	case aggNode:
+		return n.arg != nil && readsJoin(n.arg)
+	default:
+		return false
+	}
+}
+
 // nodeKey returns the SQL text of n, which identifies the expression when
 // duplicates are removed from a GROUP BY or SELECT list. Bound values do not
 // take part in the key.

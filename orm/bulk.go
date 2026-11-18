@@ -9,17 +9,29 @@ import (
 
 // bulkConfig collects the options of BulkCreate.
 type bulkConfig struct {
+	// batchSize is the requested number of rows per statement, zero when
+	// BatchSize was not given.
 	batchSize       int
+	batchSizeErr    error
 	ignoreConflicts bool
 }
+
+// errBatchSize is returned for a batch size below one. It is Django's "Batch
+// size must be a positive integer."
+var errBatchSize = errors.New("orm: batch size must be a positive integer")
 
 // BulkOption is an optional argument of BulkCreate.
 type BulkOption func(*bulkConfig)
 
 // BatchSize caps the number of rows BulkCreate writes per INSERT statement,
-// like Django's batch_size.
+// like Django's batch_size. A size below one is an error.
 func BatchSize(n int) BulkOption {
-	return func(c *bulkConfig) { c.batchSize = n }
+	return func(c *bulkConfig) {
+		c.batchSize = n
+		if n < 1 {
+			c.batchSizeErr = errBatchSize
+		}
+	}
 }
 
 // IgnoreConflicts makes BulkCreate skip the rows that violate a constraint
@@ -37,20 +49,21 @@ func IgnoreConflicts() BulkOption {
 //
 // The objects are split over several statements when the dialect caps the
 // parameters of one statement, when BatchSize is given, or when only some of
-// them carry a primary key. Several statements run in one transaction.
+// them carry a primary key. A model with no column but its generated key is
+// written one row per statement. Several statements run in one transaction.
 func (qs *QuerySet[T]) BulkCreate(ctx context.Context, objs []*T, opts ...BulkOption) error {
 	if qs.q.err != nil {
 		return qs.q.err
-	}
-	if len(objs) == 0 {
-		return nil
 	}
 	cfg := &bulkConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	if cfg.batchSize < 0 {
-		return errors.New("orm: batch size must be a positive integer")
+	if cfg.batchSizeErr != nil {
+		return cfg.batchSizeErr
+	}
+	if len(objs) == 0 {
+		return nil
 	}
 	db, m := qs.q.db, qs.q.model
 	pk := m.PrimaryKey()
@@ -75,8 +88,14 @@ func (qs *QuerySet[T]) BulkCreate(ctx context.Context, objs []*T, opts ...BulkOp
 	}
 
 	var batches [][]reflect.Value
-	for _, group := range [][]reflect.Value{withPK, withoutPK} {
-		size := batchRows(db.dialect, len(m.fields), cfg.batchSize, len(group))
+	for i, group := range [][]reflect.Value{withPK, withoutPK} {
+		// The second group leaves the key column to the database.
+		columns := len(m.fields) - i
+		// A row without columns is written as DEFAULT VALUES, one per statement.
+		size := 1
+		if columns > 0 {
+			size = batchRows(db.dialect, columns, cfg.batchSize, len(group))
+		}
 		for start := 0; start < len(group); start += size {
 			batches = append(batches, group[start:min(start+size, len(group))])
 		}

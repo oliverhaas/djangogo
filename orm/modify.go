@@ -79,7 +79,6 @@ func (q *query) updateSQL(pairs []any) (string, []any, error) {
 		field *Field
 		value sqlNode
 	}
-	filterJoins := c.joins.used()
 	sets := make([]assignment, 0, len(pairs)/2)
 	for i := 0; i < len(pairs); i += 2 {
 		key, ok := pairs[i].(string)
@@ -98,9 +97,6 @@ func (q *query) updateSQL(pairs []any) (string, []any, error) {
 			return "", nil, err
 		}
 		sets = append(sets, assignment{field: f, value: value})
-	}
-	if c.joins.used() != filterJoins {
-		return "", nil, errors.New("orm: joined field references are not permitted in this query")
 	}
 	if c.empty {
 		return "", nil, errEmptyResultSet
@@ -124,7 +120,9 @@ func (q *query) updateSQL(pairs []any) (string, []any, error) {
 	return w.String(), w.args, nil
 }
 
-// assignedValue resolves the value an UPDATE assigns to field f.
+// assignedValue resolves the value an UPDATE assigns to field f. An
+// expression may only read the row that is updated: the statement has no
+// joins, and an aggregate has no place in it.
 func (c *compiler) assignedValue(f *Field, value any) (sqlNode, error) {
 	var expr *Expr
 	switch e := value.(type) {
@@ -144,8 +142,11 @@ func (c *compiler) assignedValue(f *Field, value any) (sqlNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	if readsJoin(n) {
+		return nil, &FieldError{Model: c.q.model.Name(), Message: "joined field references are not permitted in this query"}
+	}
 	if n.aggregate() {
-		return nil, errors.New("orm: aggregate functions are not allowed in this query")
+		return nil, &FieldError{Model: c.q.model.Name(), Message: "aggregate functions are not allowed in this query"}
 	}
 	return n, nil
 }
