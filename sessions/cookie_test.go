@@ -2,7 +2,9 @@ package sessions_test
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/sessions"
 )
@@ -119,5 +121,105 @@ func TestRotate(t *testing.T) {
 	sessions.Rotate(s)
 	if s.Key() == after {
 		t.Fatal("second Rotate produced the same key")
+	}
+}
+
+func TestSessionKeyFormat(t *testing.T) {
+	seen := make(map[string]bool)
+	for range 50 {
+		s := &sessions.Session{}
+		s.CycleKey()
+		key := s.Key()
+		if len(key) != 32 {
+			t.Fatalf("key %q has %d characters, want 32", key, len(key))
+		}
+		for _, c := range key {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+				t.Fatalf("key %q has the character %q outside [a-z0-9]", key, c)
+			}
+		}
+		if seen[key] {
+			t.Fatalf("key %q was issued twice", key)
+		}
+		seen[key] = true
+	}
+}
+
+func TestSignedCookieMaxAge(t *testing.T) {
+	ctx := context.Background()
+	store := sessions.NewSignedCookieStore([]byte("secret"))
+	s := store.New()
+	s.Set("uid", "7")
+	value, err := store.Encode(ctx, s)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	expired := sessions.NewSignedCookieStore([]byte("secret"))
+	expired.MaxAge = time.Nanosecond
+	got, err := expired.Decode(ctx, value)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if !got.IsEmpty() {
+		t.Errorf("a value older than MaxAge was accepted: %v", got.Data())
+	}
+
+	got, err = store.Decode(ctx, value)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if v, _ := got.Get("uid"); v != "7" {
+		t.Errorf("uid = %v, want 7 within the default age", v)
+	}
+}
+
+func TestSignedCookieFallbackSecrets(t *testing.T) {
+	ctx := context.Background()
+	old := sessions.NewSignedCookieStore([]byte("old secret"))
+	s := old.New()
+	s.Set("uid", "7")
+	value, err := old.Encode(ctx, s)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	rotated := sessions.NewSignedCookieStore([]byte("new secret"))
+	got, _ := rotated.Decode(ctx, value)
+	if !got.IsEmpty() {
+		t.Error("a value signed with an unknown secret was accepted")
+	}
+
+	rotated.Fallbacks = [][]byte{[]byte("old secret")}
+	got, _ = rotated.Decode(ctx, value)
+	if v, _ := got.Get("uid"); v != "7" {
+		t.Errorf("uid = %v, want 7 from the fallback secret", v)
+	}
+
+	renewed, err := rotated.Encode(ctx, got)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if back, _ := old.Decode(ctx, renewed); !back.IsEmpty() {
+		t.Error("a new value is signed with a fallback secret")
+	}
+}
+
+func TestSignedCookieRejectsChangedTimestamp(t *testing.T) {
+	ctx := context.Background()
+	store := sessions.NewSignedCookieStore([]byte("secret"))
+	s := store.New()
+	s.Set("uid", "7")
+	value, err := store.Encode(ctx, s)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		t.Fatalf("value %q has %d parts, want 3", value, len(parts))
+	}
+	forged := parts[0] + ".99999999999." + parts[2]
+	if got, _ := store.Decode(ctx, forged); !got.IsEmpty() {
+		t.Error("a value with a changed timestamp was accepted")
 	}
 }

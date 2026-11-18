@@ -6,81 +6,141 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"strconv"
 	"strings"
+	"time"
 )
 
-// SignedCookieStore stores all session data in an HMAC-signed cookie, keeping no
-// server-side state. The cookie value is "payload.mac" where payload is the
-// URL-safe base64 of the JSON-encoded data and mac is the URL-safe base64 of
-// HMAC-SHA256(secret, payload).
+// cookieSalt separates the signatures of session cookies from other uses of
+// the same secret.
+const cookieSalt = "djangogo.sessions.SignedCookieStore"
+
+// SignedCookieStore keeps the whole session in a signed cookie and nothing on
+// the server (Django's signed_cookies backend).
+//
+// The cookie value is "payload.timestamp.mac": the URL-safe base64 of the
+// values as JSON, the time of signing in seconds since the epoch, and an
+// HMAC-SHA256 over both. The values are signed, not encrypted: the browser can
+// read them. A cookie that was copied stays valid until it expires, even after
+// logout, because there is no server state to delete.
 type SignedCookieStore struct {
+	// MaxAge is the time for which a cookie value is accepted after it was
+	// signed. Zero means DefaultCookieAge. Set it to the cookie age of the
+	// middleware.
+	MaxAge time.Duration
+	// Fallbacks are earlier secrets. Values signed with one of them are still
+	// read; new values are signed with the current secret only.
+	Fallbacks [][]byte
+
+	// secret is the current signing secret.
 	secret []byte
 }
 
-// NewSignedCookieStore returns a SignedCookieStore that signs cookies with secret.
+// NewSignedCookieStore returns a SignedCookieStore that signs with secret.
 func NewSignedCookieStore(secret []byte) *SignedCookieStore {
 	return &SignedCookieStore{secret: secret}
 }
 
-// New returns a fresh, empty session.
+// New returns an empty session.
 func (s *SignedCookieStore) New() *Session {
 	return &Session{data: make(map[string]any)}
 }
 
-// Encode serializes s into a signed cookie value of the form "payload.mac".
+// Encode returns the signed cookie value for the values of sess.
 func (s *SignedCookieStore) Encode(_ context.Context, sess *Session) (string, error) {
-	raw, err := json.Marshal(sess.Data())
+	raw, err := json.Marshal(sess.data)
 	if err != nil {
 		return "", err
 	}
-	payload := base64.RawURLEncoding.EncodeToString(raw)
-	mac := s.sign(payload)
-	return payload + "." + base64.RawURLEncoding.EncodeToString(mac), nil
+	sess.stale = nil
+	signed := base64.RawURLEncoding.EncodeToString(raw) + "." + strconv.FormatInt(time.Now().Unix(), 10)
+	mac := sign(s.secret, signed)
+	return signed + "." + base64.RawURLEncoding.EncodeToString(mac), nil
 }
 
-// Decode verifies and parses a signed cookie value. A tampered, malformed, or
-// wrongly-signed value yields a fresh empty session and a nil error so the request
-// proceeds as if logged out.
+// Decode checks the signature and the age of a cookie value and returns its
+// session. A forged, malformed or expired value yields an empty session.
 func (s *SignedCookieStore) Decode(_ context.Context, cookieValue string) (*Session, error) {
-	data, ok := s.verify(cookieValue)
+	data, signedAt, ok := s.verify(cookieValue)
 	if !ok {
 		return s.New(), nil
 	}
-	return &Session{data: data}, nil
+	sess := &Session{data: data}
+	seconds, _, kind := sess.expiry()
+	custom := kind == kindDate || (kind == kindSeconds && seconds != 0)
+	if custom && !sess.expiryDate(signedAt).After(time.Now()) {
+		return s.New(), nil
+	}
+	return sess, nil
 }
 
-// verify validates the MAC over the payload and returns the decoded data. The boolean
-// is false for any tampered, malformed, or wrongly-signed value.
-func (s *SignedCookieStore) verify(cookieValue string) (map[string]any, bool) {
+// Delete does nothing: there is no server state.
+func (s *SignedCookieStore) Delete(_ context.Context, sess *Session) error {
+	sess.stale = nil
+	return nil
+}
+
+// ClearExpired does nothing: an expired cookie is rejected when it is read.
+func (s *SignedCookieStore) ClearExpired(_ context.Context) error { return nil }
+
+// verify returns the values and the signing time of a cookie value. The
+// boolean is false for a value that is malformed, carries a wrong signature or
+// is older than the maximum age.
+func (s *SignedCookieStore) verify(cookieValue string) (data map[string]any, signedAt time.Time, ok bool) {
 	idx := strings.LastIndex(cookieValue, ".")
 	if idx < 0 {
-		return nil, false
+		return nil, time.Time{}, false
 	}
-	payload := cookieValue[:idx]
+	signed := cookieValue[:idx]
 	gotMAC, err := base64.RawURLEncoding.DecodeString(cookieValue[idx+1:])
-	if err != nil {
-		return nil, false
+	if err != nil || !s.validMAC(signed, gotMAC) {
+		return nil, time.Time{}, false
 	}
-	if !hmac.Equal(gotMAC, s.sign(payload)) {
-		return nil, false
+	payload, stamp, found := strings.Cut(signed, ".")
+	if !found {
+		return nil, time.Time{}, false
+	}
+	seconds, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil {
+		return nil, time.Time{}, false
+	}
+	signedAt = time.Unix(seconds, 0)
+	maxAge := s.MaxAge
+	if maxAge <= 0 {
+		maxAge = DefaultCookieAge
+	}
+	if time.Since(signedAt) > maxAge {
+		return nil, time.Time{}, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
-		return nil, false
+		return nil, time.Time{}, false
 	}
-	data := make(map[string]any)
+	data = make(map[string]any)
 	if err := json.Unmarshal(raw, &data); err != nil {
-		return nil, false
+		return nil, time.Time{}, false
 	}
-	return data, true
+	return data, signedAt, true
 }
 
-// Delete is a no-op: the signed cookie store keeps no server-side state.
-func (s *SignedCookieStore) Delete(_ context.Context, _ *Session) error { return nil }
+// validMAC reports whether mac signs the value under the current secret or one
+// of the fallbacks. Every comparison takes constant time.
+func (s *SignedCookieStore) validMAC(signed string, mac []byte) bool {
+	valid := hmac.Equal(mac, sign(s.secret, signed))
+	for _, secret := range s.Fallbacks {
+		if hmac.Equal(mac, sign(secret, signed)) {
+			valid = true
+		}
+	}
+	return valid
+}
 
-// sign returns HMAC-SHA256(secret, payload).
-func (s *SignedCookieStore) sign(payload string) []byte {
-	mac := hmac.New(sha256.New, s.secret)
-	mac.Write([]byte(payload))
+// sign returns the HMAC-SHA256 of value under a key derived from secret and
+// cookieSalt.
+func sign(secret []byte, value string) []byte {
+	derive := hmac.New(sha256.New, secret)
+	derive.Write([]byte(cookieSalt))
+	mac := hmac.New(sha256.New, derive.Sum(nil))
+	mac.Write([]byte(value))
 	return mac.Sum(nil)
 }
