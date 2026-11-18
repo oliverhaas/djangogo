@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -28,16 +30,25 @@ func NormalizeEmail(email string) string {
 	return email[:at] + "@" + strings.ToLower(email[at+1:])
 }
 
+// NormalizeUsername returns the username in Unicode normalization form NFKC
+// (Django's normalize_username). Names that look the same but are spelled with
+// different code points, such as the ohm sign and the Greek capital omega,
+// become one name, so that they cannot be registered as two users.
+func NormalizeUsername(username string) string {
+	return norm.NFKC.String(username)
+}
+
 // CreateUser hashes password and inserts a new user with the given flags,
-// returning it with its primary key (Django's create_user). The email is
-// normalized with NormalizeEmail. An empty password gives the user an unusable
-// password, as create_user does without one. CreateUser returns
-// ErrEmptyUsername for a blank username and ErrUserExists when the username is
-// taken.
+// returning it with its primary key (Django's create_user). The username is
+// normalized with NormalizeUsername and the email with NormalizeEmail. An empty
+// password gives the user an unusable password, as create_user does without
+// one. CreateUser returns ErrEmptyUsername for a blank username and
+// ErrUserExists when the username is taken.
 func CreateUser(ctx context.Context, db *orm.DB, username, email, password string, isStaff, isSuperuser, isActive bool) (*User, error) {
 	if username == "" {
 		return nil, ErrEmptyUsername
 	}
+	username = NormalizeUsername(username)
 	switch _, err := orm.Query[User](db).Get(ctx, "username", username); {
 	case err == nil:
 		return nil, ErrUserExists

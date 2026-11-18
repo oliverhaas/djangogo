@@ -104,3 +104,52 @@ func okHandler(ran *bool) http.Handler {
 		w.WriteHeader(http.StatusOK)
 	})
 }
+
+// sessionCookieName is the session cookie of the test sites.
+const sessionCookieName = "sessionid"
+
+// site is a handler behind the sessions and auth middleware, with the
+// sessions in the database, and a client for it.
+type site struct {
+	*djangotest.Client
+	// db holds the users and the sessions.
+	db *orm.DB
+	// store is the session store of the site.
+	store *sessions.DBStore
+}
+
+// newSite returns a site that serves handler.
+func newSite(t *testing.T, db *orm.DB, handler http.Handler) *site {
+	t.Helper()
+	store := sessions.NewDBStore(db)
+	h := sessions.Middleware(store, sessionCookieName)(auth.Middleware(db)(handler))
+	client := djangotest.NewClient(t, h,
+		djangotest.WithSessions(store, sessionCookieName), djangotest.WithDB(db))
+	return &site{Client: client, db: db, store: store}
+}
+
+// whoami writes the username of the user of the request, or "anonymous".
+var whoami = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	name := "anonymous"
+	if u, ok := auth.CurrentUser(r.Context()); ok {
+		name = u.Username
+	}
+	_, _ = w.Write([]byte(name))
+})
+
+// useSecret sets the secret key and its fallbacks for the test.
+func useSecret(t *testing.T, key string, fallbacks ...string) {
+	t.Helper()
+	cfg := auth.CurrentConfig()
+	cfg.SecretKey, cfg.SecretKeyFallbacks = key, fallbacks
+	t.Cleanup(auth.Configure(cfg))
+}
+
+// setPassword stores a new password for the user (Django's set_password and
+// save).
+func setPassword(t *testing.T, db *orm.DB, u *auth.User, raw string) {
+	t.Helper()
+	must(t, u.SetPassword(raw))
+	_, err := orm.Query[auth.User](db).Filter("id", u.ID).Update(context.Background(), "password", u.Password)
+	must(t, err)
+}
