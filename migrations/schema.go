@@ -102,6 +102,7 @@ func toOrmField(f FieldState) *orm.Field {
 	return &orm.Field{
 		Name: f.Name, Column: f.Column, Kind: f.Kind, PrimaryKey: f.PrimaryKey,
 		Null: f.Null, Unique: f.Unique, MaxLength: f.MaxLength,
+		MaxDigits: f.MaxDigits, DecimalPlaces: f.DecimalPlaces,
 	}
 }
 
@@ -110,9 +111,10 @@ func (e *SchemaEditor) columnDef(f FieldState) string {
 	return e.q(f.Column) + " " + e.dialect.ColumnType(toOrmField(f))
 }
 
-// bareType returns the column type without NULL, UNIQUE or PRIMARY KEY.
+// bareType returns the column type without NULL, UNIQUE, PRIMARY KEY, or CHECK.
 func (e *SchemaEditor) bareType(f FieldState) string {
 	of := toOrmField(f)
+	of.Column = ""
 	of.Null, of.Unique, of.PrimaryKey = true, false, false
 	return e.dialect.ColumnType(of)
 }
@@ -339,7 +341,8 @@ func (e *SchemaEditor) removeField(ctx context.Context, state *ProjectState, old
 // its name. Options that live only in Go (default, blank, auto_now) are ignored.
 func schemaEqual(a, b FieldState) bool {
 	return a.Kind == b.Kind && a.PrimaryKey == b.PrimaryKey && a.Null == b.Null && a.Unique == b.Unique &&
-		a.MaxLength == b.MaxLength && shouldIndex(a) == shouldIndex(b) && a.IsRelation() == b.IsRelation() &&
+		a.MaxLength == b.MaxLength && a.MaxDigits == b.MaxDigits && a.DecimalPlaces == b.DecimalPlaces &&
+		shouldIndex(a) == shouldIndex(b) && a.IsRelation() == b.IsRelation() &&
 		a.RelTo == b.RelTo && a.RelOnDelete == b.RelOnDelete
 }
 

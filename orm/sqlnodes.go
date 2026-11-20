@@ -22,19 +22,50 @@ const (
 	typeBool
 	// typeTime converts to time.Time.
 	typeTime
+	// typeDecimal converts to Decimal.
+	typeDecimal
+	// typeDate converts to Date.
+	typeDate
+	// typeTimeOfDay converts to Time.
+	typeTimeOfDay
+	// typeDuration converts to time.Duration.
+	typeDuration
+	// typeUUID converts to UUID.
+	typeUUID
+	// typeJSON converts to json.RawMessage.
+	typeJSON
+	// typeBinary converts to []byte.
+	typeBinary
 )
 
 // fieldValueType returns the type the values of field f are read as.
 func fieldValueType(f *Field) valueType {
 	switch f.Kind {
-	case KindAuto, KindInt:
+	case KindAuto, KindInt, KindSmallInt, KindBigInt,
+		KindPositiveSmallInt, KindPositiveInt, KindPositiveBigInt:
 		return typeInt
-	case KindChar, KindText:
+	case KindFloat:
+		return typeFloat
+	case KindDecimal:
+		return typeDecimal
+	case KindChar, KindText, KindSlug, KindEmail, KindURL, KindGenericIPAddress:
 		return typeString
 	case KindBool:
 		return typeBool
 	case KindDateTime:
 		return typeTime
+	case KindDate:
+		return typeDate
+	case KindTime:
+		return typeTimeOfDay
+	case KindDuration:
+		return typeDuration
+	case KindUUID:
+		return typeUUID
+	case KindJSON:
+		return typeJSON
+	case KindBinary:
+		return typeBinary
 	default:
 		return typeUnknown
 	}
@@ -46,8 +77,25 @@ func goValueType(v any) valueType {
 		return typeUnknown
 	}
 	t := reflect.TypeOf(v)
-	if t == timeType {
+	switch t {
+	case timeType:
 		return typeTime
+	case decimalType:
+		return typeDecimal
+	case dateType:
+		return typeDate
+	case timeOfDayType:
+		return typeTimeOfDay
+	case durationType:
+		return typeDuration
+	case uuidType:
+		return typeUUID
+	case jsonRawMessageType:
+		return typeJSON
+	case byteSliceType:
+		return typeBinary
+	case netipAddrType:
+		return typeString
 	}
 	switch t.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,

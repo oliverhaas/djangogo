@@ -46,12 +46,35 @@ func (d Dialect) ColumnType(f *orm.Field) string {
 		return "INTEGER PRIMARY KEY AUTOINCREMENT"
 	}
 
-	var base string
+	var base, check string
 
 	switch f.Kind {
 	case orm.KindInt:
 		base = "INTEGER"
-	case orm.KindChar:
+	case orm.KindSmallInt:
+		base = "SMALLINT"
+	case orm.KindBigInt:
+		base = "BIGINT"
+	case orm.KindPositiveSmallInt:
+		base = "SMALLINT UNSIGNED"
+		if f.Column != "" {
+			check = "CHECK (" + d.Quote(f.Column) + " >= 0)"
+		}
+	case orm.KindPositiveInt:
+		base = "INTEGER UNSIGNED"
+		if f.Column != "" {
+			check = "CHECK (" + d.Quote(f.Column) + " >= 0)"
+		}
+	case orm.KindPositiveBigInt:
+		base = "BIGINT UNSIGNED"
+		if f.Column != "" {
+			check = "CHECK (" + d.Quote(f.Column) + " >= 0)"
+		}
+	case orm.KindFloat:
+		base = "REAL"
+	case orm.KindDecimal:
+		base = "DECIMAL"
+	case orm.KindChar, orm.KindSlug, orm.KindEmail, orm.KindURL:
 		base = fmt.Sprintf("VARCHAR(%d)", f.MaxLength)
 	case orm.KindText:
 		base = "TEXT"
@@ -59,6 +82,24 @@ func (d Dialect) ColumnType(f *orm.Field) string {
 		base = "BOOLEAN"
 	case orm.KindDateTime:
 		base = "DATETIME"
+	case orm.KindDate:
+		base = "DATE"
+	case orm.KindTime:
+		base = "TIME"
+	case orm.KindDuration:
+		base = "BIGINT"
+	case orm.KindUUID:
+		base = "CHAR(32)"
+	case orm.KindJSON:
+		base = "TEXT"
+		if f.Column != "" {
+			q := d.Quote(f.Column)
+			check = "CHECK (JSON_VALID(" + q + ") OR " + q + " IS NULL)"
+		}
+	case orm.KindBinary:
+		base = "BLOB"
+	case orm.KindGenericIPAddress:
+		base = "CHAR(39)"
 	default:
 		base = "TEXT"
 	}
@@ -75,6 +116,11 @@ func (d Dialect) ColumnType(f *orm.Field) string {
 		b.WriteString(" PRIMARY KEY")
 	} else if f.Unique {
 		b.WriteString(" UNIQUE")
+	}
+
+	if check != "" {
+		b.WriteByte(' ')
+		b.WriteString(check)
 	}
 
 	return b.String()

@@ -242,7 +242,7 @@ func (r *RawQuerySet[T]) fetch(ctx context.Context, each func(row reflect.Value,
 				extra[columns[i]] = raw[i]
 				continue
 			}
-			if err := assignScanned(elem.Field(f.Index), raw[i]); err != nil {
+			if err := assignFieldScanned(r.db.dialect, f, elem.Field(f.Index), raw[i]); err != nil {
 				return fmt.Errorf("orm: raw query %s: column %s: %w", m.Name(), columns[i], err)
 			}
 		}
