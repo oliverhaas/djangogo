@@ -10,14 +10,17 @@ import (
 	"github.com/oliverhaas/djangogo/orm"
 )
 
-// ordAuthor is Django's ordering.Author, without its Meta.ordering.
+// ordAuthor is Django's ordering.Author with Meta.ordering = ("-pk",).
 type ordAuthor struct {
 	ID     int64
 	Name   string            `orm:"max_length=63;null;blank"`
-	Editor orm.FK[ordAuthor] `orm:"null"`
+	Editor orm.FK[ordAuthor] `orm:"null;on_delete=cascade"`
 }
 
-// ordArticle is Django's ordering.Article, without its Meta.ordering.
+// Meta sets Author's default ordering to descending primary key.
+func (ordAuthor) Meta() orm.Meta { return orm.Meta{Ordering: []string{"-pk"}} }
+
+// ordArticle is Django's ordering.Article with its Meta.ordering.
 type ordArticle struct {
 	ID           int64
 	Author       orm.FK[ordAuthor] `orm:"null;on_delete=set_null"`
@@ -26,9 +29,42 @@ type ordArticle struct {
 	PubDate      time.Time
 }
 
+// Meta sets Article's default ordering matching Django's ordering.Article.
+func (ordArticle) Meta() orm.Meta {
+	return orm.Meta{
+		Ordering: []string{"-pub_date", "headline", "author__name", "second_author__name"},
+	}
+}
+
+// ordByAuthorArticle mirrors Django's OrderedByAuthorArticle, ordering by
+// two FKs to ordAuthor (which itself orders by -pk).
+type ordByAuthorArticle struct {
+	ID           int64
+	Author       orm.FK[ordAuthor] `orm:"null;on_delete=set_null"`
+	SecondAuthor orm.FK[ordAuthor] `orm:"null;on_delete=set_null"`
+	Headline     string            `orm:"max_length=100"`
+	PubDate      time.Time
+}
+
+// Meta sets default ordering to author, second_author.
+func (ordByAuthorArticle) Meta() orm.Meta {
+	return orm.Meta{Ordering: []string{"author", "second_author"}}
+}
+
+// ordReference mirrors Django's ordering.Reference (using FK for Proof since
+// O2O belongs to a later item).
+type ordReference struct {
+	ID      int64
+	Article orm.FK[ordByAuthorArticle] `orm:"on_delete=cascade"`
+	Proof   orm.FK[ordByAuthorArticle] `orm:"on_delete=cascade"`
+}
+
+// Meta sets default ordering to article.
+func (ordReference) Meta() orm.Meta { return orm.Meta{Ordering: []string{"article"}} }
+
 // ordModels returns the models of Django's ordering test app.
 func ordModels() []any {
-	return []any{djangotest.App("ordering", &ordAuthor{}, &ordArticle{})}
+	return []any{djangotest.App("ordering", &ordAuthor{}, &ordArticle{}, &ordByAuthorArticle{}, &ordReference{})}
 }
 
 // ordFixture is the data of Django's OrderingTests.
@@ -71,6 +107,36 @@ func ordSetAuthor(t *testing.T, db *orm.DB, article *ordArticle, author *ordAuth
 	}
 }
 
+// Ported from Django: tests/ordering/tests.py::OrderingTests.test_default_ordering
+func TestOrderingDefaultOrdering(t *testing.T) {
+	djangotest.EachDB(t, ordModels(), func(t *testing.T, db *orm.DB) {
+		fx := ordSetUp(t, db)
+		ordAssert(t, orm.Query[ordArticle](db),
+			"Article 4", "Article 2", "Article 3", "Article 1")
+
+		first, err := orm.Query[ordArticle](db).First(context.Background())
+		if err != nil {
+			t.Fatalf("First: %v", err)
+		}
+		djangotest.AssertEqual(t, first.ID, fx.a4.ID)
+
+		last, err := orm.Query[ordArticle](db).Last(context.Background())
+		if err != nil {
+			t.Fatalf("Last: %v", err)
+		}
+		djangotest.AssertEqual(t, last.ID, fx.a1.ID)
+
+		// OrderBy() with no arguments clears Meta.ordering.
+		sqlText, _, err := orm.CompileSelectForTest(orm.Query[ordArticle](db).OrderBy())
+		if err != nil {
+			t.Fatalf("compile: %v", err)
+		}
+		if strings.Contains(strings.ToUpper(sqlText), "ORDER BY") {
+			t.Errorf("OrderBy() did not clear Meta.ordering: %s", sqlText)
+		}
+	})
+}
+
 // Ported from Django: tests/ordering/tests.py::OrderingTests.test_default_ordering_override
 func TestOrderingDefaultOrderingOverride(t *testing.T) {
 	djangotest.EachDB(t, ordModels(), func(t *testing.T, db *orm.DB) {
@@ -95,8 +161,8 @@ func TestOrderingDefaultOrderingOverrideUnknownField(t *testing.T) {
 	})
 }
 
-// Django's order_by replaces the ordering. OrderBy appends to it, and an
-// empty OrderBy clears it: the port asserts both.
+// Django's order_by replaces the ordering. OrderBy overrides Meta.ordering on
+// the first call, appends on subsequent calls, and clears when called empty.
 //
 // Ported from Django: tests/ordering/tests.py::OrderingTests.test_order_by_override
 func TestOrderingOrderByOverride(t *testing.T) {
@@ -135,14 +201,11 @@ func TestOrderingRandomOrdering(t *testing.T) {
 	})
 }
 
-// Django reverses the Meta.ordering of Article here. Without one, the port
-// spells that ordering out.
-//
 // Ported from Django: tests/ordering/tests.py::OrderingTests.test_reversed_ordering
 func TestOrderingReversedOrdering(t *testing.T) {
 	djangotest.EachDB(t, ordModels(), func(t *testing.T, db *orm.DB) {
 		ordSetUp(t, db)
-		ordAssert(t, orm.Query[ordArticle](db).OrderBy("-pub_date", "headline").Reverse().Limit(2),
+		ordAssert(t, orm.Query[ordArticle](db).Reverse().Limit(2),
 			"Article 1", "Article 3")
 	})
 }
@@ -160,14 +223,42 @@ func TestOrderingReverseOrderingPure(t *testing.T) {
 	})
 }
 
-// Django compares the Meta.ordering "-pk" of Author with order_by("-pk").
-// Here "pk" is checked against the primary key column.
-//
+// Ported from Django: tests/ordering/tests.py::OrderingTests.test_reverse_meta_ordering_pure
+func TestOrderingReverseMetaOrderingPure(t *testing.T) {
+	djangotest.EachDB(t, ordModels(), func(t *testing.T, db *orm.DB) {
+		fx := ordSetUp(t, db)
+		create(t, db, &ordArticle{
+			Headline:     "Article 5",
+			PubDate:      day(2005, 7, 30),
+			Author:       fkTo[ordAuthor](fx.author1.ID),
+			SecondAuthor: fkTo[ordAuthor](fx.author2.ID),
+		})
+		create(t, db, &ordArticle{
+			Headline:     "Article 5",
+			PubDate:      day(2005, 7, 30),
+			Author:       fkTo[ordAuthor](fx.author2.ID),
+			SecondAuthor: fkTo[ordAuthor](fx.author1.ID),
+		})
+		authorName := func(a ordArticle) string {
+			author, _ := a.Author.Object()
+			return author.Name
+		}
+		djangotest.AssertQuerySetEqual(t,
+			orm.Query[ordArticle](db).SelectRelated("author").Filter("headline", "Article 5").Reverse(),
+			[]string{"Name 2", "Name 1"}, authorName)
+		djangotest.AssertQuerySetEqual(t,
+			orm.Query[ordArticle](db).SelectRelated("author").Filter("headline", "Article 5"),
+			[]string{"Name 1", "Name 2"}, authorName)
+	})
+}
+
 // Ported from Django: tests/ordering/tests.py::OrderingTests.test_order_by_pk
 func TestOrderingOrderByPK(t *testing.T) {
 	djangotest.EachDB(t, ordModels(), func(t *testing.T, db *orm.DB) {
 		fx := ordSetUp(t, db)
 		id := func(a ordAuthor) int64 { return a.ID }
+		djangotest.AssertQuerySetEqual(t, orm.Query[ordAuthor](db),
+			[]int64{fx.unnamed2.ID, fx.unnamed1.ID, fx.author2.ID, fx.author1.ID}, id)
 		djangotest.AssertQuerySetEqual(t, orm.Query[ordAuthor](db).OrderBy("-pk"),
 			[]int64{fx.unnamed2.ID, fx.unnamed1.ID, fx.author2.ID, fx.author1.ID}, id)
 		djangotest.AssertQuerySetEqual(t, orm.Query[ordAuthor](db).OrderBy("pk"),
@@ -188,9 +279,6 @@ func TestOrderingOrderByFKAttname(t *testing.T) {
 	})
 }
 
-// Django orders "author__editor" by the Meta.ordering of Author. Without one
-// the relation key orders by the foreign key column, like "author__editor_id".
-//
 // Ported from Django: tests/ordering/tests.py::OrderingTests.test_order_by_self_referential_fk
 func TestOrderingOrderBySelfReferentialFK(t *testing.T) {
 	djangotest.EachDB(t, ordModels(), func(t *testing.T, db *orm.DB) {
@@ -198,8 +286,8 @@ func TestOrderingOrderBySelfReferentialFK(t *testing.T) {
 		ordSetAuthor(t, db, fx.a1, create(t, db, &ordAuthor{Editor: fkTo[ordAuthor](fx.author1.ID)}))
 		ordSetAuthor(t, db, fx.a2, create(t, db, &ordAuthor{Editor: fkTo[ordAuthor](fx.author2.ID)}))
 		articles := orm.Query[ordArticle](db).Filter("author__isnull", false)
-		ordAssert(t, articles.OrderBy("author__editor"), "Article 1", "Article 2")
-		ordAssert(t, articles.OrderBy("-author__editor"), "Article 2", "Article 1")
+		ordAssert(t, articles.OrderBy("author__editor"), "Article 2", "Article 1")
+		ordAssert(t, articles.OrderBy("-author__editor"), "Article 1", "Article 2")
 		ordAssert(t, articles.OrderBy("author__editor_id"), "Article 1", "Article 2")
 	})
 }
@@ -239,27 +327,52 @@ func TestOrderingDefaultOrderingDoesNotAffectGroupBy(t *testing.T) {
 		if _, err := orm.Query[ordArticle](db).Filter("headline", "Article 4").Update(ctx, "author", fx.author2); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
-		assertValues(t, orm.Query[ordArticle](db).Values("author").Annotate("count", orm.Count("author")).OrderBy("author"),
+		assertValues(t, orm.Query[ordArticle](db).Values("author").Annotate("count", orm.Count("author")).OrderBy("author_id"),
 			[]map[string]any{
 				{"author": fx.author1.ID, "count": int64(3)},
 				{"author": fx.author2.ID, "count": int64(1)},
 			})
+		// Ordering by "author" inherits ordAuthor's Meta.Ordering ("-pk").
+		assertValues(t, orm.Query[ordArticle](db).Values("author").Annotate("count", orm.Count("author")).OrderBy("author"),
+			[]map[string]any{
+				{"author": fx.author2.ID, "count": int64(1)},
+				{"author": fx.author1.ID, "count": int64(3)},
+			})
+		// Without an explicit OrderBy, Meta.ordering still must not leak into GROUP BY.
+		rows, err := orm.Query[ordArticle](db).Values("author").Annotate("count", orm.Count("author")).All(ctx)
+		if err != nil {
+			t.Fatalf("Values.Annotate: %v", err)
+		}
+		djangotest.AssertEqual(t, len(rows), 2)
 	})
 }
 
-// Ported from Django: tests/ordering/tests.py::OrderingTests.test_default_ordering
-func TestOrderingDefaultOrdering(t *testing.T) {
-	t.Skip("needs Meta.ordering, which belongs to the model options work package")
-}
-
-// Ported from Django: tests/ordering/tests.py::OrderingTests.test_reverse_meta_ordering_pure
-func TestOrderingReverseMetaOrderingPure(t *testing.T) {
-	t.Skip("needs Meta.ordering, which belongs to the model options work package")
-}
-
+// Django's Reference.proof is a OneToOneField; here it is a ForeignKey because
+// O2O belongs to a later item. The duplicate-table ordering traversal is the
+// same.
+//
 // Ported from Django: tests/ordering/tests.py::OrderingTests.test_related_ordering_duplicate_table_reference
 func TestOrderingRelatedOrderingDuplicateTableReference(t *testing.T) {
-	t.Skip("needs Meta.ordering and O2O[T], which belong to other work packages")
+	djangotest.EachDB(t, ordModels(), func(t *testing.T, db *orm.DB) {
+		firstAuthor := create(t, db, &ordAuthor{})
+		secondAuthor := create(t, db, &ordAuthor{})
+		a1 := create(t, db, &ordByAuthorArticle{
+			Headline:     "A1",
+			PubDate:      day(2005, 7, 26),
+			Author:       fkTo[ordAuthor](firstAuthor.ID),
+			SecondAuthor: fkTo[ordAuthor](secondAuthor.ID),
+		})
+		a2 := create(t, db, &ordByAuthorArticle{
+			Headline:     "A2",
+			PubDate:      day(2005, 7, 27),
+			Author:       fkTo[ordAuthor](secondAuthor.ID),
+			SecondAuthor: fkTo[ordAuthor](firstAuthor.ID),
+		})
+		r1 := create(t, db, &ordReference{Article: fkTo[ordByAuthorArticle](a1.ID), Proof: fkTo[ordByAuthorArticle](a1.ID)})
+		r2 := create(t, db, &ordReference{Article: fkTo[ordByAuthorArticle](a2.ID), Proof: fkTo[ordByAuthorArticle](a2.ID)})
+		djangotest.AssertQuerySetEqual(t, orm.Query[ordReference](db),
+			[]int64{r2.ID, r1.ID}, func(r ordReference) int64 { return r.ID })
+	})
 }
 
 // A term that spans a nullable relation keeps the rows without one.

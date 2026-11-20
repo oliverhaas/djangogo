@@ -149,6 +149,28 @@ func (m *ModelState) IndexByName(name string) (*Index, bool) {
 	return nil, false
 }
 
+// indexCol pairs a database column with whether an index orders it descending.
+type indexCol struct {
+	column string
+	desc   bool
+}
+
+// indexColumns resolves index field names (which may carry a leading "-" for
+// descending order) to their database columns.
+func (m *ModelState) indexColumns(fields []string) ([]indexCol, error) {
+	out := make([]indexCol, len(fields))
+	for i, raw := range fields {
+		desc := strings.HasPrefix(raw, "-")
+		name := strings.TrimPrefix(raw, "-")
+		f, ok := m.FieldByName(name)
+		if !ok {
+			return nil, fmt.Errorf("migrations: %s has no field named %q", m.Label(), name)
+		}
+		out[i] = indexCol{column: f.Column, desc: desc}
+	}
+	return out, nil
+}
+
 // columns resolves Go field names to their database columns.
 func (m *ModelState) columns(fields []string) ([]string, error) {
 	out := make([]string, len(fields))
@@ -302,9 +324,8 @@ type fieldRef struct {
 	field *FieldState
 }
 
-// StateFromRegistry snapshots every model of r. Models keep their registration
-// order. Model-level indexes and unique-together sets are not read, because
-// the registry does not expose them.
+// StateFromRegistry snapshots every model of r, including its Meta.Indexes and
+// Meta.UniqueTogether options. Models keep their registration order.
 func StateFromRegistry(r *orm.Registry) *ProjectState {
 	ps := NewProjectState()
 	for _, m := range r.Models() {
@@ -313,7 +334,22 @@ func StateFromRegistry(r *orm.Registry) *ProjectState {
 		for i, f := range raw {
 			fields[i] = fieldStateFromField(f)
 		}
-		ps.AddModel(&ModelState{App: m.App(), Name: m.Name(), Table: m.Table(), Fields: fields})
+		rawIndexes := m.Indexes()
+		var indexes []Index
+		if len(rawIndexes) > 0 {
+			indexes = make([]Index, len(rawIndexes))
+			for i, idx := range rawIndexes {
+				indexes[i] = Index{Name: idx.Name, Fields: idx.Fields}
+			}
+		}
+		ps.AddModel(&ModelState{
+			App:            m.App(),
+			Name:           m.Name(),
+			Table:          m.Table(),
+			Fields:         fields,
+			Indexes:        indexes,
+			UniqueTogether: m.UniqueTogether(),
+		})
 	}
 	return ps
 }

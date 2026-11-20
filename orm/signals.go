@@ -151,21 +151,3 @@ func firePreSave[T any](ctx context.Context, _ *DB, obj *T) error {
 func firePostSave[T any](ctx context.Context, _ *DB, obj *T) error {
 	return fire(ctx, postSave, obj)
 }
-
-// firePreDelete fires PreDelete handlers for obj.
-func firePreDelete[T any](ctx context.Context, _ *DB, obj *T) error {
-	return fire(ctx, preDelete, obj)
-}
-
-// firePostDelete fires PostDelete handlers for obj.
-func firePostDelete[T any](ctx context.Context, _ *DB, obj *T) error {
-	return fire(ctx, postDelete, obj)
-}
-
-// hasDeleteHandlers reports whether any PreDelete or PostDelete handler is
-// registered for T, letting Delete choose the fetch-and-fire path only when
-// needed.
-func hasDeleteHandlers[T any]() bool {
-	t := reflect.TypeFor[T]()
-	return signals.has(t, preDelete) || signals.has(t, postDelete)
-}

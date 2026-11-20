@@ -113,13 +113,9 @@ func TestIntegrityCheck(t *testing.T) {
 }
 
 // TestIntegrityForeignKey checks that a reference to a missing row is a
-// foreign key violation. SQLite enforces foreign keys only with PRAGMA
-// foreign_keys=ON, which its backend does not set.
+// foreign key violation on both SQLite and PostgreSQL.
 func TestIntegrityForeignKey(t *testing.T) {
 	djangotest.EachDB(t, intModels(), func(t *testing.T, db *orm.DB) {
-		if db.Dialect().Name() != "postgres" {
-			t.Skip("SQLite does not enforce foreign keys without PRAGMA foreign_keys=ON")
-		}
 		err := orm.Query[intChild](db).Create(context.Background(), &intChild{Item: fkTo[intItem](12345)})
 		assertIntegrity(t, err, orm.IntegrityForeignKey)
 	})
