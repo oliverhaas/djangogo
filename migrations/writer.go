@@ -366,6 +366,8 @@ func onDeleteSource(od orm.OnDelete) string {
 		return "orm.OnDeleteSetNull"
 	case orm.OnDeleteRestrict:
 		return "orm.OnDeleteRestrict"
+	case orm.OnDeleteProtect:
+		return "orm.OnDeleteProtect"
 	default:
 		return "orm.OnDeleteDoNothing"
 	}

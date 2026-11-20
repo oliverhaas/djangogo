@@ -1,8 +1,34 @@
 package orm
 
+// Index declares a model-level database index in Meta.Indexes, the analog of
+// Django's models.Index. Name is optional: when omitted, the registry derives
+// Django's default 30-character name from the table and columns.
+type Index struct {
+	// Name is the database index name. Leave empty for Django's default name.
+	Name string
+	// Fields lists the fields the index covers, in order. Entries accept Go
+	// struct names, attribute names, or column names, with an optional leading
+	// "-" for descending order.
+	Fields []string
+}
+
 // Meta is the optional per-model configuration hook (the analog of Django's Meta).
 type Meta struct {
-	Table string // overrides the default table name
+	// Table overrides the default table name (Django's db_table).
+	Table string
+	// Ordering sets the default QuerySet ordering (Django's Meta.ordering).
+	Ordering []string
+	// UniqueTogether declares sets of fields that must be unique together
+	// (Django's Meta.unique_together).
+	UniqueTogether [][]string
+	// Indexes declares model-level database indexes (Django's Meta.indexes).
+	Indexes []Index
+	// VerboseName overrides the human-readable singular name (Django's
+	// Meta.verbose_name).
+	VerboseName string
+	// VerboseNamePlural overrides the human-readable plural name (Django's
+	// Meta.verbose_name_plural).
+	VerboseNamePlural string
 }
 
 // withMeta is implemented by models that customize their Meta.

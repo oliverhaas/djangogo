@@ -297,10 +297,15 @@ func (a *Autodetector) newFieldName(key modelKey, oldName string) string {
 	return oldName
 }
 
-// renameFields maps a list of old field names to their current names.
+// renameFields maps a list of old field names to their current names,
+// preserving a leading "-" on descending index fields.
 func (a *Autodetector) renameFields(key modelKey, names []string) []string {
 	out := make([]string, len(names))
 	for i, n := range names {
+		if bare, desc := strings.CutPrefix(n, "-"); desc {
+			out[i] = "-" + a.newFieldName(key, bare)
+			continue
+		}
 		out[i] = a.newFieldName(key, n)
 	}
 	return out
@@ -309,9 +314,6 @@ func (a *Autodetector) renameFields(key modelKey, names []string) []string {
 // createAlteredIndexes compares the model-level indexes of the kept models. An
 // index over a renamed field is the same index.
 func (a *Autodetector) createAlteredIndexes() {
-	if a.PreserveModelOptions {
-		return
-	}
 	same := func(x, y Index) bool { return x.Name == y.Name && slices.Equal(x.Fields, y.Fields) }
 	for _, key := range a.keptModels {
 		newIndexes := a.to.Models[key.label()].Indexes
@@ -366,9 +368,6 @@ func setKey(fields []string) string { return strings.Join(fields, "\x00") }
 // that stay; afterwards they are set to the new value. The optimizer merges
 // the two when nothing is in between.
 func (a *Autodetector) generateAlteredUniqueTogether(removalOnly bool) {
-	if a.PreserveModelOptions {
-		return
-	}
 	for _, key := range a.keptModels {
 		newMS := a.to.Models[key.label()]
 		oldSets := map[string]bool{}

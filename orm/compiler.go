@@ -199,8 +199,10 @@ func (c *compiler) build(items []selectItem, ordered bool) (*selectStmt, error) 
 }
 
 // resolveOrder resolves the ORDER BY terms. A term is an annotation name or a
-// field key, which may span relations. An expression is ordered by once: its
-// first term wins, as in Django, because a later one could never matter.
+// field key, which may span relations. A relation addressed by its attribute
+// name (not "<attr>_id") inherits the target model's Meta.Ordering, as in
+// Django. An expression is ordered by once: its first term wins, because a
+// later one could never matter.
 func (c *compiler) resolveOrder(items []selectItem) ([]orderItem, error) {
 	selected := make(map[string]bool, len(items))
 	for _, it := range items {
@@ -208,37 +210,90 @@ func (c *compiler) resolveOrder(items []selectItem) ([]orderItem, error) {
 			selected[it.alias] = true
 		}
 	}
-	out := make([]orderItem, 0, len(c.q.orders))
-	seen := make(map[string]bool, len(c.q.orders))
-	for _, t := range c.q.orders {
-		if t.random {
-			out = append(out, orderItem{random: true})
-			continue
+	terms := c.q.effectiveOrders()
+	out := make([]orderItem, 0, len(terms))
+	seen := make(map[string]bool, len(terms))
+	stack := map[*Model]bool{c.q.model: true}
+	for _, t := range terms {
+		var err error
+		out, err = c.appendOrderTerm(out, t, selected, seen, stack)
+		if err != nil {
+			return nil, err
 		}
-		item := orderItem{desc: t.desc}
-		// An annotation is identified by its name: two of them may differ
-		// only in a bound value, which the SQL text does not show.
-		key := "annotation " + t.key
-		if n, ok := c.annots[t.key]; ok {
-			item.node = n
-			if selected[t.key] {
-				item.alias = t.key
-			}
-		} else {
-			p, err := resolveFieldPath(c.q.model, t.key, c.annotNames)
-			if err != nil {
-				return nil, err
-			}
-			item.node = c.column(p)
-			key = nodeKey(c.d, item.node)
-		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, item)
 	}
 	return out, nil
+}
+
+// appendOrderTerm resolves one orderTerm, expanding a related model's default
+// Meta.Ordering when the key ends on a relation attribute rather than its "_id"
+// column. stack tracks models on the active expansion chain to break cycles
+// while allowing sibling branches to reference the same model.
+func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected, seen map[string]bool, stack map[*Model]bool) ([]orderItem, error) {
+	if t.random {
+		return append(out, orderItem{random: true}), nil
+	}
+	item := orderItem{desc: t.desc}
+	// An annotation is identified by its name: two of them may differ
+	// only in a bound value, which the SQL text does not show.
+	key := "annotation " + t.key
+	if n, ok := c.annots[t.key]; ok {
+		item.node = n
+		if selected[t.key] {
+			item.alias = t.key
+		}
+	} else {
+		p, err := resolveFieldPath(c.q.model, t.key, c.annotNames)
+		if err != nil {
+			return nil, err
+		}
+		if target := relatedOrderingTarget(t.key, p); target != nil && !stack[target] {
+			stack[target] = true
+			for _, sub := range parseOrderTerms(target.ordering) {
+				if sub.random {
+					out = append(out, orderItem{random: true})
+					continue
+				}
+				expanded := orderTerm{
+					key:  t.key + lookupSep + sub.key,
+					desc: t.desc != sub.desc,
+				}
+				out, err = c.appendOrderTerm(out, expanded, selected, seen, stack)
+				if err != nil {
+					delete(stack, target)
+					return nil, err
+				}
+			}
+			delete(stack, target)
+			return out, nil
+		}
+		item.node = c.column(p)
+		key = nodeKey(c.d, item.node)
+	}
+	if seen[key] {
+		return out, nil
+	}
+	seen[key] = true
+	return append(out, item), nil
+}
+
+// relatedOrderingTarget returns the related target model whose Meta.Ordering
+// should be inherited for ordering key, or nil when key addresses a plain
+// field, a relation's "_id" attname/column, or a target without Meta.Ordering.
+func relatedOrderingTarget(key string, p fieldPath) *Model {
+	if !p.relation || p.field == nil || p.field.Rel == nil || p.field.Rel.Target == nil {
+		return nil
+	}
+	if len(p.field.Rel.Target.ordering) == 0 {
+		return nil
+	}
+	last := key
+	if i := strings.LastIndex(key, lookupSep); i >= 0 {
+		last = key[i+len(lookupSep):]
+	}
+	if last == attname(p.field) || last == p.field.Column {
+		return nil
+	}
+	return p.field.Rel.Target
 }
 
 // withOrderColumns appends the ORDER BY expressions that are not selected.

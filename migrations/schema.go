@@ -152,9 +152,12 @@ func (e *SchemaEditor) createTableSQL(state *ProjectState, table string, fields 
 	return "CREATE TABLE " + e.q(table) + " (" + strings.Join(defs, ", ") + ")", nil
 }
 
-// shouldIndex reports whether a field gets its own index. A unique or
-// primary-key column is indexed by its constraint already.
-func shouldIndex(f FieldState) bool { return f.DBIndex && !f.Unique && !f.PrimaryKey }
+// shouldIndex reports whether a field gets its own index. Foreign keys are
+// indexed by default, as in Django. A unique or primary-key column is indexed
+// by its constraint already.
+func shouldIndex(f FieldState) bool {
+	return (f.DBIndex || f.IsRelation()) && !f.Unique && !f.PrimaryKey
+}
 
 // fieldIndexName returns the name of the single-column index of a field.
 func (e *SchemaEditor) fieldIndexName(table, column string) string {
@@ -169,6 +172,19 @@ func (e *SchemaEditor) uniqueTogetherName(table string, columns []string) string
 // createIndexSQL renders CREATE INDEX.
 func (e *SchemaEditor) createIndexSQL(name, table string, columns []string) string {
 	return "CREATE INDEX " + e.q(name) + " ON " + e.q(table) + " (" + e.qAll(columns) + ")"
+}
+
+// createOrderedIndexSQL renders CREATE INDEX with optional DESC per column.
+func (e *SchemaEditor) createOrderedIndexSQL(name, table string, cols []indexCol) string {
+	parts := make([]string, len(cols))
+	for i, c := range cols {
+		if c.desc {
+			parts[i] = e.q(c.column) + " DESC"
+		} else {
+			parts[i] = e.q(c.column)
+		}
+	}
+	return "CREATE INDEX " + e.q(name) + " ON " + e.q(table) + " (" + strings.Join(parts, ", ") + ")"
 }
 
 // addUniqueSQL renders the statement that makes columns unique together: a
@@ -198,11 +214,11 @@ func (e *SchemaEditor) indexStatements(ms *ModelState) ([]string, error) {
 		}
 	}
 	for _, idx := range ms.Indexes {
-		cols, err := ms.columns(idx.Fields)
+		cols, err := ms.indexColumns(idx.Fields)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, e.createIndexSQL(idx.Name, ms.Table, cols))
+		out = append(out, e.createOrderedIndexSQL(idx.Name, ms.Table, cols))
 	}
 	for _, set := range ms.UniqueTogether {
 		cols, err := ms.columns(set)
@@ -485,11 +501,11 @@ func (e *SchemaEditor) alterUniqueTogether(ctx context.Context, oldMS, newMS *Mo
 
 // addIndex creates a named index on the table of ms.
 func (e *SchemaEditor) addIndex(ctx context.Context, ms *ModelState, idx Index) error {
-	cols, err := ms.columns(idx.Fields)
+	cols, err := ms.indexColumns(idx.Fields)
 	if err != nil {
 		return err
 	}
-	return e.Execute(ctx, e.createIndexSQL(idx.Name, ms.Table, cols))
+	return e.Execute(ctx, e.createOrderedIndexSQL(idx.Name, ms.Table, cols))
 }
 
 // removeIndex drops a named index.

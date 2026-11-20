@@ -50,9 +50,13 @@ const (
 	// OnDeleteSetNull sets the foreign key to NULL (ON DELETE SET NULL); the
 	// column must be nullable. It matches Django's SET_NULL.
 	OnDeleteSetNull
-	// OnDeleteRestrict rejects the delete while referencing rows exist
-	// (ON DELETE RESTRICT), matching Django's RESTRICT.
+	// OnDeleteRestrict rejects the delete while referencing rows exist unless
+	// those rows are also being deleted via a CASCADE path, matching Django's
+	// RESTRICT.
 	OnDeleteRestrict
+	// OnDeleteProtect always rejects the delete while referencing rows exist,
+	// matching Django's PROTECT.
+	OnDeleteProtect
 )
 
 // Clause returns the SQL ON DELETE fragment for od with a leading space, or ""
@@ -63,7 +67,7 @@ func (od OnDelete) Clause() string {
 		return " ON DELETE CASCADE"
 	case OnDeleteSetNull:
 		return " ON DELETE SET NULL"
-	case OnDeleteRestrict:
+	case OnDeleteRestrict, OnDeleteProtect:
 		return " ON DELETE RESTRICT"
 	default:
 		return ""
@@ -79,6 +83,8 @@ func (od OnDelete) String() string {
 		return "set_null"
 	case OnDeleteRestrict:
 		return "restrict"
+	case OnDeleteProtect:
+		return "protect"
 	default:
 		return "do_nothing"
 	}
@@ -94,10 +100,12 @@ func ParseOnDelete(raw string) (OnDelete, error) {
 		return OnDeleteSetNull, nil
 	case "restrict":
 		return OnDeleteRestrict, nil
+	case "protect":
+		return OnDeleteProtect, nil
 	case "do_nothing":
 		return OnDeleteDoNothing, nil
 	default:
-		return OnDeleteDoNothing, fmt.Errorf("invalid on_delete %q: must be cascade, set_null, restrict, or do_nothing", raw)
+		return OnDeleteDoNothing, fmt.Errorf("invalid on_delete %q: must be cascade, set_null, protect, restrict, or do_nothing", raw)
 	}
 }
 

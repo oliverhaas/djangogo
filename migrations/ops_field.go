@@ -240,11 +240,15 @@ func defaultColumn(name string, rel orm.RelKind) string {
 	return snakeCase(name)
 }
 
-// renameIn replaces every occurrence of oldName in names.
+// renameIn replaces every occurrence of oldName in names, preserving a leading
+// "-" prefix on descending index fields.
 func renameIn(names []string, oldName, newName string) {
 	for i, n := range names {
-		if n == oldName {
+		switch n {
+		case oldName:
 			names[i] = newName
+		case "-" + oldName:
+			names[i] = "-" + newName
 		}
 	}
 }

@@ -102,7 +102,8 @@ func (d Dialect) CreateTableSQL(m *orm.Model) string {
 	return "CREATE TABLE " + d.Quote(m.Table()) + " (" + strings.Join(defs, ", ") + ")"
 }
 
-// Open opens a SQLite database at dsn and returns the *sql.DB. For in-memory
+// Open opens a SQLite database at dsn and returns the *sql.DB. Every connection
+// of the pool enforces foreign keys, as with Django's SQLite backend. For in-memory
 // databases it pins the pool to a single connection so the in-memory database is
 // shared across queries. This covers both the ":memory:" form and the named
 // shared form "file:name?mode=memory&cache=shared" (dsn containing "mode=memory").
@@ -110,7 +111,7 @@ func Open(dsn string) (*sql.DB, error) {
 	if regexpRegistration != nil {
 		return nil, fmt.Errorf("sqlite: register regexp function: %w", regexpRegistration)
 	}
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", withForeignKeys(dsn))
 	if err != nil {
 		return nil, err
 	}
@@ -118,4 +119,20 @@ func Open(dsn string) (*sql.DB, error) {
 		db.SetMaxOpenConns(1)
 	}
 	return db, nil
+}
+
+// withForeignKeys adds the foreign_keys pragma to the query of dsn, so the
+// driver runs it on each new connection of this pool. The DSN keeps the
+// setting local to the pool, where a driver connection hook would also change
+// the SQLite connections that the program opens elsewhere. A DSN that already
+// names foreign_keys is left as it is, so a caller can turn enforcement off.
+func withForeignKeys(dsn string) string {
+	if strings.Contains(dsn, "foreign_keys") {
+		return dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + "_pragma=foreign_keys(1)"
 }

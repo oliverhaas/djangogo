@@ -299,7 +299,7 @@ func (o AddIndex) StateForwards(app string, state *ProjectState) error {
 	if err != nil {
 		return err
 	}
-	if _, err := ms.columns(o.Index.Fields); err != nil {
+	if _, err := ms.indexColumns(o.Index.Fields); err != nil {
 		return err
 	}
 	if _, exists := ms.IndexByName(o.Index.Name); exists {
@@ -327,7 +327,7 @@ func (o AddIndex) DatabaseBackwards(ctx context.Context, _ string, e *SchemaEdit
 func (o AddIndex) Describe() string {
 	attrs := make([]string, len(o.Index.Fields))
 	for i, f := range o.Index.Fields {
-		attrs[i] = snakeCase(f)
+		attrs[i] = snakeCase(strings.TrimPrefix(f, "-"))
 	}
 	return fmt.Sprintf("Create index %s on field(s) %s of model %s",
 		o.Index.Name, strings.Join(attrs, ", "), lowerName(o.Model))
