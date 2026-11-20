@@ -103,11 +103,7 @@ func (a *Application) newAutodetector(loader *migrations.Loader, q migrations.Qu
 	if err != nil {
 		return nil, err
 	}
-	detector := migrations.NewAutodetector(from, migrations.StateFromRegistry(a.Models), q)
-	// The model registry cannot express model-level indexes and
-	// unique-together sets, so the ones declared in migrations stay.
-	detector.PreserveModelOptions = true
-	return detector, nil
+	return migrations.NewAutodetector(from, migrations.StateFromRegistry(a.Models), q), nil
 }
 
 // pendingModelChanges returns the sorted apps whose models differ from the

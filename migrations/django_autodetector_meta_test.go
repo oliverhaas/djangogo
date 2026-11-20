@@ -94,8 +94,6 @@ func TestAutodetectorReadsMetaOptionsFromRegistry(t *testing.T) {
 	renameKey(to, "metaStateBookWithOptions", "Book")
 
 	detector := migrations.NewAutodetector(from, to, nil)
-	// PreserveModelOptions is now a no-op: models own indexes and unique_together.
-	detector.PreserveModelOptions = true
 	changes, err := detector.Changes(nil, nil, "")
 	if err != nil {
 		t.Fatalf("Changes: %v", err)

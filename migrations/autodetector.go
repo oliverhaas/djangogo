@@ -133,11 +133,6 @@ func satisfies(op Operation, dep opDep) bool {
 // It cannot tell a renamed field or model from a removed and an added one,
 // so it asks its Questioner when a pair looks like a rename.
 type Autodetector struct {
-	// PreserveModelOptions is retained for backwards compatibility and has no
-	// effect: models declare Meta.Indexes and Meta.UniqueTogether directly, so
-	// the autodetector always compares them against the target state.
-	PreserveModelOptions bool
-
 	from, to   *ProjectState
 	questioner Questioner
 
