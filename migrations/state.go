@@ -24,6 +24,9 @@ type FieldState struct {
 	Unique     bool
 	// MaxLength is the VARCHAR length of a Char field.
 	MaxLength int
+	// MaxDigits and DecimalPlaces hold precision and scale for KindDecimal.
+	MaxDigits     int
+	DecimalPlaces int
 	// DBIndex requests a single-column index (the field option "index").
 	DBIndex bool
 	// Blank mirrors Django's blank=True. A non-null Char or Text field that may
@@ -44,6 +47,10 @@ type FieldState struct {
 
 // Equal reports whether two field states are identical.
 func (f FieldState) Equal(other FieldState) bool {
+	if !defaultsEqual(f.Default, other.Default) {
+		return false
+	}
+	f.Default, other.Default = nil, nil
 	return f == other
 }
 
@@ -51,8 +58,11 @@ func (f FieldState) Equal(other FieldState) bool {
 // column. A renamed field keeps its definition, which is what rename detection
 // looks for.
 func (f FieldState) sameDefinition(other FieldState) bool {
-	f.Name, f.Column = "", ""
-	other.Name, other.Column = "", ""
+	if !defaultsEqual(f.Default, other.Default) {
+		return false
+	}
+	f.Name, f.Column, f.Default = "", "", nil
+	other.Name, other.Column, other.Default = "", "", nil
 	return f == other
 }
 
@@ -66,17 +76,19 @@ func (f FieldState) Attr() string { return snakeCase(f.Name) }
 // fieldStateFromField snapshots an orm field.
 func fieldStateFromField(f *orm.Field) FieldState {
 	fs := FieldState{
-		Name:       f.Name,
-		Column:     f.Column,
-		Kind:       f.Kind,
-		PrimaryKey: f.PrimaryKey,
-		Null:       f.Null,
-		Unique:     f.Unique,
-		MaxLength:  f.MaxLength,
-		DBIndex:    f.DBIndex,
-		Blank:      f.Blank,
-		AutoNow:    f.AutoNow,
-		AutoNowAdd: f.AutoNowAdd,
+		Name:          f.Name,
+		Column:        f.Column,
+		Kind:          f.Kind,
+		PrimaryKey:    f.PrimaryKey,
+		Null:          f.Null,
+		Unique:        f.Unique,
+		MaxLength:     f.MaxLength,
+		MaxDigits:     f.MaxDigits,
+		DecimalPlaces: f.DecimalPlaces,
+		DBIndex:       f.DBIndex,
+		Blank:         f.Blank,
+		AutoNow:       f.AutoNow,
+		AutoNowAdd:    f.AutoNowAdd,
 	}
 	if f.HasDefault {
 		fs.Default = f.Default

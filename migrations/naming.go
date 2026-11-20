@@ -121,6 +121,40 @@ func fieldClassName(f FieldState) string {
 		return "BooleanField"
 	case orm.KindDateTime:
 		return "DateTimeField"
+	case orm.KindSmallInt:
+		return "SmallIntegerField"
+	case orm.KindBigInt:
+		return "BigIntegerField"
+	case orm.KindPositiveSmallInt:
+		return "PositiveSmallIntegerField"
+	case orm.KindPositiveInt:
+		return "PositiveIntegerField"
+	case orm.KindPositiveBigInt:
+		return "PositiveBigIntegerField"
+	case orm.KindFloat:
+		return "FloatField"
+	case orm.KindDecimal:
+		return "DecimalField"
+	case orm.KindDate:
+		return "DateField"
+	case orm.KindTime:
+		return "TimeField"
+	case orm.KindDuration:
+		return "DurationField"
+	case orm.KindUUID:
+		return "UUIDField"
+	case orm.KindJSON:
+		return "JSONField"
+	case orm.KindBinary:
+		return "BinaryField"
+	case orm.KindSlug:
+		return "SlugField"
+	case orm.KindEmail:
+		return "EmailField"
+	case orm.KindURL:
+		return "URLField"
+	case orm.KindGenericIPAddress:
+		return "GenericIPAddressField"
 	default:
 		return "Field"
 	}
