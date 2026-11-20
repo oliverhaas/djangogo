@@ -136,7 +136,11 @@ func (c *compiler) assignedValue(f *Field, value any) (sqlNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		return paramNode{value: v}, nil
+		bound, err := bindField(c.d, f, v)
+		if err != nil {
+			return nil, err
+		}
+		return paramNode{value: bound}, nil
 	}
 	n, err := c.resolveExpr(*expr)
 	if err != nil {

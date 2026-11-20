@@ -96,7 +96,7 @@ func (q *query) rowsStmt() (*selectStmt, *rowPlan, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	plan := &rowPlan{model: q.model}
+	plan := &rowPlan{dialect: c.d, model: q.model}
 	items := make([]selectItem, 0, len(q.model.fields))
 	for _, f := range q.model.fields {
 		items = append(items, selectItem{node: c.baseColumn(f)})

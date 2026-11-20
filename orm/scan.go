@@ -47,6 +47,10 @@ func convertValue(v any, t valueType) (any, error) {
 	if v == nil {
 		return nil, nil
 	}
+	if t == typeBinary || t == typeJSON || t == typeDecimal || t == typeDate ||
+		t == typeTimeOfDay || t == typeDuration || t == typeUUID {
+		return convertKindValue(v, t)
+	}
 	if b, ok := v.([]byte); ok {
 		v = string(b)
 	}
@@ -204,21 +208,11 @@ func assignScanned(dst reflect.Value, v any) error {
 	return nil
 }
 
-// nullTarget is the Scan destination of a nullable plain field. database/sql
-// refuses to scan NULL into a string, an integer, a bool, or a time; the
-// wrapper reads NULL as the zero value instead.
-type nullTarget struct {
-	dst reflect.Value
-}
-
-// Scan implements sql.Scanner.
-func (n nullTarget) Scan(src any) error { return assignScanned(n.dst, src) }
-
 // fieldTarget returns the Scan destination for field f of the struct elem.
-func fieldTarget(elem reflect.Value, f *Field) any {
+func fieldTarget(d Dialect, elem reflect.Value, f *Field) any {
 	fv := elem.Field(f.Index)
-	if f.Null && f.Rel == nil {
-		return nullTarget{dst: fv}
+	if f.Rel == nil {
+		return fieldScanner{dialect: d, field: f, dst: fv}
 	}
 	return fv.Addr().Interface()
 }
@@ -236,6 +230,7 @@ type relPlan struct {
 // model's own fields, the fields of each select_related target, the
 // annotations, and any hidden ordering columns.
 type rowPlan struct {
+	dialect    Dialect
 	model      *Model
 	rels       []relPlan
 	annots     []string
@@ -249,7 +244,7 @@ func (p *rowPlan) scan(rows *sql.Rows) (reflect.Value, []any, error) {
 	elem := reflect.New(p.model.goType).Elem()
 	targets := make([]any, 0, p.ncols)
 	for _, f := range p.model.fields {
-		targets = append(targets, fieldTarget(elem, f))
+		targets = append(targets, fieldTarget(p.dialect, elem, f))
 	}
 	holders := make([][]any, len(p.rels))
 	for i, r := range p.rels {
@@ -310,7 +305,7 @@ func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 		}
 		obj := reflect.New(target.goType)
 		for k, f := range target.fields {
-			if err := assignScanned(obj.Elem().Field(f.Index), holders[i][k]); err != nil {
+			if err := assignFieldScanned(p.dialect, f, obj.Elem().Field(f.Index), holders[i][k]); err != nil {
 				return fmt.Errorf("field %s.%s: %w", target.Name(), f.Name, err)
 			}
 		}

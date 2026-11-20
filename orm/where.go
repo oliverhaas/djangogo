@@ -380,6 +380,6 @@ func djangoFieldName(f *Field) string {
 	case KindDateTime:
 		return "DateTimeField"
 	default:
-		return "Field"
+		return djangoKindFieldName(f.Kind)
 	}
 }

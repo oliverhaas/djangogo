@@ -1,7 +1,9 @@
 package postgres
 
 import (
+	"encoding/json"
 	"errors"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -64,6 +66,22 @@ func (Dialect) LiteralSQL(placeholder string, v any) string {
 		return placeholder + "::text"
 	case time.Time:
 		return placeholder + "::timestamptz"
+	case time.Duration:
+		return placeholder + "::interval"
+	case orm.Decimal:
+		return placeholder + "::numeric"
+	case orm.Date:
+		return placeholder + "::date"
+	case orm.Time:
+		return placeholder + "::time"
+	case orm.UUID:
+		return placeholder + "::uuid"
+	case json.RawMessage:
+		return placeholder + "::jsonb"
+	case []byte:
+		return placeholder + "::bytea"
+	case netip.Addr:
+		return placeholder + "::inet"
 	default:
 		return placeholder
 	}

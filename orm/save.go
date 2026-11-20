@@ -98,8 +98,8 @@ func (qs *QuerySet[T]) Save(ctx context.Context, obj *T, opts ...SaveOption) err
 	}
 	now := db.now()
 	for _, f := range fields {
-		if f.AutoNow && f.Kind == KindDateTime {
-			v.Field(f.Index).Set(reflect.ValueOf(now))
+		if f.AutoNow && isTemporalAutoKind(f.Kind) {
+			stampTemporalAuto(v.Field(f.Index), f.Kind, now)
 		}
 	}
 	updated := true
@@ -159,12 +159,20 @@ func (db *DB) updateRow(ctx context.Context, m *Model, v reflect.Value, fields [
 		}
 		w.ident(f.Column)
 		w.write(" = ")
-		w.param(v.Field(f.Index).Interface())
+		arg, err := bindField(db.dialect, f, v.Field(f.Index).Interface())
+		if err != nil {
+			return false, fmt.Errorf("orm: update %s: %w", m.Name(), err)
+		}
+		w.param(arg)
 	}
 	w.write(" WHERE ")
 	w.ident(m.pk.Column)
 	w.write(" = ")
-	w.param(v.Field(m.pk.Index).Interface())
+	pkArg, err := bindField(db.dialect, m.pk, v.Field(m.pk.Index).Interface())
+	if err != nil {
+		return false, fmt.Errorf("orm: update %s: %w", m.Name(), err)
+	}
+	w.param(pkArg)
 	result, err := db.conn(ctx).ExecContext(ctx, w.String(), w.args...)
 	if err != nil {
 		return false, fmt.Errorf("orm: update %s: %w", m.Name(), err)
@@ -223,7 +231,11 @@ func (db *DB) insert(ctx context.Context, m *Model, objs []reflect.Value, ignore
 				if i > 0 {
 					w.write(", ")
 				}
-				w.param(obj.Field(f.Index).Interface())
+				arg, err := bindField(d, f, obj.Field(f.Index).Interface())
+				if err != nil {
+					return fmt.Errorf("orm: insert %s: %w", m.Name(), err)
+				}
+				w.param(arg)
 			}
 			w.write(")")
 		}
@@ -304,6 +316,10 @@ func applyDefaults(v reflect.Value, fields []*Field) {
 // setDefaultValue assigns a parsed default value onto a struct field, matching
 // the field's Go kind. Unhandled kinds leave the field untouched.
 func setDefaultValue(fv reflect.Value, def any) {
+	if fv.Kind() == reflect.Pointer {
+		setKindDefaultValue(fv, def)
+		return
+	}
 	switch d := def.(type) {
 	case int64:
 		switch fv.Kind() {
@@ -315,7 +331,13 @@ func setDefaultValue(fv reflect.Value, def any) {
 	case bool:
 		fv.SetBool(d)
 	case string:
-		fv.SetString(d)
+		if fv.Kind() == reflect.String {
+			fv.SetString(d)
+		} else {
+			setKindDefaultValue(fv, def)
+		}
+	default:
+		setKindDefaultValue(fv, def)
 	}
 }
 
@@ -323,10 +345,10 @@ func setDefaultValue(fv reflect.Value, def any) {
 // for a row that is being inserted.
 func applyAutoNowOnCreate(v reflect.Value, fields []*Field, now time.Time) {
 	for _, f := range fields {
-		if f.Kind != KindDateTime || (!f.AutoNow && !f.AutoNowAdd) {
+		if !isTemporalAutoKind(f.Kind) || (!f.AutoNow && !f.AutoNowAdd) {
 			continue
 		}
-		v.Field(f.Index).Set(reflect.ValueOf(now))
+		stampTemporalAuto(v.Field(f.Index), f.Kind, now)
 	}
 }
 
