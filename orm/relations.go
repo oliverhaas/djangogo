@@ -18,13 +18,15 @@ const (
 	RelFK
 	// RelO2O indicates a forward one-to-one relation (unique foreign key).
 	RelO2O
+	// RelM2M indicates a forward many-to-many relation.
+	RelM2M
 )
 
 // Relation describes a forward relation on a field.
 type Relation struct {
-	// Kind classifies the relation (RelFK or RelO2O).
+	// Kind classifies the relation (RelFK, RelO2O, or RelM2M).
 	Kind RelKind
-	// Column is the FK column on this model (e.g. "author_id").
+	// Column is the FK column on this model (e.g. "author_id"), or "" for M2M.
 	Column string
 	// OnDelete is the referential action when the referenced row is deleted. It
 	// defaults to OnDeleteDoNothing (SQL NO ACTION) when on_delete is unset.
@@ -37,6 +39,26 @@ type Relation struct {
 	targetType reflect.Type
 	// Target is the resolved related model, set by Registry.Resolve.
 	Target *Model
+
+	// ThroughName is the explicit through= tag value on an M2M field, or ""
+	// when the intermediate table is auto-created.
+	ThroughName string
+	// ThroughFields holds the optional through_fields= [source, target] pair.
+	ThroughFields [2]string
+	// DBTable overrides the auto-created M2M join table name when non-empty.
+	DBTable string
+	// Symmetrical reports whether a self-referential M2M is symmetrical.
+	Symmetrical bool
+	// symmetricalSet records whether symmetrical= was explicitly specified.
+	symmetricalSet bool
+	// AutoCreated reports whether Through was synthesized by Registry.Resolve.
+	AutoCreated bool
+	// Through is the resolved intermediate model for a RelM2M relation.
+	Through *Model
+	// SourceField is the FK field on Through pointing to the declaring model.
+	SourceField *Field
+	// TargetField is the FK field on Through pointing to Target.
+	TargetField *Field
 }
 
 // OnDelete is the referential action applied when the row a foreign key points

@@ -16,6 +16,7 @@ type query struct {
 	// filters holds one condition per Filter or Exclude call, in call order.
 	// The order matters: each call may change the type of the joins it uses.
 	filters       []Cond
+	m2mFilter     *m2mCoreFilter
 	orders        []orderTerm
 	explicitOrder bool
 	selectRelated []string

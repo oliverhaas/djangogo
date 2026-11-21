@@ -185,13 +185,28 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 		Editable: true,
 	}
 
-	// Relation fields (e.g. FK[T], O2O[T]) are detected before the scalar type switch.
-	// They map to an integer FK column and carry a *Relation; the column defaults
-	// to "<snake>_id" and may be overridden by a column= tag.
+	// Relation fields (FK[T], O2O[T], M2M[T]) are detected before the scalar type switch.
+	// FK and O2O map to an integer FK column ("<snake>_id", overridable by column=).
+	// M2M has no concrete column on the declaring model.
 	if rm, ok := reflect.Zero(sf.Type).Interface().(relationMarker); ok {
+		f.Rel = &Relation{Kind: rm.relKind(), targetType: rm.relTarget()}
+		if f.Rel.Kind == RelM2M {
+			f.Column = ""
+			if tag != "" {
+				for _, token := range strings.Split(tag, ";") {
+					token = strings.TrimSpace(token)
+					if token == "" {
+						continue
+					}
+					if err := applyM2MTagOption(f, sf.Name, token); err != nil {
+						return nil, false, err
+					}
+				}
+			}
+			return f, true, nil
+		}
 		f.Kind = KindInt
 		f.Column = toSnakeCase(sf.Name) + "_id"
-		f.Rel = &Relation{Kind: rm.relKind(), targetType: rm.relTarget()}
 		if f.Rel.Kind == RelO2O {
 			f.Unique = true
 		}

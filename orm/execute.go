@@ -8,13 +8,24 @@ import (
 )
 
 // CreateTable creates the table for m using the dialect's DDL, along with its
-// field indexes, Meta.Indexes, and Meta.UniqueTogether constraints.
+// field indexes, Meta.Indexes, Meta.UniqueTogether constraints, and any
+// auto-created M2M join tables declared on m.
 func (db *DB) CreateTable(ctx context.Context, m *Model) error {
 	ddl := db.dialect.CreateTableSQL(m)
 	if _, err := db.conn(ctx).ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("orm: create table %s: %w", m.Table(), err)
 	}
-	return db.createTableExtras(ctx, m)
+	if err := db.createTableExtras(ctx, m); err != nil {
+		return err
+	}
+	for _, f := range m.m2mFields {
+		if f.Rel != nil && f.Rel.AutoCreated && f.Rel.Through != nil {
+			if err := db.CreateTable(ctx, f.Rel.Through); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Annotated is a model row together with the values of the queryset's

@@ -92,9 +92,14 @@ func (r *Registry) resolveReverseRelations() {
 	}
 	for _, src := range r.models {
 		lowerSrc := strings.ToLower(src.name)
-		for _, f := range src.fields {
+		registerReverse := func(f *Field) {
 			if f.Rel == nil || f.Rel.Target == nil {
-				continue
+				return
+			}
+			// Symmetrical self-referential M2M fields expose no reverse accessor
+			// or reverse query name, matching Django's hidden internal reverse.
+			if f.Rel.Kind == RelM2M && f.Rel.Symmetrical {
+				return
 			}
 			target := f.Rel.Target
 			hidden := strings.HasSuffix(f.Rel.RelatedName, "+")
@@ -143,6 +148,12 @@ func (r *Registry) resolveReverseRelations() {
 					target.byReverseQuery[queryName] = rev
 				}
 			}
+		}
+		for _, f := range src.fields {
+			registerReverse(f)
+		}
+		for _, f := range src.m2mFields {
+			registerReverse(f)
 		}
 	}
 }
@@ -198,12 +209,23 @@ func lookupReverseForChild[Child any](ownerModel *Model, name string, wantKind R
 }
 
 // Related returns a QuerySet of Child rows related to owner via the reverse
-// relation named name (the related_name tag, or "<child>_set" by default).
+// FK relation or forward/reverse M2M relation named name (the field attribute,
+// related_name tag, or "<child>_set" by default).
 //
 // owner may be a model struct value or pointer. Any lookup error (unknown or
 // hidden relation name, wrong Child type, or an unsaved owner with a zero
 // primary key) is recorded on the returned QuerySet and reported when it runs.
 func Related[Child any](db *DB, owner any, name string) *QuerySet[Child] {
+	if owner != nil {
+		if ownerModel, ok := db.Registry().ModelOf(owner); ok {
+			if _, isM2M := ownerModel.ManyToManyField(name); isM2M {
+				return Many[Child](db, owner, name).QuerySet()
+			}
+			if rev, found, _ := ownerModel.lookupReverseAccessor(name); found && rev.Kind == RelM2M {
+				return Many[Child](db, owner, name).QuerySet()
+			}
+		}
+	}
 	return RelatedSet[Child](db, owner, name).QuerySet()
 }
 

@@ -198,6 +198,26 @@ func (n *whereNode) split(negated bool) (where, having *whereNode) {
 // itself, as in Django's Query.add_q.
 func (c *compiler) addFilters() error {
 	root := &whereNode{conn: connAnd}
+	if mf := c.q.m2mFilter; mf != nil && c.q.model != nil && c.q.model.PrimaryKey() != nil {
+		h := hop{
+			fromColumn: c.q.model.PrimaryKey().Column,
+			target:     mf.through,
+			toColumn:   mf.targetFKCol,
+			nullable:   false,
+			many:       true,
+		}
+		joins := c.joins.setup([]hop{h}, nil)
+		arg, err := bindField(c.d, mf.sourceField, mf.ownerPK)
+		if err != nil {
+			return err
+		}
+		pred := &predicate{
+			lookup: lookupExact,
+			lhs:    colNode{join: joins[0], field: mf.sourceField},
+			rhs:    []sqlNode{paramNode{value: arg}},
+		}
+		root.children = append(root.children, whereChild{pred: pred})
+	}
 	for _, cond := range c.q.filters {
 		if cond.err != nil {
 			return cond.err
@@ -353,8 +373,11 @@ func (c *compiler) lookupOf(rest []string, path *fieldPath) (string, error) {
 		if path.relation {
 			supported = relationLookupNames
 			kind = "ForeignKey"
-			if (path.reverse != nil && path.reverse.Kind == RelO2O) ||
-				(path.reverse == nil && path.field != nil && path.field.Rel != nil && path.field.Rel.Kind == RelO2O) {
+			switch {
+			case path.m2m || (path.reverse != nil && path.reverse.Kind == RelM2M):
+				kind = "ManyToManyField"
+			case (path.reverse != nil && path.reverse.Kind == RelO2O) ||
+				(path.reverse == nil && path.field != nil && path.field.Rel != nil && path.field.Rel.Kind == RelO2O):
 				kind = "OneToOneField"
 			}
 		}

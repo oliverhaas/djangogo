@@ -286,6 +286,12 @@ func relatedOrderingTarget(key string, p fieldPath) *Model {
 	if !p.relation {
 		return nil
 	}
+	if p.targetModel != nil {
+		if len(p.targetModel.ordering) == 0 {
+			return nil
+		}
+		return p.targetModel
+	}
 	if p.reverse != nil {
 		if len(p.model.ordering) == 0 {
 			return nil

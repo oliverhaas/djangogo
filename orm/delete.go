@@ -64,8 +64,9 @@ type incomingFK struct {
 	field *Field
 }
 
-// incomingFKs returns every resolved FK in r that points to target, in
-// registration and field-declaration order.
+// incomingFKs returns every resolved FK in r (including auto-created M2M
+// through tables) that points to target, in registration and field-declaration
+// order.
 func incomingFKs(r *Registry, target *Model) []incomingFK {
 	var out []incomingFK
 	for _, m := range r.Models() {
@@ -75,12 +76,22 @@ func incomingFKs(r *Registry, target *Model) []incomingFK {
 			}
 		}
 	}
+	for _, tm := range r.autoThroughModels {
+		for _, f := range tm.fields {
+			if f.Rel != nil && f.Rel.Target == target {
+				out = append(out, incomingFK{model: tm, field: f})
+			}
+		}
+	}
 	return out
 }
 
 // hasModelDeleteHandlers reports whether any PreDelete or PostDelete handler
 // is registered for m.
 func hasModelDeleteHandlers(m *Model) bool {
+	if m.goType == nil {
+		return false
+	}
 	return signals.has(m.goType, preDelete) || signals.has(m.goType, postDelete)
 }
 

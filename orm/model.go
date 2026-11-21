@@ -17,6 +17,10 @@ type Model struct {
 	byColumn              map[string]*Field
 	goType                reflect.Type
 	cacheIndex            int
+	autoCreated           bool
+	m2mFields             []*Field
+	byM2MName             map[string]*Field
+	byM2MAttr             map[string]*Field
 	reverseRels           []*ReverseRelation
 	byReverseName         map[string]*ReverseRelation
 	byReverseQuery        map[string]*ReverseRelation
@@ -102,4 +106,31 @@ func (m *Model) Columns() []string {
 }
 
 // GoType returns the reflect.Type of the underlying Go struct (not a pointer).
+// It is nil for synthetic auto-created M2M through models.
 func (m *Model) GoType() reflect.Type { return m.goType }
+
+// AutoCreated reports whether m is a synthetic intermediate model generated
+// automatically for a many-to-many field without an explicit through= model.
+func (m *Model) AutoCreated() bool { return m.autoCreated }
+
+// ManyToMany returns a shallow copy of the forward many-to-many fields
+// declared on m, in field-declaration order.
+func (m *Model) ManyToMany() []*Field {
+	if len(m.m2mFields) == 0 {
+		return nil
+	}
+	cp := make([]*Field, len(m.m2mFields))
+	copy(cp, m.m2mFields)
+	return cp
+}
+
+// ManyToManyField looks up a declared forward many-to-many field on m by its
+// snake_case attribute name (e.g. "publications") or Go struct field name
+// (e.g. "Publications").
+func (m *Model) ManyToManyField(name string) (*Field, bool) {
+	if f, ok := m.byM2MAttr[name]; ok {
+		return f, true
+	}
+	f, ok := m.byM2MName[name]
+	return f, ok
+}

@@ -53,9 +53,17 @@ type relationPath struct {
 	// local is the field of the starting model whose column already holds the
 	// target's primary key, which is the case for a forward foreign key or O2O.
 	// A key that ends on the relation, or on the target's primary key, then
-	// needs no join. It is nil for a reverse relation.
+	// needs no join. It is nil for a reverse or M2M relation.
 	local *Field
-	// reverse is set when the relation traverses a reverse FK or O2O.
+	// through and throughLocal are set for an M2M relation (forward or reverse),
+	// where the first hop reaches the through table and throughLocal already
+	// holds the target's primary key, so a key ending on the relation or its
+	// target's primary key trims the second hop.
+	through      *Model
+	throughLocal *Field
+	// m2m reports that this relation traverses a many-to-many relation.
+	m2m bool
+	// reverse is set when the relation traverses a reverse FK, O2O, or M2M.
 	reverse *ReverseRelation
 }
 
@@ -68,8 +76,8 @@ func isForwardToOne(k RelKind) bool { return k == RelFK || k == RelO2O }
 // its column ("author_id"), Django's attname for a relation ("<attr>_id"), or
 // "pk" for the primary key.
 //
-// Reverse relations (reverse FK and reverse O2O) are matched by their
-// QueryName when no concrete field of m carries name.
+// Forward M2M fields and reverse relations (reverse FK, O2O, and M2M) are
+// matched when no concrete field of m carries name.
 func lookupName(m *Model, name string) (*Field, *relationPath, bool) {
 	if f, ok := lookupField(m, name); ok {
 		if f.Rel == nil || !isForwardToOne(f.Rel.Kind) || f.Rel.Target == nil || f.Rel.Target.PrimaryKey() == nil {
@@ -86,7 +94,60 @@ func lookupName(m *Model, name string) (*Field, *relationPath, bool) {
 			local:  f,
 		}, true
 	}
+	if f, ok := m.byM2MAttr[name]; ok && m.PrimaryKey() != nil &&
+		f.Rel != nil && f.Rel.Target != nil && f.Rel.Target.PrimaryKey() != nil &&
+		f.Rel.Through != nil && f.Rel.SourceField != nil && f.Rel.TargetField != nil {
+		return nil, &relationPath{
+			hops: []hop{
+				{
+					fromColumn: m.PrimaryKey().Column,
+					target:     f.Rel.Through,
+					toColumn:   f.Rel.SourceField.Column,
+					nullable:   true,
+					many:       true,
+				},
+				{
+					fromColumn: f.Rel.TargetField.Column,
+					target:     f.Rel.Target,
+					toColumn:   f.Rel.Target.PrimaryKey().Column,
+					nullable:   f.Rel.TargetField.Null,
+				},
+			},
+			target:       f.Rel.Target,
+			through:      f.Rel.Through,
+			throughLocal: f.Rel.TargetField,
+			m2m:          true,
+		}, true
+	}
 	if rev, ok := m.lookupReverseQuery(name); ok && m.PrimaryKey() != nil && rev.Source.PrimaryKey() != nil {
+		if rev.Kind == RelM2M {
+			rel := rev.Field.Rel
+			if rel != nil && rel.Through != nil && rel.SourceField != nil && rel.TargetField != nil {
+				return nil, &relationPath{
+					hops: []hop{
+						{
+							fromColumn: m.PrimaryKey().Column,
+							target:     rel.Through,
+							toColumn:   rel.TargetField.Column,
+							nullable:   true,
+							many:       true,
+						},
+						{
+							fromColumn: rel.SourceField.Column,
+							target:     rev.Source,
+							toColumn:   rev.Source.PrimaryKey().Column,
+							nullable:   rel.SourceField.Null,
+						},
+					},
+					target:       rev.Source,
+					through:      rel.Through,
+					throughLocal: rel.SourceField,
+					m2m:          true,
+					reverse:      rev,
+				}, true
+			}
+			return nil, nil, false
+		}
 		return nil, &relationPath{
 			hops: []hop{{
 				fromColumn: m.PrimaryKey().Column,
@@ -140,6 +201,9 @@ func fieldChoices(m *Model, extra []string) string {
 		seen[f.Attr] = true
 		seen[attname(f)] = true
 	}
+	for _, f := range m.m2mFields {
+		seen[f.Attr] = true
+	}
 	for _, rev := range m.reverseRels {
 		if !rev.Hidden {
 			seen[rev.QueryName] = true
@@ -165,11 +229,16 @@ type fieldPath struct {
 	field *Field
 	// model owns field.
 	model *Model
+	// targetModel is set when an M2M relation trimmed its second hop, recording
+	// the logical target model of the relation.
+	targetModel *Model
 	// rest holds the trailing parts that are not fields: the lookup.
 	rest []string
 	// relation reports that the key ended on a relation rather than on a
 	// plain field.
 	relation bool
+	// m2m reports that the key ended on a many-to-many relation.
+	m2m bool
 	// reverse is set when the key ended on a reverse relation.
 	reverse *ReverseRelation
 	// keyWasPK reports that the final resolved segment was literally "pk".
@@ -182,6 +251,9 @@ type fieldPath struct {
 // expectedModel returns the model type expected when a model instance is passed
 // as the filter value for this path, or nil when no model check applies.
 func (p fieldPath) expectedModel() *Model {
+	if p.targetModel != nil {
+		return p.targetModel
+	}
 	if p.reverse != nil {
 		return p.model
 	}
@@ -232,6 +304,19 @@ func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 				p.rest = parts[i+1:]
 				return p, nil
 			}
+			if pending.throughLocal != nil && rel == nil && f == pending.target.PrimaryKey() {
+				// "publications__id" is the through table's "publication_id" column.
+				p.hops = append(p.hops, pending.hops[:len(pending.hops)-1]...)
+				p.field = pending.throughLocal
+				p.model = pending.through
+				p.targetModel = pending.target
+				p.m2m = pending.m2m
+				p.reverse = pending.reverse
+				p.keyWasPK = name == "pk"
+				p.trimmed = pending.hops[len(pending.hops)-1:]
+				p.rest = parts[i+1:]
+				return p, nil
+			}
 			p.hops = append(p.hops, pending.hops...)
 			p.model = pending.target
 			pending = nil
@@ -257,6 +342,16 @@ func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 		p.trimmed = pending.hops
 		return p, nil
 	}
+	if pending.throughLocal != nil {
+		p.hops = append(p.hops, pending.hops[:len(pending.hops)-1]...)
+		p.model = pending.through
+		p.field = pending.throughLocal
+		p.targetModel = pending.target
+		p.m2m = pending.m2m
+		p.reverse = pending.reverse
+		p.trimmed = pending.hops[len(pending.hops)-1:]
+		return p, nil
+	}
 	p.hops = append(p.hops, pending.hops...)
 	p.model = pending.target
 	p.field = pending.target.PrimaryKey()
@@ -277,7 +372,9 @@ func resolveFieldPath(m *Model, key string, extra []string) (fieldPath, error) {
 	}
 	if p.relation {
 		target := p.model
-		if p.reverse == nil {
+		if p.targetModel != nil {
+			target = p.targetModel
+		} else if p.reverse == nil {
 			if rel := p.field.Rel; rel != nil && rel.Target != nil {
 				target = rel.Target
 			}

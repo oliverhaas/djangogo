@@ -177,6 +177,11 @@ func creationOrder(models []*orm.Model) []*orm.Model {
 				visit(f.Rel.Target)
 			}
 		}
+		for _, f := range m.ManyToMany() {
+			if f.Rel != nil && f.Rel.AutoCreated && f.Rel.Target != nil {
+				visit(f.Rel.Target)
+			}
+		}
 		state[m] = 2
 		out = append(out, m)
 	}

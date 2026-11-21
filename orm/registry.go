@@ -9,12 +9,13 @@ import (
 // Registry holds all registered model descriptors and is safe for concurrent
 // reads after Freeze is called.
 type Registry struct {
-	models  []*Model
-	byType  map[reflect.Type]*Model
-	byLabel map[string]*Model   // keyed by Model.Label()
-	byName  map[string][]*Model // keyed by the bare Go type name
-	byTable map[string]*Model
-	frozen  bool
+	models            []*Model
+	autoThroughModels []*Model
+	byType            map[reflect.Type]*Model
+	byLabel           map[string]*Model   // keyed by Model.Label()
+	byName            map[string][]*Model // keyed by the bare Go type name
+	byTable           map[string]*Model
+	frozen            bool
 }
 
 // NewRegistry returns an empty, unfrozen Registry.
@@ -78,8 +79,9 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 		return nil, fmt.Errorf("orm: model %s already registered", label)
 	}
 
-	// Step 4: collect fields.
+	// Step 4: collect concrete fields and many-to-many fields.
 	var fields []*Field
+	var m2mFields []*Field
 	cacheIndex := -1
 	for i := range st.NumField() {
 		sf := st.Field(i)
@@ -92,7 +94,11 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 			return nil, fmt.Errorf("orm: model %s: %w", name, err)
 		}
 		if keep {
-			fields = append(fields, f)
+			if f.Rel != nil && f.Rel.Kind == RelM2M {
+				m2mFields = append(m2mFields, f)
+			} else {
+				fields = append(fields, f)
+			}
 		}
 	}
 
@@ -163,6 +169,18 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 		}
 		byColumn[f.Column] = f
 	}
+	byM2MName := make(map[string]*Field, len(m2mFields))
+	byM2MAttr := make(map[string]*Field, len(m2mFields))
+	for _, f := range m2mFields {
+		if other, dup := byAttr[f.Attr]; dup {
+			return nil, fmt.Errorf("orm: model %s: fields %s and %s share the attribute name %s", name, other.Name, f.Name, f.Attr)
+		}
+		if other, dup := byM2MAttr[f.Attr]; dup {
+			return nil, fmt.Errorf("orm: model %s: fields %s and %s share the attribute name %s", name, other.Name, f.Name, f.Attr)
+		}
+		byM2MName[f.Name] = f
+		byM2MAttr[f.Attr] = f
+	}
 
 	// Apply model-declared field choices (legacy Choices() hook).
 	if err := applyWithChoices(name, byName, byAttr, byColumn, model); err != nil {
@@ -179,6 +197,9 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 		byName:     byName,
 		byAttr:     byAttr,
 		byColumn:   byColumn,
+		m2mFields:  m2mFields,
+		byM2MName:  byM2MName,
+		byM2MAttr:  byM2MAttr,
 		goType:     st,
 		cacheIndex: cacheIndex,
 	}
@@ -219,6 +240,9 @@ func (r *Registry) Resolve() error {
 			}
 			f.Rel.Target = tm
 		}
+	}
+	if err := r.resolveM2MRelations(); err != nil {
+		return err
 	}
 	r.resolveReverseRelations()
 	return nil
