@@ -12,6 +12,12 @@ equivalence against the fixture result executed by Django.
 Run from the repository root with Python 3 and Django installed:
 
 ```
+go generate ./fidelity/...
+```
+
+or specifically for query SQL:
+
+```
 python3 fidelity/oracle/query_sql.py
 ```
 
