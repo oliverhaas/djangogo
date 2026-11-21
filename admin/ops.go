@@ -13,10 +13,12 @@ type querySpec struct {
 	filters       []orm.Cond
 	ordering      []string
 	selectRelated []string
-	distinct      bool
-	limit         int // <= 0 means unlimited (unless limitZero is true)
-	limitZero     bool
-	offset        int
+	// prefetchRelated are forward relations loaded in one query each.
+	prefetchRelated []string
+	distinct        bool
+	limit           int // <= 0 means unlimited (unless limitZero is true)
+	limitZero       bool
+	offset          int
 }
 
 // applySpec translates spec onto a typed *orm.QuerySet[T].
@@ -26,6 +28,9 @@ func applySpec[T any](qs *orm.QuerySet[T], spec querySpec) *orm.QuerySet[T] {
 	}
 	if len(spec.selectRelated) > 0 {
 		qs = qs.SelectRelated(spec.selectRelated...)
+	}
+	for _, p := range spec.prefetchRelated {
+		qs = qs.PrefetchRelated(p)
 	}
 	if len(spec.ordering) > 0 {
 		qs = qs.OrderBy(spec.ordering...)

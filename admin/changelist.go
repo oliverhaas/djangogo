@@ -142,6 +142,27 @@ func (e *entry) actionsSelectionCounter() bool {
 	return true
 }
 
+// joins returns the relations that the changelist query for r joins and
+// those it loads in one more query each, Django's apply_select_related.
+// shown are the relations that the columns show. Without ListSelectRelated
+// the query joins them; with it, the query joins its relations and loads
+// the shown ones that no join covers, since a join of "a__b" loads "a" too.
+func (e *entry) joins(r *http.Request, shown []string) (joined, loaded []string) {
+	joined = e.admin.ListSelectRelated
+	if e.admin.GetListSelectRelated != nil {
+		joined = e.admin.GetListSelectRelated(r)
+	}
+	if joined == nil {
+		return shown, nil
+	}
+	for _, p := range shown {
+		if !slices.ContainsFunc(joined, func(j string) bool { return j == p || strings.HasPrefix(j, p+"__") }) {
+			loaded = append(loaded, p)
+		}
+	}
+	return joined, loaded
+}
+
 // buildChangeList constructs and executes the changelist query for r and e.
 func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action) (*changeList, error) {
 	ctx := r.Context()
@@ -293,10 +314,12 @@ func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action)
 	}
 	cl.clearAllFiltersQS = cl.getQueryString(newRem, allFilterKeys)
 
+	joined, loaded := e.joins(r, selectRelatedForColumns(cols))
 	spec := querySpec{
-		filters:       append([]orm.Cond(nil), baseSpec.filters...),
-		selectRelated: selectRelatedForColumns(cols),
-		distinct:      filterDups,
+		filters:         append([]orm.Cond(nil), baseSpec.filters...),
+		selectRelated:   joined,
+		prefetchRelated: loaded,
+		distinct:        filterDups,
 	}
 	spec.filters = append(spec.filters, filterConds...)
 

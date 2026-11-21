@@ -243,6 +243,13 @@ type ModelAdmin struct {
 	// ShowFullResultCount controls whether the total unfiltered count is
 	// queried and displayed in the search bar (default true when nil).
 	ShowFullResultCount *bool
+	// ListSelectRelated names the relations that the changelist query joins
+	// (Django's list_select_related as a list). nil joins the foreign keys
+	// that the columns show, as Django's default does, and a non-nil empty
+	// slice joins none. A relation that a column shows and the query does
+	// not join is loaded in one more query, where Django loads it once per
+	// row.
+	ListSelectRelated []string
 	// SortableBy restricts which ListDisplay columns are sortable. nil allows
 	// sorting on every sortable column; a non-nil empty slice disables sorting.
 	SortableBy []string
@@ -385,6 +392,9 @@ type ModelAdmin struct {
 	GetListDisplayLinks func(r *http.Request, listDisplay []string) []string
 	// GetListFilter dynamically returns the list_filter entries for r.
 	GetListFilter func(r *http.Request) []any
+	// GetListSelectRelated returns the joined relations for r in place of
+	// ListSelectRelated (Django's get_list_select_related).
+	GetListSelectRelated func(r *http.Request) []string
 	// GetSearchFields dynamically returns the search_fields for r.
 	GetSearchFields func(r *http.Request) []string
 	// GetOrdering dynamically returns the default ordering for r.

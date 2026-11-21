@@ -177,6 +177,32 @@ func (CLMixedFields) Meta() orm.Meta {
 	}
 }
 
+// CLChordsMusician stands in for tests/admin_changelist/models.py::ChordsMusician,
+// which inherits from Musician; the Go model copies the name.
+type CLChordsMusician struct {
+	ID   int64
+	Name string `orm:"max_length=30"`
+}
+
+func (m CLChordsMusician) String() string { return m.Name }
+
+// CLChordsBand stands in for tests/admin_changelist/models.py::ChordsBand.
+// Its label is the name, so that the page shows a text the tests can find.
+type CLChordsBand struct {
+	ID   int64
+	Name string `orm:"max_length=30"`
+}
+
+func (b CLChordsBand) String() string { return b.Name }
+
+// CLInvitation stands in for tests/admin_changelist/models.py::Invitation.
+type CLInvitation struct {
+	ID         int64
+	Player     orm.FK[CLChordsMusician] `orm:"on_delete=cascade"`
+	Band       orm.FK[CLChordsBand]     `orm:"on_delete=cascade"`
+	Instrument string                   `orm:"max_length=15"`
+}
+
 func changelistModels() []any {
 	return []any{
 		auth.App{},
@@ -196,6 +222,9 @@ func changelistModels() []any {
 			&CLOrderedObject{},
 			&CLQuartet{},
 			&CLMixedFields{},
+			&CLChordsMusician{},
+			&CLChordsBand{},
+			&CLInvitation{},
 		),
 	}
 }
@@ -1246,5 +1275,103 @@ func TestColumnSortingMultiToggleAndSortableBy(t *testing.T) {
 		envNoSort.client.ForceLogin(super)
 		resp = envNoSort.client.Get(mustReverse(t, envNoSort.router, "admin:admin_changelist_clswallow_changelist"))
 		djangotest.AssertNotContains(t, resp, `class="sortable`)
+	})
+}
+
+// invitationChangelist requests the changelist of CLInvitation under ma with
+// one invitation and returns the page and the statement that selects its
+// rows, the counterpart of Django's cl.queryset.
+func invitationChangelist(t *testing.T, db *orm.DB, ma admin.ModelAdmin) (*djangotest.Response, string) {
+	t.Helper()
+	player := mustCreate(t, db, &CLChordsMusician{Name: "Django Reinhardt"})
+	band := mustCreate(t, db, &CLChordsBand{Name: "Quintette du Hot Club"})
+	inv := &CLInvitation{Instrument: "guitar"}
+	inv.Player.SetPK(player.ID)
+	inv.Band.SetPK(band.ID)
+	mustCreate(t, db, inv)
+	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[CLInvitation](site, ma)
+	})
+	env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+	qc := djangotest.CaptureQueries(db)
+	resp := env.client.Get(mustReverse(t, env.router, "admin:admin_changelist_clinvitation_changelist"))
+	qc.Stop()
+	djangotest.AssertStatus(t, resp, http.StatusOK)
+	for _, q := range qc.Queries() {
+		if strings.Contains(q.SQL, `FROM "admin_changelist_clinvitation"`) && !strings.Contains(q.SQL, "COUNT(") {
+			return resp, q.SQL
+		}
+	}
+	t.Fatal("no statement selects the invitations")
+	return nil, ""
+}
+
+// assertJoins asserts which of the player and band tables the statement
+// sql joins.
+func assertJoins(t *testing.T, sql string, player, band bool) {
+	t.Helper()
+	for table, want := range map[string]bool{
+		`"admin_changelist_clchordsmusician"`: player,
+		`"admin_changelist_clchordsband"`:     band,
+	} {
+		if got := strings.Contains(sql, "JOIN "+table); got != want {
+			t.Errorf("JOIN %s: got %v, want %v in %s", table, got, want, sql)
+		}
+	}
+}
+
+// No Go counterpart: tests/admin_changelist/tests.py::ChangeListTests.test_select_related_preserved
+// and test_select_related_preserved_when_multi_valued_in_search_fields: their
+// ModelAdmin.get_queryset adds select_related to the queryset, and
+// GetQuerysetFilter returns a condition, not a queryset.
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_select_related_as_tuple
+func TestSelectRelatedAsTuple(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		// tests/admin_changelist/admin.py::InvitationAdmin.
+		resp, sql := invitationChangelist(t, db, admin.ModelAdmin{
+			ListDisplay:       []string{"band", "player"},
+			ListSelectRelated: []string{"player"},
+		})
+		assertJoins(t, sql, true, false)
+		// No Django test exists: Django loads the band of each row on
+		// access. Go loads the bands in one more query and shows them.
+		djangotest.AssertContains(t, resp, "Quintette du Hot Club")
+		djangotest.AssertContains(t, resp, "Django Reinhardt")
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_select_related_as_empty_tuple
+func TestSelectRelatedAsEmptyTuple(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		resp, sql := invitationChangelist(t, db, admin.ModelAdmin{
+			ListDisplay:       []string{"band", "player"},
+			ListSelectRelated: []string{},
+		})
+		assertJoins(t, sql, false, false)
+		djangotest.AssertContains(t, resp, "Quintette du Hot Club")
+		djangotest.AssertContains(t, resp, "Django Reinhardt")
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_get_select_related_custom_method
+func TestGetSelectRelatedCustomMethod(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		_, sql := invitationChangelist(t, db, admin.ModelAdmin{
+			ListDisplay: []string{"band", "player"},
+			GetListSelectRelated: func(*http.Request) []string {
+				return []string{"band", "player"}
+			},
+		})
+		assertJoins(t, sql, true, true)
+	})
+}
+
+// No Django test exists: without ListSelectRelated the query joins the
+// foreign keys that the columns show, as Django's default does.
+func TestSelectRelatedDefault(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		_, sql := invitationChangelist(t, db, admin.ModelAdmin{ListDisplay: []string{"band", "player"}})
+		assertJoins(t, sql, true, true)
 	})
 }

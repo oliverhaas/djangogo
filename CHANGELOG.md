@@ -431,6 +431,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   renders Django's `admin/prepopulated_fields_js.html` with the fields of the
   form, unless the user can only view it, and those of the inline forms that
   add a row. The checks report admin.E027, admin.E028 and admin.E030.
+- Admin: `ModelAdmin.ListSelectRelated` and `GetListSelectRelated` name the
+  relations that the changelist query joins, Django's `list_select_related`
+  as a list. A non-nil empty slice joins none. A relation that a column
+  shows and the query does not join is loaded in one more query, so the
+  column shows its label, not its primary key. Without the option the query
+  joins the foreign keys that the columns show, as before. Django's `True`,
+  which Django 6.1 deprecates, has no counterpart.
 
 ### Changed
 

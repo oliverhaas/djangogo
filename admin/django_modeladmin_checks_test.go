@@ -305,6 +305,10 @@ func TestPrepopulatedFieldsCheck(t *testing.T) {
 	})
 }
 
+// No Go counterpart: tests/modeladmin/test_checks.py::ListSelectRelatedCheckTests.test_invalid_type
+// (admin.E117) and test_valid_case: ListSelectRelated is a []string. Its
+// value True, which Django 6.1 deprecates, has no counterpart.
+
 // listDisplayE108 is Django's admin.E108 message for name on
 // ValidationTestModel. Django names the ModelAdmin class; the Go ModelAdmin
 // has no class name, so the message says 'ModelAdmin'.
