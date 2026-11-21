@@ -21,7 +21,7 @@ type query struct {
 	orders          []orderTerm
 	explicitOrder   bool
 	selectRelated   []string
-	prefetchRelated []PrefetchSpec
+	prefetchRelated []Prefetch
 	prefetchedList  any
 	annotations     []annotation
 	values          *valuesSpec
@@ -70,7 +70,7 @@ func (q *query) clone() *query {
 	cp.filters = append([]Cond(nil), q.filters...)
 	cp.orders = append([]orderTerm(nil), q.orders...)
 	cp.selectRelated = append([]string(nil), q.selectRelated...)
-	cp.prefetchRelated = append([]PrefetchSpec(nil), q.prefetchRelated...)
+	cp.prefetchRelated = append([]Prefetch(nil), q.prefetchRelated...)
 	cp.prefetchedList = nil
 	cp.annotations = append([]annotation(nil), q.annotations...)
 	if q.values != nil {

@@ -152,9 +152,9 @@ func collectCachedAttr(parentModel *Model, objs []reflect.Value, attr string) (*
 	return targetModel, out
 }
 
-// nestedPrefetchesField reports whether any nested PrefetchSpec targets attr
+// nestedPrefetchesField reports whether any nested Prefetch targets attr
 // as its first segment.
-func nestedPrefetchesField(nested []PrefetchSpec, attr string) bool {
+func nestedPrefetchesField(nested []Prefetch, attr string) bool {
 	for _, s := range nested {
 		first, _, _ := strings.Cut(s.Lookup, lookupSep)
 		if first == attr {
@@ -175,7 +175,7 @@ func prefetchOneLevel(
 	customQ *query,
 	cacheKey string,
 	isToAttr bool,
-	nestedSpecs []PrefetchSpec,
+	nestedSpecs []Prefetch,
 ) ([]reflect.Value, error) {
 	switch step.kind {
 	case stepForwardFK, stepForwardO2O:
@@ -210,7 +210,7 @@ func prefetchForwardToOne(
 	customQ *query,
 	cacheKey string,
 	isToAttr bool,
-	nestedSpecs []PrefetchSpec,
+	nestedSpecs []Prefetch,
 ) ([]reflect.Value, error) {
 	targetModel := step.targetModel
 	seenPK := make(map[int64]bool, len(parents))
@@ -303,7 +303,7 @@ func prefetchReverseO2O(
 	customQ *query,
 	cacheKey string,
 	isToAttr bool,
-	nestedSpecs []PrefetchSpec,
+	nestedSpecs []Prefetch,
 ) ([]reflect.Value, error) {
 	targetModel := step.targetModel
 	seenPK := make(map[any]bool, len(parents))
@@ -379,7 +379,7 @@ func prefetchReverseFK(
 	customQ *query,
 	cacheKey string,
 	isToAttr bool,
-	nestedSpecs []PrefetchSpec,
+	nestedSpecs []Prefetch,
 ) ([]reflect.Value, error) {
 	targetModel := step.targetModel
 	seenPK := make(map[any]bool, len(parents))

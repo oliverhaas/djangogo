@@ -33,7 +33,7 @@ func Query[T any](db *DB) *QuerySet[T] {
 // lookup: Filter("author__in", orm.Query[Author](db).Filter(...)).
 func (qs *QuerySet[T]) subquery() *query { return qs.q }
 
-// prefetchQuery exposes the underlying *query for PrefetchSpec.QuerySet.
+// prefetchQuery exposes the underlying *query for Prefetch.QuerySet.
 func (qs *QuerySet[T]) prefetchQuery() *query { return qs.q }
 
 // SelectRelated returns a clone that loads the named foreign keys in the same
@@ -54,7 +54,7 @@ func (qs *QuerySet[T]) SelectRelated(fields ...string) *QuerySet[T] {
 // PrefetchRelated returns a clone that loads the named relations using one
 // batched IN query per relation level and caches the results on the returned
 // model instances. Lookups may be plain "__"-separated relation paths
-// ("comment_set", "tags", "author__profile", "books__read_by") or PrefetchSpec
+// ("comment_set", "tags", "author__profile", "books__read_by") or Prefetch
 // values carrying a custom QuerySet and/or ToAttr cache key.
 //
 // Forward FK and O2O relations are stored directly on the field via SetObject

@@ -681,7 +681,7 @@ func TestPrefetchRelatedForwardM2MToAttrConflict(t *testing.T) {
 		ctx := context.Background()
 		fx := prSetUp(t, db)
 
-		_, err := orm.Query[prBook](db).PrefetchRelated(orm.PrefetchSpec{
+		_, err := orm.Query[prBook](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "authors",
 			QuerySet: orm.Query[prAuthor](db),
 			ToAttr:   "authors",
@@ -701,7 +701,7 @@ func TestPrefetchRelatedReverseM2MToAttrConflict(t *testing.T) {
 		ctx := context.Background()
 		fx := prSetUp(t, db)
 
-		_, err := orm.Query[prAuthor](db).PrefetchRelated(orm.PrefetchSpec{
+		_, err := orm.Query[prAuthor](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "books",
 			QuerySet: orm.Query[prBook](db).Filter("title", "Poems"),
 			ToAttr:   "books",
@@ -728,7 +728,7 @@ func TestPrefetchRelatedM2MJoinReuse(t *testing.T) {
 		djangotest.AssertNumQueries(t, db, 2, func() {
 			authors = mustAll(t, orm.Query[prAuthor](db).
 				Filter("pk__in", []int64{fx.author1.ID, fx.author2.ID}).
-				PrefetchRelated(orm.PrefetchSpec{
+				PrefetchRelated(orm.Prefetch{
 					Lookup: "favorite_authors",
 					QuerySet: orm.Query[prAuthor](db).
 						Annotate("active_favorite", orm.F("likes_me__is_active")).

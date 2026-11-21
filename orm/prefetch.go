@@ -8,19 +8,19 @@ import (
 	"strings"
 )
 
-// PrefetchSpec configures one PrefetchRelated lookup with an optional custom
+// Prefetch configures one PrefetchRelated lookup with an optional custom
 // QuerySet and destination cache attribute, mirroring Django's Prefetch object.
 //
-// Pass a PrefetchSpec (or *PrefetchSpec) alongside plain lookup strings to
+// Pass a Prefetch (or *Prefetch) alongside plain lookup strings to
 // QuerySet.PrefetchRelated, RawQuerySet.PrefetchRelated, or
 // PrefetchRelatedObjects:
 //
-//	orm.Query[Person](db).PrefetchRelated(orm.PrefetchSpec{
+//	orm.Query[Person](db).PrefetchRelated(orm.Prefetch{
 //		Lookup:   "houses",
 //		QuerySet: orm.Query[House](db).Filter("active", true),
 //		ToAttr:   "active_houses",
 //	})
-type PrefetchSpec struct {
+type Prefetch struct {
 	// Lookup is the "__"-separated relation path to prefetch (e.g. "authors",
 	// "books__read_by", or "author__profile").
 	Lookup string
@@ -47,12 +47,12 @@ type m2mPrefetchFilter struct {
 }
 
 // prefetchQuerier is implemented by *QuerySet[T] to expose its underlying
-// *query for PrefetchSpec.QuerySet without matching Values or Raw querysets.
+// *query for Prefetch.QuerySet without matching Values or Raw querysets.
 type prefetchQuerier interface {
 	prefetchQuery() *query
 }
 
-// rawQuerier is implemented by *RawQuerySet[T] so PrefetchSpec rejects raw
+// rawQuerier is implemented by *RawQuerySet[T] so Prefetch rejects raw
 // querysets with Django's error message.
 type rawQuerier interface {
 	isRawQuerySet()
@@ -60,25 +60,25 @@ type rawQuerier interface {
 
 // parsePrefetchLookups validates and normalizes the arguments passed to
 // PrefetchRelated. Calling with no arguments or a single nil signals reset=true.
-func parsePrefetchLookups(lookups []any) (specs []PrefetchSpec, reset bool, err error) {
+func parsePrefetchLookups(lookups []any) (specs []Prefetch, reset bool, err error) {
 	if len(lookups) == 0 || (len(lookups) == 1 && lookups[0] == nil) {
 		return nil, true, nil
 	}
-	specs = make([]PrefetchSpec, 0, len(lookups))
+	specs = make([]Prefetch, 0, len(lookups))
 	for _, raw := range lookups {
-		var spec PrefetchSpec
+		var spec Prefetch
 		switch v := raw.(type) {
 		case string:
-			spec = PrefetchSpec{Lookup: v}
-		case PrefetchSpec:
+			spec = Prefetch{Lookup: v}
+		case Prefetch:
 			spec = v
-		case *PrefetchSpec:
+		case *Prefetch:
 			if v == nil {
 				return nil, false, errors.New("orm: prefetch_related lookup must not be nil")
 			}
 			spec = *v
 		default:
-			return nil, false, fmt.Errorf("orm: prefetch_related expects string or PrefetchSpec, got %T", raw)
+			return nil, false, fmt.Errorf("orm: prefetch_related expects string or Prefetch, got %T", raw)
 		}
 		if spec.Lookup == "" {
 			return nil, false, errors.New("orm: prefetch_related lookup must not be empty")
@@ -93,7 +93,7 @@ func parsePrefetchLookups(lookups []any) (specs []PrefetchSpec, reset bool, err 
 	return specs, false, nil
 }
 
-// extractPrefetchQuery extracts a cloned *query from a PrefetchSpec.QuerySet,
+// extractPrefetchQuery extracts a cloned *query from a Prefetch.QuerySet,
 // rejecting RawQuerySet, ValuesQuerySet, ValuesListQuerySet, and sliced
 // querysets.
 func extractPrefetchQuery(raw any) (*query, error) {
@@ -103,11 +103,11 @@ func extractPrefetchQuery(raw any) (*query, error) {
 	}
 	pq, ok := raw.(prefetchQuerier)
 	if !ok {
-		return nil, fmt.Errorf("orm: PrefetchSpec.QuerySet must be a *orm.QuerySet[T], got %T", raw)
+		return nil, fmt.Errorf("orm: Prefetch.QuerySet must be a *orm.QuerySet[T], got %T", raw)
 	}
 	q := pq.prefetchQuery()
 	if q == nil {
-		return nil, errors.New("orm: PrefetchSpec.QuerySet must not be nil")
+		return nil, errors.New("orm: Prefetch.QuerySet must not be nil")
 	}
 	if q.err != nil {
 		return nil, q.err
@@ -215,9 +215,9 @@ type prefetchDone struct {
 	objs  []reflect.Value
 }
 
-// normalizePrefetchTasks turns PrefetchSpecs into queued tasks, optionally
+// normalizePrefetchTasks turns Prefetch options into queued tasks, optionally
 // prefixed by an ancestor prefetchTo path for nested prefetches.
-func normalizePrefetchTasks(specs []PrefetchSpec, prefix string) ([]prefetchTask, error) {
+func normalizePrefetchTasks(specs []Prefetch, prefix string) ([]prefetchTask, error) {
 	var prefixParts []string
 	if prefix != "" {
 		prefixParts = strings.Split(prefix, lookupSep)
@@ -396,7 +396,7 @@ func toAttrConflicts(m *Model, toAttr string) bool {
 }
 
 // prefetchRelatedObjects executes all specs level by level over roots.
-func prefetchRelatedObjects(ctx context.Context, db *DB, rootModel *Model, roots []reflect.Value, specs []PrefetchSpec) error {
+func prefetchRelatedObjects(ctx context.Context, db *DB, rootModel *Model, roots []reflect.Value, specs []Prefetch) error {
 	if len(roots) == 0 || len(specs) == 0 {
 		return nil
 	}
@@ -478,7 +478,7 @@ func prefetchRelatedObjects(ctx context.Context, db *DB, rootModel *Model, roots
 
 			// Strip nested prefetches from customQ so they merge into the queue
 			// with pathKey as prefix, matching Django's deduplication.
-			var nestedSpecs []PrefetchSpec
+			var nestedSpecs []Prefetch
 			if customQ != nil {
 				if customQ.model != step.targetModel {
 					return fmt.Errorf(
@@ -487,7 +487,7 @@ func prefetchRelatedObjects(ctx context.Context, db *DB, rootModel *Model, roots
 					)
 				}
 				if len(customQ.prefetchRelated) > 0 {
-					nestedSpecs = append([]PrefetchSpec(nil), customQ.prefetchRelated...)
+					nestedSpecs = append([]Prefetch(nil), customQ.prefetchRelated...)
 					customQ = customQ.clone()
 					customQ.prefetchRelated = nil
 				}

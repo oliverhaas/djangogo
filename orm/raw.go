@@ -101,11 +101,11 @@ type RawQuerySet[T any] struct {
 	query           string
 	args            []any
 	translations    map[string]string
-	prefetchRelated []PrefetchSpec
+	prefetchRelated []Prefetch
 	err             error
 }
 
-// isRawQuerySet marks RawQuerySet so PrefetchSpec rejects raw querysets.
+// isRawQuerySet marks RawQuerySet so Prefetch rejects raw querysets.
 func (*RawQuerySet[T]) isRawQuerySet() {}
 
 // PrefetchRelated returns a copy of r that prefetches the given lookups after
@@ -113,7 +113,7 @@ func (*RawQuerySet[T]) isRawQuerySet() {}
 // PrefetchRelated(nil) clears previously configured prefetches.
 func (r *RawQuerySet[T]) PrefetchRelated(lookups ...any) *RawQuerySet[T] {
 	out := *r
-	out.prefetchRelated = append([]PrefetchSpec(nil), r.prefetchRelated...)
+	out.prefetchRelated = append([]Prefetch(nil), r.prefetchRelated...)
 	specs, reset, err := parsePrefetchLookups(lookups)
 	if err != nil {
 		if out.err == nil {

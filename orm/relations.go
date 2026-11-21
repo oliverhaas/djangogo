@@ -242,46 +242,6 @@ func (f *FK[T]) Fetch(ctx context.Context, db *DB) (*T, error) {
 	return &v, nil
 }
 
-// Prefetch loads, in a single query, all Child rows whose fkColumn is one of
-// parentPKs, and returns a map from each parent PK to its children. fkColumn is
-// the FK column on Child (e.g. "author_id"). This is the batched-IN reverse
-// equivalent of Django's prefetch_related: it avoids the N+1 of fetching
-// children per parent. When parentPKs is empty it returns an empty map and runs
-// no query.
-func Prefetch[Child any](ctx context.Context, db *DB, fkColumn string, parentPKs []int64) (map[int64][]Child, error) {
-	out := make(map[int64][]Child)
-	if len(parentPKs) == 0 {
-		return out, nil
-	}
-
-	var zero Child
-	m, ok := db.Registry().ModelOf(zero)
-	if !ok {
-		return nil, fmt.Errorf("orm: Prefetch: no model registered for %T", zero)
-	}
-	var fkField *Field
-	for _, f := range m.Fields() {
-		if f.Column == fkColumn && f.Rel != nil {
-			fkField = f
-			break
-		}
-	}
-	if fkField == nil {
-		return nil, fmt.Errorf("orm: Prefetch: %s has no FK column %q", m.Name(), fkColumn)
-	}
-
-	children, err := Query[Child](db).Filter(fkColumn+"__in", parentPKs).All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for i := range children {
-		// The FK field is an FK[Parent] value; its PK() method yields the parent pk.
-		pk := reflect.ValueOf(children[i]).Field(fkField.Index).MethodByName("PK").Call(nil)[0].Int()
-		out[pk] = append(out[pk], children[i])
-	}
-	return out, nil
-}
-
 // PKsOf returns the auto primary-key values of parents, read by reflection from
 // each parent's primary-key field. It returns an error when no model is
 // registered for T or the model has no primary key.

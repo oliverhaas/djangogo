@@ -200,7 +200,7 @@ func hasRelCacheKey(m *Model, sv reflect.Value, name string) bool {
 }
 
 // Prefetched returns the cached multi-valued slice stored on owner under name
-// (a relation accessor name or a PrefetchSpec.ToAttr key). It returns (nil,
+// (a relation accessor name or a Prefetch.ToAttr key). It returns (nil,
 // false) when owner does not embed RelCache, name is not cached, or the cached
 // slice does not have element type T.
 func Prefetched[T any](owner any, name string) ([]T, bool) {
@@ -222,7 +222,7 @@ func Prefetched[T any](owner any, name string) ([]T, bool) {
 }
 
 // PrefetchedOne returns the cached single related object stored on owner under
-// name (a reverse O2O accessor name or a single-valued PrefetchSpec.ToAttr
+// name (a reverse O2O accessor name or a single-valued Prefetch.ToAttr
 // key). When the relation was prefetched and had no matching row, it returns
 // (nil, true). It returns (nil, false) when name is not cached or has another
 // target type.
@@ -273,7 +273,7 @@ func CachedList(m *Model, instance any, name string) (items any, target *Model, 
 	return getPrefetchListCache(m, sv, name)
 }
 
-// CachedAttr describes one custom PrefetchSpec.ToAttr entry stored in an
+// CachedAttr describes one custom Prefetch.ToAttr entry stored in an
 // instance's RelCache.
 type CachedAttr struct {
 	// Name is the ToAttr key.

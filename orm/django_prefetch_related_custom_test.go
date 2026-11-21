@@ -111,7 +111,7 @@ func TestPrefetchRelatedCustomAmbiguous(t *testing.T) {
 		djangotest.AssertNumQueries(t, db, 3, func() {
 			_, err := orm.Query[prPerson](db).PrefetchRelated(
 				"houses__rooms",
-				orm.PrefetchSpec{Lookup: "houses", QuerySet: orm.Query[prHouse](db)},
+				orm.Prefetch{Lookup: "houses", QuerySet: orm.Query[prHouse](db)},
 			).All(ctx)
 			assertErrorContains(t, err, "'houses' lookup was already seen with a different queryset")
 		})
@@ -119,7 +119,7 @@ func TestPrefetchRelatedCustomAmbiguous(t *testing.T) {
 		// Lookup houses_lst does not yet exist when performing houses_lst__rooms.
 		_, err := orm.Query[prPerson](db).PrefetchRelated(
 			"houses_lst__rooms",
-			orm.PrefetchSpec{Lookup: "houses", QuerySet: orm.Query[prHouse](db), ToAttr: "houses_lst"},
+			orm.Prefetch{Lookup: "houses", QuerySet: orm.Query[prHouse](db), ToAttr: "houses_lst"},
 		).All(ctx)
 		assertErrorContains(t, err, "Cannot find 'houses_lst' on prPerson object, 'houses_lst__rooms' is an invalid parameter to prefetch_related()")
 
@@ -127,7 +127,7 @@ func TestPrefetchRelatedCustomAmbiguous(t *testing.T) {
 		mustAll(t, orm.Query[prPerson](db).PrefetchRelated("houses__rooms", "houses"))
 		mustAll(t, orm.Query[prPerson](db).PrefetchRelated(
 			"houses__rooms",
-			orm.PrefetchSpec{Lookup: "houses", QuerySet: orm.Query[prHouse](db), ToAttr: "houses_lst"},
+			orm.Prefetch{Lookup: "houses", QuerySet: orm.Query[prHouse](db), ToAttr: "houses_lst"},
 		))
 	})
 }
@@ -151,7 +151,7 @@ func TestPrefetchRelatedCustomM2M(t *testing.T) {
 		})
 
 		djangotest.AssertNumQueries(t, db, 2, func() {
-			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(orm.PrefetchSpec{Lookup: "houses"}))
+			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(orm.Prefetch{Lookup: "houses"}))
 			got := make([][]string, 0, len(people))
 			for i := range people {
 				houses, err := orm.Many[prHouse](db, &people[i], "houses").All(ctx)
@@ -164,7 +164,7 @@ func TestPrefetchRelatedCustomM2M(t *testing.T) {
 		})
 
 		djangotest.AssertNumQueries(t, db, 2, func() {
-			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(orm.PrefetchSpec{Lookup: "houses", ToAttr: "houses_lst"}))
+			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(orm.Prefetch{Lookup: "houses", ToAttr: "houses_lst"}))
 			got := make([][]string, 0, len(people))
 			for i := range people {
 				houses, ok := orm.Prefetched[prHouse](&people[i], "houses_lst")
@@ -195,7 +195,7 @@ func TestPrefetchRelatedCustomReverseM2M(t *testing.T) {
 		})
 
 		djangotest.AssertNumQueries(t, db, 2, func() {
-			houses := mustAll(t, orm.Query[prHouse](db).PrefetchRelated(orm.PrefetchSpec{Lookup: "occupants", ToAttr: "occupants_lst"}))
+			houses := mustAll(t, orm.Query[prHouse](db).PrefetchRelated(orm.Prefetch{Lookup: "occupants", ToAttr: "occupants_lst"}))
 			got := make([][]string, 0, len(houses))
 			for i := range houses {
 				occ, ok := orm.Prefetched[prPerson](&houses[i], "occupants_lst")
@@ -230,7 +230,7 @@ func TestPrefetchRelatedCustomM2MThroughFK(t *testing.T) {
 		})
 
 		djangotest.AssertNumQueries(t, db, 3, func() {
-			rooms := mustAll(t, orm.Query[prRoom](db).PrefetchRelated(orm.PrefetchSpec{
+			rooms := mustAll(t, orm.Query[prRoom](db).PrefetchRelated(orm.Prefetch{
 				Lookup: "house__occupants",
 				ToAttr: "occupants_lst",
 			}))
@@ -277,8 +277,8 @@ func TestPrefetchRelatedCustomO2MThroughM2M(t *testing.T) {
 
 		djangotest.AssertNumQueries(t, db, 3, func() {
 			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(
-				orm.PrefetchSpec{Lookup: "houses", ToAttr: "houses_lst"},
-				orm.PrefetchSpec{Lookup: "houses_lst__rooms", ToAttr: "rooms_lst"},
+				orm.Prefetch{Lookup: "houses", ToAttr: "houses_lst"},
+				orm.Prefetch{Lookup: "houses_lst__rooms", ToAttr: "rooms_lst"},
 			))
 			got := make([][][]string, 0, len(people))
 			for i := range people {
@@ -305,7 +305,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 
 		// Filtered custom queryset with to_attr.
 		djangotest.AssertNumQueries(t, db, 2, func() {
-			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(orm.PrefetchSpec{
+			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(orm.Prefetch{
 				Lookup:   "houses",
 				QuerySet: orm.Query[prHouse](db).Filter("pk__in", []int64{fx.house1.ID, fx.house3.ID}),
 				ToAttr:   "houses_lst",
@@ -320,7 +320,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 
 		// Inner select_related on custom queryset cuts queries from 3 to 2.
 		djangotest.AssertNumQueries(t, db, 2, func() {
-			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(orm.PrefetchSpec{
+			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(orm.Prefetch{
 				Lookup:   "houses",
 				QuerySet: orm.Query[prHouse](db).SelectRelated("owner"),
 			}))
@@ -337,7 +337,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 
 		// Inner prefetch_related on custom queryset followed by outer prefetch on to_attr chain.
 		innerRoomsQS := orm.Query[prRoom](db).Filter("pk__in", []int64{fx.room1_1.ID, fx.room1_2.ID})
-		housesQS := orm.Query[prHouse](db).PrefetchRelated(orm.PrefetchSpec{
+		housesQS := orm.Query[prHouse](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "rooms",
 			QuerySet: innerRoomsQS,
 			ToAttr:   "rooms_lst",
@@ -345,12 +345,12 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 		var people []prPerson
 		djangotest.AssertNumQueries(t, db, 4, func() {
 			people = mustAll(t, orm.Query[prPerson](db).PrefetchRelated(
-				orm.PrefetchSpec{
+				orm.Prefetch{
 					Lookup:   "houses",
 					QuerySet: housesQS.Filter("pk", fx.house1.ID),
 					ToAttr:   "houses_lst",
 				},
-				orm.PrefetchSpec{Lookup: "houses_lst__rooms_lst__main_room_of"},
+				orm.Prefetch{Lookup: "houses_lst__rooms_lst__main_room_of"},
 			))
 		})
 		djangotest.AssertNumQueries(t, db, 0, func() {
@@ -372,7 +372,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 		// Forward FK custom queryset with SelectRelated and to_attr.
 		housesWithOwner := orm.Query[prHouse](db).SelectRelated("owner")
 		djangotest.AssertNumQueries(t, db, 2, func() {
-			rooms := mustAll(t, orm.Query[prRoom](db).PrefetchRelated(orm.PrefetchSpec{
+			rooms := mustAll(t, orm.Query[prRoom](db).PrefetchRelated(orm.Prefetch{
 				Lookup:   "house",
 				QuerySet: housesWithOwner,
 			}))
@@ -387,7 +387,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 			djangotest.AssertEqual(t, owner.Name, "Joe")
 		})
 		djangotest.AssertNumQueries(t, db, 2, func() {
-			rooms := mustAll(t, orm.Query[prRoom](db).PrefetchRelated(orm.PrefetchSpec{
+			rooms := mustAll(t, orm.Query[prRoom](db).PrefetchRelated(orm.Prefetch{
 				Lookup:   "house",
 				QuerySet: housesWithOwner,
 				ToAttr:   "house_attr",
@@ -402,7 +402,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 		})
 
 		// Forward FK custom queryset filtering out target: Fetch returns ErrDoesNotExist (0 queries), to_attr is nil.
-		room, err := orm.Query[prRoom](db).PrefetchRelated(orm.PrefetchSpec{
+		room, err := orm.Query[prRoom](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "house",
 			QuerySet: housesWithOwner.Filter("address", "DoesNotExist"),
 		}).First(ctx)
@@ -413,7 +413,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 			_, err := room.House.Fetch(ctx, db)
 			djangotest.AssertErrorIs(t, err, orm.ErrDoesNotExist)
 		})
-		roomAttr, err := orm.Query[prRoom](db).PrefetchRelated(orm.PrefetchSpec{
+		roomAttr, err := orm.Query[prRoom](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "house",
 			QuerySet: housesWithOwner.Filter("address", "DoesNotExist"),
 			ToAttr:   "house_attr",
@@ -427,7 +427,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 
 		// Forward O2O (main_room_of) and Reverse O2O (main_room) custom querysets with missing targets.
 		djangotest.AssertNumQueries(t, db, 2, func() {
-			rooms := mustAll(t, orm.Query[prRoom](db).PrefetchRelated(orm.PrefetchSpec{
+			rooms := mustAll(t, orm.Query[prRoom](db).PrefetchRelated(orm.Prefetch{
 				Lookup:   "main_room_of",
 				QuerySet: housesWithOwner,
 				ToAttr:   "main_room_of_attr",
@@ -442,7 +442,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 		})
 		roomMissing, err := orm.Query[prRoom](db).
 			Filter("main_room_of__isnull", false).
-			PrefetchRelated(orm.PrefetchSpec{
+			PrefetchRelated(orm.Prefetch{
 				Lookup:   "main_room_of",
 				QuerySet: housesWithOwner.Filter("address", "DoesNotExist"),
 			}).First(ctx)
@@ -454,7 +454,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 			djangotest.AssertErrorIs(t, err, orm.ErrDoesNotExist)
 		})
 		houseMissingRev, err := orm.Query[prHouse](db).
-			PrefetchRelated(orm.PrefetchSpec{
+			PrefetchRelated(orm.Prefetch{
 				Lookup:   "main_room",
 				QuerySet: orm.Query[prRoom](db).Filter("name", "DoesNotExist"),
 			}).First(ctx)
@@ -466,7 +466,7 @@ func TestPrefetchRelatedCustomQS(t *testing.T) {
 			djangotest.AssertErrorIs(t, err, orm.ErrDoesNotExist)
 		})
 		houseMissingRevAttr, err := orm.Query[prHouse](db).
-			PrefetchRelated(orm.PrefetchSpec{
+			PrefetchRelated(orm.Prefetch{
 				Lookup:   "main_room",
 				QuerySet: orm.Query[prRoom](db).Filter("name", "DoesNotExist"),
 				ToAttr:   "main_room_attr",
@@ -486,9 +486,9 @@ func TestPrefetchRelatedNestedNotOverwritten(t *testing.T) {
 		ctx := context.Background()
 		fx := prCustomSetUp(t, db)
 
-		houses2 := orm.Query[prHouse](db).PrefetchRelated(orm.PrefetchSpec{Lookup: "rooms"})
-		persons := orm.Query[prPerson](db).PrefetchRelated(orm.PrefetchSpec{Lookup: "houses", QuerySet: houses2})
-		housesQS := orm.Query[prHouse](db).PrefetchRelated(orm.PrefetchSpec{Lookup: "occupants", QuerySet: persons})
+		houses2 := orm.Query[prHouse](db).PrefetchRelated(orm.Prefetch{Lookup: "rooms"})
+		persons := orm.Query[prPerson](db).PrefetchRelated(orm.Prefetch{Lookup: "houses", QuerySet: houses2})
+		housesQS := orm.Query[prHouse](db).PrefetchRelated(orm.Prefetch{Lookup: "occupants", QuerySet: persons})
 
 		houses := mustAll(t, housesQS)
 		djangotest.AssertNumQueries(t, db, 0, func() {
@@ -516,10 +516,10 @@ func TestPrefetchRelatedNestedDuplicatePrefetcher(t *testing.T) {
 		prCustomSetUp(t, db)
 
 		occupants := orm.Query[prPerson](db).PrefetchRelated(
-			orm.PrefetchSpec{Lookup: "houses", ToAttr: "some_attr_name"},
-			orm.PrefetchSpec{Lookup: "houses", QuerySet: orm.Query[prHouse](db).PrefetchRelated("main_room")},
+			orm.Prefetch{Lookup: "houses", ToAttr: "some_attr_name"},
+			orm.Prefetch{Lookup: "houses", QuerySet: orm.Query[prHouse](db).PrefetchRelated("main_room")},
 		)
-		housesQS := orm.Query[prHouse](db).PrefetchRelated(orm.PrefetchSpec{
+		housesQS := orm.Query[prHouse](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "occupants",
 			QuerySet: occupants,
 		})
@@ -550,7 +550,7 @@ func TestPrefetchRelatedNestedDuplicateAndDepth(t *testing.T) {
 
 		djangotest.AssertNumQueries(t, db, 4, func() {
 			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(
-				orm.PrefetchSpec{
+				orm.Prefetch{
 					Lookup:   "houses__main_room",
 					QuerySet: orm.Query[prRoom](db).Filter("name", "Dining room"),
 					ToAttr:   "dining_room",
@@ -574,7 +574,7 @@ func TestPrefetchRelatedNestedDuplicateAndDepth(t *testing.T) {
 		djangotest.AssertNumQueries(t, db, 4, func() {
 			people := mustAll(t, orm.Query[prPerson](db).PrefetchRelated(
 				"houses__main_room",
-				orm.PrefetchSpec{
+				orm.Prefetch{
 					Lookup:   "houses__main_room",
 					QuerySet: orm.Query[prRoom](db).Filter("name", "Dining room"),
 					ToAttr:   "dining_room",
@@ -601,19 +601,19 @@ func TestPrefetchRelatedInvalidCustomQuerySet(t *testing.T) {
 		prCustomSetUp(t, db)
 		const wantMsg = "Prefetch querysets cannot use raw(), values(), and values_list()"
 
-		_, err := orm.Query[prPerson](db).PrefetchRelated(orm.PrefetchSpec{
+		_, err := orm.Query[prPerson](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "houses",
 			QuerySet: orm.Query[prHouse](db).Values("pk"),
 		}).All(ctx)
 		assertErrorContains(t, err, wantMsg)
 
-		_, err = orm.Query[prPerson](db).PrefetchRelated(orm.PrefetchSpec{
+		_, err = orm.Query[prPerson](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "houses",
 			QuerySet: orm.Query[prHouse](db).ValuesList("pk"),
 		}).All(ctx)
 		assertErrorContains(t, err, wantMsg)
 
-		_, err = orm.Query[prPerson](db).PrefetchRelated(orm.PrefetchSpec{
+		_, err = orm.Query[prPerson](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "houses",
 			QuerySet: orm.Raw[prHouse](db, "SELECT id FROM prefetch_related_prhouse"),
 		}).All(ctx)
@@ -639,9 +639,9 @@ func TestPrefetchRelatedDetectIsFetched(t *testing.T) {
 		djangotest.AssertNumQueries(t, db, 3, func() {
 			books = mustAll(t, orm.Query[prBook](db).
 				Filter("title__in", []string{"book1", "book2"}).
-				PrefetchRelated(orm.PrefetchSpec{
+				PrefetchRelated(orm.Prefetch{
 					Lookup: "first_time_authors",
-					QuerySet: orm.Query[prAuthor](db).PrefetchRelated(orm.PrefetchSpec{
+					QuerySet: orm.Query[prAuthor](db).PrefetchRelated(orm.Prefetch{
 						Lookup:   "addresses",
 						QuerySet: orm.Query[prAuthorAddress](db).Filter("address", "Happy place"),
 					}),
@@ -673,9 +673,9 @@ func TestPrefetchRelatedDetectIsFetched(t *testing.T) {
 		djangotest.AssertNumQueries(t, db, 3, func() {
 			books = mustAll(t, orm.Query[prBook](db).
 				Filter("title__in", []string{"book1", "book2"}).
-				PrefetchRelated(orm.PrefetchSpec{
+				PrefetchRelated(orm.Prefetch{
 					Lookup: "first_time_authors",
-					QuerySet: orm.Query[prAuthor](db).PrefetchRelated(orm.PrefetchSpec{
+					QuerySet: orm.Query[prAuthor](db).PrefetchRelated(orm.Prefetch{
 						Lookup:   "addresses",
 						QuerySet: orm.Query[prAuthorAddress](db).Filter("address", "Happy place"),
 						ToAttr:   "happy_place",
@@ -713,9 +713,9 @@ func TestPrefetchRelatedNestedNotOverwrittenByBackRef(t *testing.T) {
 		var house prHouse
 		djangotest.AssertNumQueries(t, db, 3, func() {
 			var err error
-			house, err = orm.Query[prHouse](db).PrefetchRelated(orm.PrefetchSpec{
+			house, err = orm.Query[prHouse](db).PrefetchRelated(orm.Prefetch{
 				Lookup: "rooms",
-				QuerySet: orm.Query[prRoom](db).PrefetchRelated(orm.PrefetchSpec{
+				QuerySet: orm.Query[prRoom](db).PrefetchRelated(orm.Prefetch{
 					Lookup:   "house",
 					QuerySet: orm.Query[prHouse](db),
 				}),

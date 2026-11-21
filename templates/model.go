@@ -123,7 +123,7 @@ func (e *Engine) modelLookup() ModelLookup {
 //     exists, first, and last, so {{ post.comment_set.count }} and
 //     {% for c in post.comment_set.all %} work without queries. An unloaded
 //     set is nil and renders empty, matching unloaded forward relations,
-//   - any custom PrefetchSpec.ToAttr cached on orm.RelCache, exposed directly
+//   - any custom Prefetch.ToAttr cached on orm.RelCache, exposed directly
 //     under its ToAttr name (a ModelMap for single objects or a slice of
 //     ModelMaps for multi-valued prefetches),
 //   - get_<field>_display with the label of the current choice, for a field
@@ -465,7 +465,7 @@ func isTrackablePK(pk any) bool {
 }
 
 // cachedRelations exposes reverse O2O, reverse FK sets, M2M sets (forward and
-// reverse), and custom PrefetchSpec.ToAttr entries from orm.RelCache without
+// reverse), and custom Prefetch.ToAttr entries from orm.RelCache without
 // issuing any database queries. Unloaded relations remain nil and render empty.
 func (c converter) cachedRelations(out map[string]any, m *orm.Model, inst any, depth int) {
 	for _, rev := range m.ReverseRelations() {

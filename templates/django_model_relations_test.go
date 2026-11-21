@@ -238,7 +238,7 @@ func TestTemplateRelationContext(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get prefTag: %v", err)
 		}
-		prefPostToAttr, err := orm.Query[tmplRelPost](db).PrefetchRelated(orm.PrefetchSpec{
+		prefPostToAttr, err := orm.Query[tmplRelPost](db).PrefetchRelated(orm.Prefetch{
 			Lookup:   "comment_set",
 			QuerySet: orm.Query[tmplRelComment](db).Filter("body", "First!"),
 			ToAttr:   "first_comments",
@@ -281,7 +281,7 @@ func TestTemplateRelationContext(t *testing.T) {
 			"author__profile",
 			"comment_set",
 			"tags",
-			orm.PrefetchSpec{Lookup: "author", ToAttr: "writer"},
+			orm.Prefetch{Lookup: "author", ToAttr: "writer"},
 		).All(ctx)
 		if err != nil {
 			t.Fatalf("All posts: %v", err)
