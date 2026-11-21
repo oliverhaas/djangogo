@@ -316,6 +316,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - ORM: `QuerySet.Ordering` returns the keys a queryset is ordered by, and
   `QuerySet.TotallyOrdered` reports whether they decide the position of every
   row, Django's `ordered` and `totally_ordered`.
+- auth: `Hasher.SafeSummary` returns the parts of an encoded password that
+  can be shown, with the salt and the hash masked (Django's `safe_summary`).
+  The username field of `User` validates with Django's validator and reports a
+  taken name with Django's message.
+- Forms: `forms.RenderAttrs` renders HTML attributes for widgets of other
+  packages.
 
 ### Changed
 
@@ -332,6 +338,17 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `"app_label.codename"`, `auth.Iterations` is replaced by
   `PBKDF2Iterations`, and the fields of `sessions.Record` are now `SessionKey`,
   `SessionData` and `ExpireDate`.
+- **BREAKING**: `User.Groups`, `User.UserPermissions` and `Group.Permissions`
+  are many-to-many fields, as in Django, and the models `UserGroup`,
+  `UserPermission` and `GroupPermission` are removed. The tables keep their
+  names (`auth_user_groups`, `auth_user_user_permissions`,
+  `auth_group_permissions`), so only the auth migrations must be generated
+  again. Read and change the relations with `orm.Many`, or with
+  `User.AddGroups`, `User.AddPermissions` and `Group.AddPermissions`.
+  `User.LastLogin` is now a `*time.Time` that is nil for a user who never
+  logged in.
+- **BREAKING**: the `auth.Hasher` interface has a `SafeSummary` method. A
+  custom hasher must implement it.
 - **BREAKING**: the default CSRF middleware keeps the secret in the
   `csrftoken` cookie instead of the session, and `csrf.SessionKey` is now
   `_csrftoken`.
@@ -408,6 +425,8 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 
 ### Fixed
 
+- auth: a user row with a NULL `last_login`, which Django writes for a user who
+  never logged in, failed to load. It now loads with a nil `LastLogin`.
 - Admin: a duplicate value of a unique field on the add or change page gave a
   500 error; the field now shows the error. The admin form runs the model
   validation as Django's `ModelForm` does, so an inline's clean also sees the

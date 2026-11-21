@@ -23,8 +23,10 @@ func newUserDB(t *testing.T) *orm.DB {
 	t.Helper()
 
 	reg := orm.NewRegistry()
-	if _, err := reg.Register(&auth.User{}); err != nil {
-		t.Fatalf("Register(User): %v", err)
+	for _, m := range auth.AppModels() {
+		if _, err := reg.Register(m); err != nil {
+			t.Fatalf("Register(%T): %v", m, err)
+		}
 	}
 	if err := reg.Resolve(); err != nil {
 		t.Fatalf("Resolve: %v", err)

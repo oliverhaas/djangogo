@@ -138,7 +138,7 @@ func UpdateLastLogin(ctx context.Context, db *orm.DB, u *User) error {
 	if _, err := orm.Query[User](db).Filter("id", u.ID).Update(ctx, "last_login", now); err != nil {
 		return fmt.Errorf("auth: update last login: %w", err)
 	}
-	u.LastLogin = now
+	u.LastLogin = &now
 	return nil
 }
 

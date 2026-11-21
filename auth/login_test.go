@@ -204,8 +204,8 @@ func loginSite(t *testing.T, db *orm.DB) *site {
 func TestLoginRequest(t *testing.T) {
 	eachDB(t, func(t *testing.T, db *orm.DB) {
 		created := createUser(t, db, "alice", "pw")
-		if !created.LastLogin.IsZero() {
-			t.Fatalf("last login of a new user = %v, want the zero time", created.LastLogin)
+		if created.LastLogin != nil {
+			t.Fatalf("last login of a new user = %v, want nil", created.LastLogin)
 		}
 		s := loginSite(t, db)
 		djangotest.AssertEqual(t, s.Get("/").Content(), "anonymous")
@@ -215,7 +215,7 @@ func TestLoginRequest(t *testing.T) {
 		// The user is known to the request that logged it in.
 		djangotest.AssertEqual(t, resp.Content(), "alice")
 		djangotest.AssertEqual(t, s.Get("/").Content(), "alice")
-		if reload(t, db, created.ID).LastLogin.IsZero() {
+		if reload(t, db, created.ID).LastLogin == nil {
 			t.Error("the login did not set last_login")
 		}
 

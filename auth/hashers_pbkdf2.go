@@ -54,6 +54,12 @@ func (h PBKDF2Hasher) HardenRuntime(password, encoded string) {
 	h.variant().hardenRuntime(password, encoded)
 }
 
+// SafeSummary returns the algorithm, the iterations and the masked salt and
+// hash of encoded.
+func (h PBKDF2Hasher) SafeSummary(encoded string) ([]SummaryItem, bool) {
+	return h.variant().safeSummary(encoded)
+}
+
 // variant returns the shared implementation set up for SHA-256.
 func (h PBKDF2Hasher) variant() pbkdf2Variant {
 	return pbkdf2Variant{algorithm: h.Algorithm(), digest: sha256.New, size: sha256.Size, iterations: h.Iterations}
@@ -95,6 +101,12 @@ func (h PBKDF2SHA1Hasher) MustUpdate(encoded string) bool { return h.variant().m
 // HardenRuntime runs the iterations that encoded lacks.
 func (h PBKDF2SHA1Hasher) HardenRuntime(password, encoded string) {
 	h.variant().hardenRuntime(password, encoded)
+}
+
+// SafeSummary returns the algorithm, the iterations and the masked salt and
+// hash of encoded.
+func (h PBKDF2SHA1Hasher) SafeSummary(encoded string) ([]SummaryItem, bool) {
+	return h.variant().safeSummary(encoded)
 }
 
 // variant returns the shared implementation set up for SHA-1.
@@ -159,6 +171,22 @@ func (v pbkdf2Variant) decode(encoded string) (iterations int, salt string, ok b
 		return 0, "", false
 	}
 	return iterations, parts[2], true
+}
+
+// safeSummary returns the algorithm, the iterations and the masked salt and
+// hash of encoded.
+func (v pbkdf2Variant) safeSummary(encoded string) ([]SummaryItem, bool) {
+	iterations, salt, ok := v.decode(encoded)
+	if !ok {
+		return nil, false
+	}
+	hash := strings.SplitN(encoded, "$", 4)[3]
+	return []SummaryItem{
+		{"algorithm", v.algorithm},
+		{"iterations", strconv.Itoa(iterations)},
+		{"salt", maskHash(salt, 6)},
+		{"hash", maskHash(hash, 6)},
+	}, true
 }
 
 // verify hashes password with the parameters of encoded and compares.
@@ -234,6 +262,19 @@ func (h MD5Hasher) MustUpdate(encoded string) bool {
 
 // HardenRuntime does nothing: MD5 has no work factor.
 func (MD5Hasher) HardenRuntime(string, string) {}
+
+// SafeSummary returns the algorithm and the masked salt and hash of encoded.
+func (h MD5Hasher) SafeSummary(encoded string) ([]SummaryItem, bool) {
+	parts := strings.SplitN(encoded, "$", 3)
+	if len(parts) != 3 || parts[0] != h.Algorithm() {
+		return nil, false
+	}
+	return []SummaryItem{
+		{"algorithm", parts[0]},
+		{"salt", maskHash(parts[1], 2)},
+		{"hash", maskHash(parts[2], 6)},
+	}, true
+}
 
 // salt returns the salt of encoded.
 func (h MD5Hasher) salt(encoded string) (string, bool) {

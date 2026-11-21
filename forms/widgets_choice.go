@@ -77,7 +77,7 @@ func renderSelect(name string, choices []Choice, value any, multiple bool, layer
 		attrs["multiple"] = true
 	}
 	var b strings.Builder
-	b.WriteString(`<select name="` + escape(name) + `"` + renderAttrs(attrs) + ">")
+	b.WriteString(`<select name="` + escape(name) + `"` + RenderAttrs(attrs) + ">")
 	selected := selectedIndexes(choices, value, multiple)
 	for i, c := range choices {
 		b.WriteString("\n  <option value=\"" + escape(c.Value) + `"`)
@@ -229,7 +229,7 @@ func renderInputGroup(inputType, name string, choices []Choice, value any, multi
 		// The value attribute is written even when empty, so that the empty
 		// choice submits "" and not the browser default "on".
 		b.WriteString(`<input type="` + inputType + `" name="` + escape(name) + `" value="` + escape(c.Value) + `"`)
-		b.WriteString(renderAttrs(option) + "> " + escape(c.Label) + "</label></div>")
+		b.WriteString(RenderAttrs(option) + "> " + escape(c.Label) + "</label></div>")
 	}
 	b.WriteString("\n</div>")
 	return b.String()

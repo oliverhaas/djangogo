@@ -214,8 +214,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `icontains`, not full-text search.
 - **Auth:** no custom user model. The login, logout and password change views
   are mounted by hand: there is no counterpart of `django.contrib.auth.urls`. No
-  `LoginRequiredMiddleware`. A user row that Django wrote with a NULL
-  `last_login` cannot be loaded yet. In templates, `perms` does not grant an
+  `LoginRequiredMiddleware`. In templates, `perms` does not grant an
   active superuser the permissions that are missing from the database, and
   `user` has no related objects such as groups. `LoginRequired` escapes the
   slashes of `next` (`%2F`), where Django keeps them.

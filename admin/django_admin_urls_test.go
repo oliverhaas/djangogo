@@ -147,11 +147,8 @@ func grantPerm(t *testing.T, db *orm.DB, u *auth.User, appLabel, codename string
 	if err != nil {
 		t.Fatalf("Get permission %s.%s: %v", appLabel, codename, err)
 	}
-	link := &auth.UserPermission{}
-	link.User.SetPK(u.ID)
-	link.Permission.SetPK(p.ID)
-	if err := orm.Query[auth.UserPermission](db).Create(ctx, link); err != nil {
-		t.Fatalf("Create UserPermission %s.%s: %v", appLabel, codename, err)
+	if err := u.AddPermissions(ctx, db, &p); err != nil {
+		t.Fatalf("AddPermissions %s.%s: %v", appLabel, codename, err)
 	}
 }
 
@@ -167,10 +164,8 @@ func revokePerm(t *testing.T, db *orm.DB, u *auth.User, appLabel, codename strin
 	if err != nil {
 		t.Fatalf("Get permission %s.%s: %v", appLabel, codename, err)
 	}
-	if _, err := orm.Query[auth.UserPermission](db).
-		Filter("user_id", u.ID, "permission_id", p.ID).
-		Delete(ctx); err != nil {
-		t.Fatalf("Delete UserPermission %s.%s: %v", appLabel, codename, err)
+	if err := orm.Many[auth.Permission](db, u, "user_permissions").Remove(ctx, &p); err != nil {
+		t.Fatalf("Remove permission %s.%s: %v", appLabel, codename, err)
 	}
 }
 

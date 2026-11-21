@@ -139,9 +139,9 @@ func TestSyncPermissionsNamesAndIdempotence(t *testing.T) {
 		})
 
 		// ContentType, User, Group, Permission and the session Record get four
-		// permissions each; the three membership tables get none, as in Django.
+		// permissions each; the three tables of the many-to-many relations get
+		// none, as in Django.
 		djangotest.AssertEqual(t, len(created), 20)
-		djangotest.AssertEqual(t, countPerms(t, db, &auth.UserGroup{}), int64(0))
 
 		again, err := auth.SyncPermissions(ctx, db)
 		must(t, err)

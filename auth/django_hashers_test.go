@@ -58,6 +58,26 @@ func salted(t *testing.T, algorithm string) auth.SaltedHasher {
 	return s
 }
 
+// summaryValue returns the value of key in the safe summary of encoded by
+// the configured hasher of algorithm (Django's
+// hasher.safe_summary(encoded)[key]).
+func summaryValue(t *testing.T, algorithm, encoded, key string) string {
+	t.Helper()
+	h, err := auth.GetHasher(algorithm)
+	must(t, err)
+	summary, ok := h.SafeSummary(encoded)
+	if !ok {
+		t.Fatalf("no safe summary of %q", encoded)
+	}
+	for _, item := range summary {
+		if item.Key == key {
+			return item.Value
+		}
+	}
+	t.Fatalf("no %q in the safe summary %v", key, summary)
+	return ""
+}
+
 // upgradeRecorder is the setter of the Django tests: it records that the
 // password was handed back for a new hash.
 type upgradeRecorder struct{ upgraded bool }
@@ -201,7 +221,7 @@ func TestHashPassBCryptUpgrade(t *testing.T) {
 	useHashers(t, auth.BCryptHasher{Rounds: 4})
 	// Generate a password with 4 rounds.
 	encoded := makePassword(t, "letmein", "", "bcrypt")
-	djangotest.AssertEqual(t, strings.HasPrefix(encoded, "bcrypt$$2a$04$"), true)
+	djangotest.AssertEqual(t, summaryValue(t, "bcrypt", encoded, "work factor"), "4")
 
 	var state upgradeRecorder
 	// No upgrade is triggered.
@@ -534,14 +554,18 @@ func TestHashPassArgon2(t *testing.T) {
 // configured twice per attribute; the current parameters are kept small.
 func TestHashPassArgon2Upgrade(t *testing.T) {
 	current := auth.Argon2Hasher{TimeCost: 2, MemoryCost: 128, Parallelism: 2}
-	olds := []auth.Argon2Hasher{
-		{TimeCost: 1, MemoryCost: 128, Parallelism: 2},
-		{TimeCost: 2, MemoryCost: 64, Parallelism: 2},
-		{TimeCost: 2, MemoryCost: 128, Parallelism: 1},
+	olds := []struct {
+		hasher          auth.Argon2Hasher
+		summaryKey, val string
+	}{
+		{auth.Argon2Hasher{TimeCost: 1, MemoryCost: 128, Parallelism: 2}, "time cost", "1"},
+		{auth.Argon2Hasher{TimeCost: 2, MemoryCost: 64, Parallelism: 2}, "memory cost", "64"},
+		{auth.Argon2Hasher{TimeCost: 2, MemoryCost: 128, Parallelism: 1}, "parallelism", "1"},
 	}
 	for _, old := range olds {
-		useHashers(t, old)
+		useHashers(t, old.hasher)
 		encoded := makePassword(t, "letmein", "", "argon2")
+		djangotest.AssertEqual(t, summaryValue(t, "argon2", encoded, old.summaryKey), old.val)
 
 		var state upgradeRecorder
 		// No upgrade is triggered.
@@ -597,14 +621,18 @@ func TestHashPassScrypt(t *testing.T) {
 // configured twice per attribute; the current parameters are kept small.
 func TestHashPassScryptUpgrade(t *testing.T) {
 	current := auth.ScryptHasher{WorkFactor: 1 << 5, BlockSize: 8, Parallelism: 3}
-	olds := []auth.ScryptHasher{
-		{WorkFactor: 1 << 4, BlockSize: 8, Parallelism: 3},
-		{WorkFactor: 1 << 5, BlockSize: 10, Parallelism: 3},
-		{WorkFactor: 1 << 5, BlockSize: 8, Parallelism: 2},
+	olds := []struct {
+		hasher          auth.ScryptHasher
+		summaryKey, val string
+	}{
+		{auth.ScryptHasher{WorkFactor: 1 << 4, BlockSize: 8, Parallelism: 3}, "work factor", "16"},
+		{auth.ScryptHasher{WorkFactor: 1 << 5, BlockSize: 10, Parallelism: 3}, "block size", "10"},
+		{auth.ScryptHasher{WorkFactor: 1 << 5, BlockSize: 8, Parallelism: 2}, "parallelism", "2"},
 	}
 	for _, old := range olds {
-		useHashers(t, old)
+		useHashers(t, old.hasher)
 		encoded := makePassword(t, "lètmein", "seasalt", "scrypt")
+		djangotest.AssertEqual(t, summaryValue(t, "scrypt", encoded, old.summaryKey), old.val)
 
 		var state upgradeRecorder
 		// No update is triggered.

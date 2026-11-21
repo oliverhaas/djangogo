@@ -17,21 +17,29 @@ import (
 // Password holds the encoded hash ("pbkdf2_sha256$..."), never a raw password.
 // Use SetPassword and CheckPassword to manage it.
 //
-// LastLogin is the zero time for a user that never logged in. The ORM stores a
-// zero time as year 1 and cannot read NULL into a time.Time, so a row written
-// by Django with a NULL last_login cannot be loaded yet.
+// LastLogin is nil for a user that never logged in. Groups and
+// UserPermissions are the many-to-many relations of Django's PermissionsMixin;
+// read and change them with orm.Many, or with AddGroups and AddPermissions.
+//
+// Django defaults is_active to true and date_joined to the current time. A Go
+// zero value cannot carry these defaults: CreateUser and the user admin set
+// them.
 type User struct {
 	ID          int64
-	Password    string    `orm:"max_length=128"`
-	LastLogin   time.Time `orm:"null;blank"`
-	IsSuperuser bool      `orm:"verbose_name=superuser status"`
-	Username    string    `orm:"unique;max_length=150"`
-	FirstName   string    `orm:"max_length=150;blank"`
-	LastName    string    `orm:"max_length=150;blank"`
-	Email       string    `orm:"max_length=254;blank;verbose_name=email address"`
-	IsStaff     bool      `orm:"verbose_name=staff status"`
-	IsActive    bool      `orm:"verbose_name=active"`
-	DateJoined  time.Time
+	Password    string     `orm:"max_length=128"`
+	LastLogin   *time.Time `orm:"null;blank"`
+	IsSuperuser bool       `orm:"verbose_name=superuser status;help_text=Designates that this user has all permissions without explicitly assigning them."`
+	//nolint:lll // The help text is Django's.
+	Groups          orm.M2M[Group]      `orm:"blank;related_name=user_set;related_query_name=user;help_text=The groups this user belongs to. A user will get all permissions granted to each of their groups."`
+	UserPermissions orm.M2M[Permission] `orm:"blank;related_name=user_set;related_query_name=user;help_text=Specific permissions for this user."`
+	Username        string              `orm:"unique;max_length=150;help_text=Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only."`
+	FirstName       string              `orm:"max_length=150;blank"`
+	LastName        string              `orm:"max_length=150;blank"`
+	Email           string              `orm:"max_length=254;blank;verbose_name=email address"`
+	IsStaff         bool                `orm:"verbose_name=staff status;help_text=Designates whether the user can log into this admin site."`
+	//nolint:lll // The help text is Django's.
+	IsActive   bool `orm:"verbose_name=active;help_text=Designates whether this user should be treated as active. Unselect this instead of deleting accounts."`
+	DateJoined time.Time
 
 	// backend names the backend that authenticated the user, which Login
 	// records in the session (Django's user.backend).
@@ -42,8 +50,26 @@ type User struct {
 	perms *permCache
 }
 
-// Meta names the table as Django does.
-func (User) Meta() orm.Meta { return orm.Meta{Table: "auth_user"} }
+// Meta names the table as Django does and gives the username Django's
+// validator and the message for a taken name.
+func (User) Meta() orm.Meta {
+	return orm.Meta{
+		Table:      "auth_user",
+		Validators: map[string][]orm.Validator{"username": {validateUsernameField}},
+		ErrorMessages: map[string]map[string]string{
+			"username": {"unique": "A user with that username already exists."},
+		},
+	}
+}
+
+// validateUsernameField is ValidateUsername as a validator of the username
+// field, with Django's code "invalid".
+func validateUsernameField(value any) error {
+	if s, ok := value.(string); ok && ValidateUsername(s) == nil {
+		return nil
+	}
+	return orm.NewValidationError(unicodeUsernameMessage, "invalid")
+}
 
 // IsAuthenticated reports whether u is a stored user, as opposed to the
 // anonymous user (Django's is_authenticated).
@@ -87,8 +113,9 @@ func (u *User) SetBackend(name string) { u.backend = name }
 
 // Group is a named set of users that share permissions (auth_group).
 type Group struct {
-	ID   int64
-	Name string `orm:"unique;max_length=150"`
+	ID          int64
+	Name        string              `orm:"unique;max_length=150"`
+	Permissions orm.M2M[Permission] `orm:"blank"`
 }
 
 // Meta names the table as Django does.
@@ -118,57 +145,13 @@ type Permission struct {
 // Meta names the table as Django does.
 func (Permission) Meta() orm.Meta { return orm.Meta{Table: "auth_permission"} }
 
-// UserGroup is the membership of a user in a group (auth_user_groups).
-type UserGroup struct {
-	ID    int64
-	User  orm.FK[User]
-	Group orm.FK[Group]
-}
-
-// Meta names the table as Django does.
-func (UserGroup) Meta() orm.Meta { return orm.Meta{Table: "auth_user_groups"} }
-
-// UserPermission is a permission granted to one user directly
-// (auth_user_user_permissions).
-type UserPermission struct {
-	ID         int64
-	User       orm.FK[User]
-	Permission orm.FK[Permission]
-}
-
-// Meta names the table as Django does.
-func (UserPermission) Meta() orm.Meta { return orm.Meta{Table: "auth_user_user_permissions"} }
-
-// GroupPermission is a permission granted to every member of a group
-// (auth_group_permissions).
-type GroupPermission struct {
-	ID         int64
-	Group      orm.FK[Group]
-	Permission orm.FK[Permission]
-}
-
-// Meta names the table as Django does.
-func (GroupPermission) Meta() orm.Meta { return orm.Meta{Table: "auth_group_permissions"} }
-
 // AddPermissions grants perms to u directly (Django's
 // user.user_permissions.add). A permission the user already holds is left
 // alone. Load the user again to see the change in HasPerm, whose result is
 // cached on the value.
 func (u *User) AddPermissions(ctx context.Context, db *orm.DB, perms ...*Permission) error {
-	for _, p := range perms {
-		exists, err := orm.Query[UserPermission](db).Filter("user_id", u.ID, "permission_id", p.ID).Exists(ctx)
-		if err != nil {
-			return fmt.Errorf("auth: add user permission: %w", err)
-		}
-		if exists {
-			continue
-		}
-		link := &UserPermission{}
-		link.User.SetPK(u.ID)
-		link.Permission.SetPK(p.ID)
-		if err := orm.Query[UserPermission](db).Create(ctx, link); err != nil {
-			return fmt.Errorf("auth: add user permission: %w", err)
-		}
+	if err := orm.Many[Permission](db, u, "user_permissions").Add(ctx, perms...); err != nil {
+		return fmt.Errorf("auth: add user permission: %w", err)
 	}
 	return nil
 }
@@ -176,20 +159,8 @@ func (u *User) AddPermissions(ctx context.Context, db *orm.DB, perms ...*Permiss
 // AddGroups makes u a member of groups (Django's user.groups.add). A group the
 // user already belongs to is left alone.
 func (u *User) AddGroups(ctx context.Context, db *orm.DB, groups ...*Group) error {
-	for _, g := range groups {
-		exists, err := orm.Query[UserGroup](db).Filter("user_id", u.ID, "group_id", g.ID).Exists(ctx)
-		if err != nil {
-			return fmt.Errorf("auth: add user to group: %w", err)
-		}
-		if exists {
-			continue
-		}
-		link := &UserGroup{}
-		link.User.SetPK(u.ID)
-		link.Group.SetPK(g.ID)
-		if err := orm.Query[UserGroup](db).Create(ctx, link); err != nil {
-			return fmt.Errorf("auth: add user to group: %w", err)
-		}
+	if err := orm.Many[Group](db, u, "groups").Add(ctx, groups...); err != nil {
+		return fmt.Errorf("auth: add user to group: %w", err)
 	}
 	return nil
 }
@@ -197,35 +168,20 @@ func (u *User) AddGroups(ctx context.Context, db *orm.DB, groups ...*Group) erro
 // AddPermissions grants perms to every member of g (Django's
 // group.permissions.add). A permission the group already holds is left alone.
 func (g *Group) AddPermissions(ctx context.Context, db *orm.DB, perms ...*Permission) error {
-	for _, p := range perms {
-		exists, err := orm.Query[GroupPermission](db).Filter("group_id", g.ID, "permission_id", p.ID).Exists(ctx)
-		if err != nil {
-			return fmt.Errorf("auth: add group permission: %w", err)
-		}
-		if exists {
-			continue
-		}
-		link := &GroupPermission{}
-		link.Group.SetPK(g.ID)
-		link.Permission.SetPK(p.ID)
-		if err := orm.Query[GroupPermission](db).Create(ctx, link); err != nil {
-			return fmt.Errorf("auth: add group permission: %w", err)
-		}
+	if err := orm.Many[Permission](db, g, "permissions").Add(ctx, perms...); err != nil {
+		return fmt.Errorf("auth: add group permission: %w", err)
 	}
 	return nil
 }
 
-// AppModels returns pointers to zero-valued instances of every auth model, in
-// dependency order (referenced models before their referrers), so a caller can
-// register and migrate them.
+// AppModels returns pointers to zero-valued instances of every auth model, so
+// a caller can register and migrate them. The tables of the many-to-many
+// relations come with the models that declare them.
 func AppModels() []any {
 	return []any{
 		&User{},
 		&Group{},
 		&Permission{},
-		&UserGroup{},
-		&UserPermission{},
-		&GroupPermission{},
 	}
 }
 
@@ -235,6 +191,10 @@ type App struct{}
 
 // Name returns the app label "auth".
 func (App) Name() string { return "auth" }
+
+// VerboseName returns Django's name of the app, "Authentication and
+// Authorization".
+func (App) VerboseName() string { return "Authentication and Authorization" }
 
 // Models returns the auth models (see AppModels).
 func (App) Models() []any { return AppModels() }

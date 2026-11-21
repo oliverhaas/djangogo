@@ -73,6 +73,23 @@ func (h ScryptHasher) MustUpdate(encoded string) bool {
 	return n != wantN || r != wantR || p != wantP
 }
 
+// SafeSummary returns the algorithm, the parameters and the masked salt and
+// hash of encoded.
+func (h ScryptHasher) SafeSummary(encoded string) ([]SummaryItem, bool) {
+	n, salt, r, p, ok := h.decode(encoded)
+	if !ok {
+		return nil, false
+	}
+	return []SummaryItem{
+		{"algorithm", h.Algorithm()},
+		{"work factor", strconv.Itoa(n)},
+		{"block size", strconv.Itoa(r)},
+		{"parallelism", strconv.Itoa(p)},
+		{"salt", maskHash(salt, 6)},
+		{"hash", maskHash(encoded[strings.LastIndex(encoded, "$")+1:], 6)},
+	}, true
+}
+
 // HardenRuntime does nothing: the runtime of scrypt does not grow in a way
 // that a number of extra runs could bridge.
 func (ScryptHasher) HardenRuntime(string, string) {}
@@ -204,6 +221,30 @@ func (h Argon2Hasher) MustUpdate(encoded string) bool {
 		got.memory != want.memory || got.time != want.time || got.threads != want.threads ||
 		len(got.hash) != argon2KeyLen
 	return changed || mustUpdateSalt(string(got.salt))
+}
+
+// SafeSummary returns the algorithm, the variant, the parameters and the
+// masked salt and hash of encoded. The salt shows its bytes as Latin-1
+// characters, as Django's does.
+func (h Argon2Hasher) SafeSummary(encoded string) ([]SummaryItem, bool) {
+	p, ok := h.decode(encoded)
+	if !ok {
+		return nil, false
+	}
+	salt := make([]rune, len(p.salt))
+	for i, b := range p.salt {
+		salt[i] = rune(b)
+	}
+	return []SummaryItem{
+		{"algorithm", h.Algorithm()},
+		{"variety", p.variety},
+		{"version", strconv.Itoa(p.version)},
+		{"memory cost", strconv.Itoa(p.memory)},
+		{"time cost", strconv.Itoa(p.time)},
+		{"parallelism", strconv.Itoa(p.threads)},
+		{"salt", maskHash(string(salt), 6)},
+		{"hash", maskHash(encoded[strings.LastIndex(encoded, "$")+1:], 6)},
+	}, true
 }
 
 // HardenRuntime does nothing: the runtime of Argon2 does not grow in a way

@@ -94,8 +94,8 @@ func templateUser(u *User) TemplateUser {
 	if u.IsAuthenticated() {
 		t["pk"], t["id"] = u.ID, u.ID
 		t["date_joined"] = u.DateJoined
-		if !u.LastLogin.IsZero() {
-			t["last_login"] = u.LastLogin
+		if u.LastLogin != nil {
+			t["last_login"] = *u.LastLogin
 		}
 	}
 	return t

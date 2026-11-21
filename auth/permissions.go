@@ -38,15 +38,6 @@ type DefaultPermissionsProvider interface {
 // defaultActions is Django's default_permissions.
 var defaultActions = []string{"add", "change", "delete", "view"}
 
-// linkModels are the membership tables. Django creates them implicitly for a
-// many-to-many field and gives them no permissions, so SyncPermissions skips
-// them.
-var linkModels = map[reflect.Type]bool{
-	reflect.TypeFor[UserGroup]():       true,
-	reflect.TypeFor[UserPermission]():  true,
-	reflect.TypeFor[GroupPermission](): true,
-}
-
 // SyncPermissions creates the missing permissions of every registered model:
 // "add", "change", "delete" and "view" (named "Can add post" and so on), plus
 // the ones a model declares. It is the counterpart of the create_permissions
@@ -69,12 +60,7 @@ func SyncPermissions(ctx context.Context, db *orm.DB) ([]Permission, error) {
 	if _, err := contenttypes.Sync(ctx, db); err != nil {
 		return nil, err
 	}
-	var models []*orm.Model
-	for _, m := range reg.Models() {
-		if !linkModels[m.GoType()] {
-			models = append(models, m)
-		}
-	}
+	models := reg.Models()
 	cts, err := contenttypes.GetForModels(ctx, db, models...)
 	if err != nil {
 		return nil, err
@@ -243,37 +229,13 @@ func modelPermissions(ctx context.Context, db *orm.DB, u *User, from permSource)
 
 // userPermissionRows returns the permissions granted to a user directly.
 func userPermissionRows(ctx context.Context, db *orm.DB, userID int64) ([]Permission, error) {
-	links, err := orm.Query[UserPermission](db).Filter("user_id", userID).All(ctx)
-	if err != nil || len(links) == 0 {
-		return nil, err
-	}
-	ids := make([]int64, 0, len(links))
-	for _, l := range links {
-		ids = append(ids, l.Permission.PK())
-	}
-	return orm.Query[Permission](db).Filter("id__in", ids).All(ctx)
+	return orm.Query[Permission](db).Filter("user__id", userID).All(ctx)
 }
 
 // groupPermissionRows returns the permissions granted to the groups of a
-// user.
+// user, Django's Permission.objects.filter(group__user=user).
 func groupPermissionRows(ctx context.Context, db *orm.DB, userID int64) ([]Permission, error) {
-	memberships, err := orm.Query[UserGroup](db).Filter("user_id", userID).All(ctx)
-	if err != nil || len(memberships) == 0 {
-		return nil, err
-	}
-	groupIDs := make([]int64, 0, len(memberships))
-	for _, m := range memberships {
-		groupIDs = append(groupIDs, m.Group.PK())
-	}
-	links, err := orm.Query[GroupPermission](db).Filter("group_id__in", groupIDs).All(ctx)
-	if err != nil || len(links) == 0 {
-		return nil, err
-	}
-	ids := make([]int64, 0, len(links))
-	for _, l := range links {
-		ids = append(ids, l.Permission.PK())
-	}
-	return orm.Query[Permission](db).Filter("id__in", ids).All(ctx)
+	return orm.Query[Permission](db).Filter("group__user__id", userID).All(ctx)
 }
 
 // sortedPerms returns the members of set in sorted order. The result is never

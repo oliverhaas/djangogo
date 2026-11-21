@@ -43,6 +43,26 @@ type Hasher interface {
 	// an outdated hash, so that the answer takes as long as for a current
 	// one. A hasher without a work factor does nothing.
 	HardenRuntime(password, encoded string)
+	// SafeSummary returns the parts of encoded that can be shown, with the
+	// salt and the hash masked (Django's safe_summary). It returns false
+	// for a malformed value.
+	SafeSummary(encoded string) ([]SummaryItem, bool)
+}
+
+// SummaryItem is one labeled part of an encoded password in the summary of
+// Hasher.SafeSummary, such as {"algorithm", "pbkdf2_sha256"}.
+type SummaryItem struct {
+	Key, Value string
+}
+
+// maskHash returns s with the characters after the first show replaced by
+// "*" (Django's mask_hash).
+func maskHash(s string, show int) string {
+	runes := []rune(s)
+	if len(runes) <= show {
+		return s
+	}
+	return string(runes[:show]) + strings.Repeat("*", len(runes)-show)
 }
 
 // SaltedHasher is a Hasher that also takes the salt from the caller (Django's

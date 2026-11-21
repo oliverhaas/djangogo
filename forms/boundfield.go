@@ -285,7 +285,7 @@ func (bf *BoundField) LabelTagWith(contents string, attrs Attrs, suffix *string,
 	if tag == "" {
 		tag = "label"
 	}
-	return "<" + tag + renderAttrs(tagAttrs) + ">" + contents + "</" + tag + ">"
+	return "<" + tag + RenderAttrs(tagAttrs) + ">" + contents + "</" + tag + ">"
 }
 
 // lastRune returns the last character of s.

@@ -57,8 +57,10 @@ func isTailAttr(name string) bool {
 	return false
 }
 
-// renderAttrs returns attrs as HTML attributes, each preceded by a space.
-func renderAttrs(attrs Attrs) string {
+// RenderAttrs returns attrs as HTML attributes, each preceded by a space, as
+// Django's django/forms/widgets/attrs.html template does. A widget of another
+// package renders the attributes of its own elements with it.
+func RenderAttrs(attrs Attrs) string {
 	if len(attrs) == 0 {
 		return ""
 	}
@@ -134,7 +136,7 @@ func renderInput(inputType, name string, value any, layers ...Attrs) string {
 	if s, ok := formatValue(value); ok {
 		b.WriteString(` value="` + escape(s) + `"`)
 	}
-	b.WriteString(renderAttrs(attrs))
+	b.WriteString(RenderAttrs(attrs))
 	b.WriteString(">")
 	return b.String()
 }
@@ -369,7 +371,7 @@ func (w Textarea) Render(name string, value any, attrs Attrs) string {
 	text, _ := formatValue(value)
 	// The newline after the tag is dropped by browsers; without it a value
 	// that starts with a newline would lose that newline.
-	return `<textarea name="` + escape(name) + `"` + renderAttrs(all) + ">\n" + escape(text) + "</textarea>"
+	return `<textarea name="` + escape(name) + `"` + RenderAttrs(all) + ">\n" + escape(text) + "</textarea>"
 }
 
 // Attributes implements Widget.

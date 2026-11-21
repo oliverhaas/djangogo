@@ -74,7 +74,6 @@ func newM6DB(t *testing.T) *orm.DB {
 	ctx := context.Background()
 	for _, name := range []string{
 		"User", "Group", "Permission",
-		"UserGroup", "UserPermission", "GroupPermission",
 		"Product",
 	} {
 		m, ok := reg.Get(name)

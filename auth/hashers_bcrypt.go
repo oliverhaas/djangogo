@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -46,6 +47,12 @@ func (h BCryptSHA256Hasher) HardenRuntime(password, encoded string) {
 	bcryptHarden(h.Algorithm(), bcryptDigest(password), encoded, h.Rounds)
 }
 
+// SafeSummary returns the algorithm, the work factor and the masked salt and
+// checksum of encoded.
+func (h BCryptSHA256Hasher) SafeSummary(encoded string) ([]SummaryItem, bool) {
+	return bcryptSummary(h.Algorithm(), encoded)
+}
+
 // BCryptHasher hashes with plain bcrypt (Django's BCryptPasswordHasher).
 // bcrypt reads 72 bytes at most: Encode refuses a longer password, and Verify
 // compares the first 72 bytes only. Prefer BCryptSHA256Hasher. The encoded
@@ -78,6 +85,36 @@ func (h BCryptHasher) MustUpdate(encoded string) bool {
 // costs more than the one of encoded.
 func (h BCryptHasher) HardenRuntime(password, encoded string) {
 	bcryptHarden(h.Algorithm(), []byte(password), encoded, h.Rounds)
+}
+
+// SafeSummary returns the algorithm, the work factor and the masked salt and
+// checksum of encoded.
+func (h BCryptHasher) SafeSummary(encoded string) ([]SummaryItem, bool) {
+	return bcryptSummary(h.Algorithm(), encoded)
+}
+
+// bcryptSummary is SafeSummary for both bcrypt hashers. The bcrypt hash is
+// "$2b$<work factor>$" followed by 22 characters of salt and the checksum.
+func bcryptSummary(algorithm, encoded string) ([]SummaryItem, bool) {
+	parts := strings.SplitN(encoded, "$", 5)
+	if len(parts) != 5 || parts[0] != algorithm || parts[1] != "" {
+		return nil, false
+	}
+	workFactor, err := strconv.Atoi(parts[3])
+	if err != nil {
+		return nil, false
+	}
+	data := parts[4]
+	salt, checksum := data, ""
+	if len(data) > 22 {
+		salt, checksum = data[:22], data[22:]
+	}
+	return []SummaryItem{
+		{"algorithm", algorithm},
+		{"work factor", strconv.Itoa(workFactor)},
+		{"salt", maskHash(salt, 6)},
+		{"checksum", maskHash(checksum, 6)},
+	}, true
 }
 
 // bcryptDigest returns the hex SHA-256 digest of password, the input of

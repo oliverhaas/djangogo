@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/djangotest"
@@ -94,16 +95,18 @@ func TestHasUsablePassword(t *testing.T) {
 
 // Ported from Django: tests/auth_tests/test_models.py::AbstractUserTestCase.test_last_login_default
 //
-// Django stores NULL; here "never logged in" is the zero time.
+// The users are also loaded again, to check that NULL is read back as nil.
 func TestLastLoginDefault(t *testing.T) {
 	eachDB(t, func(t *testing.T, db *orm.DB) {
 		ctx := context.Background()
 		user1 := &auth.User{Username: "user1"}
 		must(t, orm.Query[auth.User](db).Create(ctx, user1))
-		djangotest.AssertEqual(t, reload(t, db, user1.ID).LastLogin.IsZero(), true)
+		djangotest.AssertEqual(t, user1.LastLogin, (*time.Time)(nil))
+		djangotest.AssertEqual(t, reload(t, db, user1.ID).LastLogin, (*time.Time)(nil))
 
 		user2 := createUser(t, db, "user2", "")
-		djangotest.AssertEqual(t, reload(t, db, user2.ID).LastLogin.IsZero(), true)
+		djangotest.AssertEqual(t, user2.LastLogin, (*time.Time)(nil))
+		djangotest.AssertEqual(t, reload(t, db, user2.ID).LastLogin, (*time.Time)(nil))
 	})
 }
 
@@ -176,16 +179,14 @@ func TestPermissionUserPermStr(t *testing.T) {
 	})
 }
 
-// TestTableNames pins the table of every auth model to Django's name.
+// TestTableNames pins the table of every auth model and of its many-to-many
+// relations to Django's name.
 func TestTableNames(t *testing.T) {
 	db := newTestDB(t)
 	want := map[string]any{
 		"auth_user":                  &auth.User{},
 		"auth_group":                 &auth.Group{},
 		"auth_permission":            &auth.Permission{},
-		"auth_user_groups":           &auth.UserGroup{},
-		"auth_user_user_permissions": &auth.UserPermission{},
-		"auth_group_permissions":     &auth.GroupPermission{},
 	}
 	for table, instance := range want {
 		m, ok := db.Registry().ModelOf(instance)
@@ -195,6 +196,15 @@ func TestTableNames(t *testing.T) {
 		djangotest.AssertEqual(t, m.Table(), table)
 	}
 	user, _ := db.Registry().ModelOf(&auth.User{})
+	group, _ := db.Registry().ModelOf(&auth.Group{})
+	through := map[string][]string{}
+	for _, f := range append(user.ManyToMany(), group.ManyToMany()...) {
+		through[f.Rel.Through.Table()] = f.Rel.Through.Columns()
+	}
+	djangotest.AssertEqual(t, len(through), 3)
+	djangotest.AssertSequenceEqual(t, through["auth_user_groups"], []string{"id", "user_id", "group_id"})
+	djangotest.AssertSequenceEqual(t, through["auth_user_user_permissions"], []string{"id", "user_id", "permission_id"})
+	djangotest.AssertSequenceEqual(t, through["auth_group_permissions"], []string{"id", "group_id", "permission_id"})
 	djangotest.AssertSequenceEqual(t, user.Columns(), []string{
 		"id", "password", "last_login", "is_superuser", "username", "first_name",
 		"last_name", "email", "is_staff", "is_active", "date_joined",
