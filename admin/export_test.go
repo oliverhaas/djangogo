@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"net/url"
+	"time"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -81,4 +82,15 @@ func ListEditableCount(ctx context.Context, site *AdminSite, app, slug string, d
 func ViewOnSiteURL(ctx context.Context, site *AdminSite, app, slug string, obj any) string {
 	e := site.byKey[entryKey{app: app, slug: slug}]
 	return site.viewOnSiteURL(ctx, e, e.admin.ViewOnSite, e.admin.ViewOnSiteURL, obj)
+}
+
+// ErrIncorrectLookup is errIncorrectLookup for external tests.
+var ErrIncorrectLookup = errIncorrectLookup
+
+// DateHierarchyBounds returns the range that the date hierarchy parameters of
+// field in params select, the bounded lookup parameters of Django's
+// ChangeList.get_filters.
+func DateHierarchyBounds(params url.Values, field string) (from, to time.Time, err error) {
+	from, to, _, err = dateHierarchyBounds(params, field)
+	return from, to, err
 }

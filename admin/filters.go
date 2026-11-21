@@ -50,7 +50,10 @@ func lookupAllowed(e *entry, lookup string, listFilter []any) bool {
 	}
 
 	// Build set of valid relational paths and SimpleListFilter parameter names.
-	validLookups := make(map[string]bool, len(listFilter))
+	validLookups := make(map[string]bool, len(listFilter)+1)
+	if e.admin.DateHierarchy != "" {
+		validLookups[normalizeFieldPath(e.model, e.admin.DateHierarchy)] = true
+	}
 	for _, item := range listFilter {
 		switch v := item.(type) {
 		case string:
@@ -210,8 +213,21 @@ func (s *AdminSite) buildFilters(
 		}
 	}
 
+	// Bound the date hierarchy's year, month or day as a range, which the
+	// database answers faster than the extracts.
+	hierarchyCond, hierarchyBounds, hasHierarchy, err := cl.dateHierarchyFilter(lookupParams)
+	if err != nil {
+		return nil, nil, nil, false, false, err
+	}
+	if hasHierarchy {
+		conds = append(conds, hierarchyCond)
+	}
+
 	// Validate and apply any remaining lookup parameters not consumed by a filter.
 	remainingCopy := cloneValues(lookupParams)
+	for k, v := range hierarchyBounds {
+		remainingCopy[k] = v
+	}
 	for key, vals := range lookupParams {
 		if len(vals) == 0 {
 			continue

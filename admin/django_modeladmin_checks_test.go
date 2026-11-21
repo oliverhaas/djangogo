@@ -645,8 +645,8 @@ func TestRawIDCheck(t *testing.T) {
 	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
 		// FIXME-PORT: test_not_iterable (admin.E001) has no Go counterpart:
 		// RawIDFields is a []string. test_valid_case_stored_generated_field
-		// and test_valid_case_virtual_generated_field check date_hierarchy,
-		// which the Go admin does not have.
+		// and test_valid_case_virtual_generated_field check a GeneratedField,
+		// which the Go ORM does not have.
 
 		t.Run("test_missing_field", func(t *testing.T) {
 			site := checkSite(t, db, func(site *admin.AdminSite) {
@@ -681,6 +681,48 @@ func TestRawIDCheck(t *testing.T) {
 				"The value of 'raw_id_fields[0]' refers to 'band_id', "+
 					"which is not a field of 'modeladmin.ValidationTestModel'.",
 				"admin.E002")
+		})
+	})
+}
+
+// Ported from Django: tests/modeladmin/test_checks.py::DateHierarchyCheckTests.test_missing_field
+// Ported from Django: tests/modeladmin/test_checks.py::DateHierarchyCheckTests.test_invalid_field_type
+// Ported from Django: tests/modeladmin/test_checks.py::DateHierarchyCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::DateHierarchyCheckTests.test_related_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::DateHierarchyCheckTests.test_related_invalid_field_type
+func TestDateHierarchyCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		// No Go counterpart: test_related_invalid_field_type_stored_generated_field
+		// and test_related_invalid_field_type_virtual_generated_field check a
+		// GeneratedField, which the Go ORM does not have.
+		register := func(dateHierarchy string) *admin.AdminSite {
+			return checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{DateHierarchy: dateHierarchy})
+			})
+		}
+
+		t.Run("test_missing_field", func(t *testing.T) {
+			assertIsInvalid(t, register("non_existent_field"), "modeladmin.ValidationTestModel",
+				"The value of 'date_hierarchy' refers to 'non_existent_field', which does not refer to a Field.",
+				"admin.E127")
+		})
+
+		t.Run("test_invalid_field_type", func(t *testing.T) {
+			assertIsInvalid(t, register("name"), "modeladmin.ValidationTestModel",
+				"The value of 'date_hierarchy' must be a DateField or DateTimeField.", "admin.E128")
+		})
+
+		t.Run("test_valid_case", func(t *testing.T) {
+			assertIsValid(t, register("pub_date"))
+		})
+
+		t.Run("test_related_valid_case", func(t *testing.T) {
+			assertIsValid(t, register("band__sign_date"))
+		})
+
+		t.Run("test_related_invalid_field_type", func(t *testing.T) {
+			assertIsInvalid(t, register("band__name"), "modeladmin.ValidationTestModel",
+				"The value of 'date_hierarchy' must be a DateField or DateTimeField.", "admin.E128")
 		})
 	})
 }

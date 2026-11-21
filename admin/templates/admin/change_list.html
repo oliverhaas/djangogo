@@ -77,6 +77,7 @@
       {% endblock %}
       <div>
         {% block search %}{% include includes.search_form %}{% endblock %}
+        {% block date_hierarchy %}{% if date_hierarchy %}{% include includes.date_hierarchy with show=date_hierarchy.show back=date_hierarchy.back choices=date_hierarchy.choices %}{% endif %}{% endblock %}
 
         <form id="changelist-form" method="post"{% if formset_multipart %} enctype="multipart/form-data"{% endif %} novalidate>
           {% csrf_token %}

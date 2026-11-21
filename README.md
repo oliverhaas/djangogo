@@ -198,7 +198,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `ModelChoiceField` and `ModelMultipleChoiceField` have no `to_field_name` or
   `label_from_instance`, and they load their options once per form, where
   Django loads them on each render.
-- **Admin:** no `date_hierarchy` or facets. A registered model needs an integer primary key. An
+- **Admin:** no facets. A registered model needs an integer primary key. An
   inline cannot edit the auto-created through model of a many-to-many field,
   there are no generic inlines, and an inline has no custom formset class.
   `FormfieldOverrides` sets only the widget and the empty label of a model
@@ -210,8 +210,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   a model field or a `DisplayColumns` value, not a model method. The system
   checks cover `AutocompleteFields`, `RawIDFields`, `Fields`, `Fieldsets`,
   `ExcludeFields`, `FilterHorizontal`, `FilterVertical`, `RadioFields`,
-  `PrepopulatedFields`, `ReadonlyFields`, `Inlines`, `ListDisplay` and
-  `ListEditable` only. A search field with `@` uses
+  `PrepopulatedFields`, `ReadonlyFields`, `Inlines`, `ListDisplay`,
+  `ListEditable` and `DateHierarchy` only. The date hierarchy reads a datetime
+  in UTC. A search field with `@` uses
   `icontains`, not full-text search. The views take no `extra_context`, and
   a template option such as `ChangeFormTemplate` names one template, not a
   list. Blocks that Django names with hyphens, such as `object-tools-items`,

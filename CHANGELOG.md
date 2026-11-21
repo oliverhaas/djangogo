@@ -474,6 +474,16 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   also applies to the classes that derive from it, such as `SlugField` from
   `CharField`. The widget of a foreign key or a many-to-many field wins over
   the autocomplete, raw-id, radio and filter widgets.
+- ORM: `QuerySet.Dates` returns the distinct dates of a date or datetime
+  field, truncated to the year, the month, the ISO week or the day, Django's
+  `dates()`. `QuerySet.DateTimes` returns the distinct datetimes of a datetime
+  field and also truncates to the hour, the minute or the second, Django's
+  `datetimes()`. The field can span relations, and a datetime is read in UTC.
+- Admin: `ModelAdmin.DateHierarchy` adds Django's `date_hierarchy` to the
+  changelist. Links above the rows go from the years that have rows to the
+  months of a year and the days of a month, and each link shows the rows of
+  its range. The field can be on a related model, such as
+  `"question__posted"`. The checks report admin.E127 and admin.E128.
 
 ### Changed
 

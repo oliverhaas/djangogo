@@ -31,8 +31,9 @@ func (o adminObject) Label() string { return o.kind + " of " + o.model.Label() }
 // FilterVertical and FilterHorizontal (admin.E013, admin.E019, admin.E020),
 // RadioFields (admin.E022, admin.E023, admin.E024), PrepopulatedFields
 // (admin.E027, admin.E028, admin.E030), ReadonlyFields (admin.E035), the
-// inlines (see checkInlines), ListDisplay (admin.E108, admin.E109), then
-// ListEditable (admin.E121, admin.E122, admin.E123, admin.E124, admin.E125).
+// inlines (see checkInlines), ListDisplay (admin.E108, admin.E109),
+// ListEditable (admin.E121, admin.E122, admin.E123, admin.E124, admin.E125),
+// then DateHierarchy (admin.E127, admin.E128).
 func (s *AdminSite) Check() []checks.Message {
 	var out []checks.Message
 	for _, e := range s.entries {
@@ -45,6 +46,7 @@ func (s *AdminSite) Check() []checks.Message {
 		for i, name := range e.admin.ListEditable {
 			out = append(out, checkListEditableItem(e, obj, name, fmt.Sprintf("list_editable[%d]", i))...)
 		}
+		out = append(out, checkDateHierarchy(e, obj)...)
 	}
 	return out
 }

@@ -551,12 +551,12 @@ func TestAutocompleteAdminForm(t *testing.T) {
 }
 
 // Question stands in for tests/admin_views/models.py::Question, with an
-// integer primary key in place of big_id and without the uuid and expires
-// fields.
+// integer primary key in place of big_id and without the uuid field.
 type Question struct {
 	ID               int64
 	Question         string            `orm:"max_length=20"`
 	Posted           orm.Date          `orm:"null"`
+	Expires          *time.Time        `orm:"null;blank"`
 	RelatedQuestions orm.M2M[Question] `orm:"related_name=+"`
 }
 

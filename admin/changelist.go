@@ -70,15 +70,19 @@ type changeList struct {
 	params       map[string]string
 	filterParams url.Values
 
-	query               string
-	pageNum             int
-	showAll             bool
-	isPopup             bool
-	preservedFilters    string
-	filterSpecs         []filterSpec
-	hasFilters          bool
-	hasActiveFilters    bool
-	clearAllFiltersQS   string
+	query             string
+	pageNum           int
+	showAll           bool
+	isPopup           bool
+	preservedFilters  string
+	filterSpecs       []filterSpec
+	hasFilters        bool
+	hasActiveFilters  bool
+	clearAllFiltersQS string
+	// dateHierarchyPath is the normalized DateHierarchy path, and
+	// dateHierarchyField its date or datetime field, nil without one.
+	dateHierarchyPath   string
+	dateHierarchyField  *orm.Field
 	baseSpec            querySpec
 	filteredSpec        querySpec
 	resultCount         int
@@ -301,6 +305,9 @@ func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action)
 		preservedFilters:    s.preservedFilters(r, e),
 		baseSpec:            baseSpec,
 		showFullResultCount: e.showFullResultCount(),
+	}
+	if cl.dateHierarchyField = dateHierarchyField(e); cl.dateHierarchyField != nil {
+		cl.dateHierarchyPath = normalizeFieldPath(e.model, e.admin.DateHierarchy)
 	}
 
 	// Build and apply filters.
@@ -914,9 +921,13 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 		s.handleChangeListError(w, r, err)
 		return
 	}
+	dateHierarchy, err := cl.dateHierarchy(r.Context())
+	if err != nil {
+		s.handleChangeListError(w, r, err)
+		return
+	}
 
 	if set == nil && len(cl.listEditable) > 0 && canChange {
-		var err error
 		if set, err = s.changelistFormSet(r, e, cl.listEditable, cl.objects, nil, nil); err != nil {
 			http.Error(w, "invalid list_editable: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1006,6 +1017,9 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	ctx["has_filters"] = cl.hasFilters
 	ctx["has_active_filters"] = cl.hasActiveFilters
 	ctx["clear_all_filters_qs"] = cl.clearAllFiltersQS
+	if dateHierarchy != nil {
+		ctx["date_hierarchy"] = dateHierarchy
+	}
 	ctx["filter_specs"] = filterContext
 
 	// Search bar context.
@@ -1066,7 +1080,7 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	ctx["page_links"] = cl.buildPageLinks()
 	ctx["show_all_url"] = showAllURL
 
-	ctx["includes"] = s.includes(e, "change_list_object_tools", "search_form", "actions", "change_list_results", "pagination")
+	ctx["includes"] = s.includes(e, "change_list_object_tools", "search_form", "date_hierarchy", "actions", "change_list_results", "pagination")
 	s.renderPage(w, r, e, e.admin.ChangeListTemplate, "change_list.html", ctx)
 }
 

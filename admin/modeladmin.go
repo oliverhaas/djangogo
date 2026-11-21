@@ -344,6 +344,12 @@ type ModelAdmin struct {
 	// a string (field name or "__" relation path), a FieldFilter, or a
 	// SimpleListFilter (or *SimpleListFilter).
 	ListFilter []any
+	// DateHierarchy names a date or datetime field, or a "__" path to one
+	// ("question__posted"), that the changelist drills into above the rows
+	// (Django's date_hierarchy): links to the years that have rows, then to
+	// the months of a year, then to the days of a month. A datetime is read
+	// in UTC.
+	DateHierarchy string
 	// ListPerPage is the maximum number of items per changelist page (default 100).
 	ListPerPage int
 	// ListMaxShowAll is the maximum number of items shown when "Show all" is

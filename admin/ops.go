@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"reflect"
+	"time"
 
 	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
@@ -71,6 +72,14 @@ type modelOps struct {
 	distinctValues func(ctx context.Context, spec querySpec, key string) ([]any, error)
 	// deleteSpec deletes all rows matching spec and returns the deleted count.
 	deleteSpec func(ctx context.Context, spec querySpec) (int64, error)
+	// dateRange returns the earliest and the latest value of the date or
+	// datetime field key of the rows matching spec, zero times when no row
+	// has one.
+	dateRange func(ctx context.Context, spec querySpec, key string) (first, last time.Time, err error)
+	// dates returns the distinct values of the date or datetime field key of
+	// the rows matching spec, truncated to kind, ascending: orm.QuerySet.Dates,
+	// or DateTimes when datetimes is set.
+	dates func(ctx context.Context, spec querySpec, key, kind string, datetimes bool) ([]time.Time, error)
 	// get returns the row with the given primary key as a *T, or
 	// orm.ErrDoesNotExist when no such row exists.
 	get func(ctx context.Context, pk int64) (any, error)
@@ -157,6 +166,31 @@ func buildOps[T any](db *orm.DB, m *orm.Model) modelOps {
 			return applySpec(orm.Query[T](db), delSpec).Delete(ctx)
 		},
 
+		dateRange: func(ctx context.Context, spec querySpec, key string) (time.Time, time.Time, error) {
+			res, err := applySpec(orm.Query[T](db), querySpec{filters: spec.filters}).
+				Aggregate(ctx, "first", orm.Min(key), "last", orm.Max(key))
+			if err != nil {
+				return time.Time{}, time.Time{}, err
+			}
+			return aggregateTime(res["first"]), aggregateTime(res["last"]), nil
+		},
+
+		dates: func(ctx context.Context, spec querySpec, key, kind string, datetimes bool) ([]time.Time, error) {
+			qs := applySpec(orm.Query[T](db), querySpec{filters: spec.filters})
+			if datetimes {
+				return qs.DateTimes(ctx, key, kind, "ASC")
+			}
+			dates, err := qs.Dates(ctx, key, kind, "ASC")
+			if err != nil {
+				return nil, err
+			}
+			out := make([]time.Time, len(dates))
+			for i, d := range dates {
+				out[i] = d.Time()
+			}
+			return out, nil
+		},
+
 		get: func(ctx context.Context, pk int64) (any, error) {
 			v, err := orm.Query[T](db).Get(ctx, "id", pk)
 			if err != nil {
@@ -231,4 +265,16 @@ func (t *typedChangelistSet[T]) instances() []any {
 		out[i] = mf.Instance()
 	}
 	return out
+}
+
+// aggregateTime returns the time of a Min or Max of a date (an orm.Date) or a
+// datetime field, the zero time for NULL.
+func aggregateTime(v any) time.Time {
+	switch v := v.(type) {
+	case time.Time:
+		return v
+	case orm.Date:
+		return v.Time()
+	}
+	return time.Time{}
 }
