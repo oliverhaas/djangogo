@@ -46,6 +46,10 @@ type ModelFormSet[T any] struct {
 	// Rows that the queryset does not order completely are also ordered by
 	// primary key, so that a form stays with its row between requests.
 	QuerySet *orm.QuerySet[T]
+	// Objects holds the rows of the initial forms when the caller has loaded
+	// them already. It takes the place of QuerySet, as Django's queryset
+	// argument takes an evaluated queryset; the formset keeps their order.
+	Objects []*T
 	// EditOnly makes Save change and delete the existing rows only and never
 	// add one, Django's edit_only.
 	EditOnly bool
@@ -172,15 +176,20 @@ func (s *ModelFormSet[T]) objects() []*T {
 	if s.model == nil || (s.inline != nil && !s.inline.parentHasPK()) {
 		return nil
 	}
-	rows, err := s.GetQuerySet().All(s.context())
-	if err != nil {
-		s.fail(fmt.Errorf("forms: loading the rows of the formset: %w", err))
-		return nil
+	if s.Objects != nil {
+		s.st.objects = s.Objects
+	} else {
+		rows, err := s.GetQuerySet().All(s.context())
+		if err != nil {
+			s.fail(fmt.Errorf("forms: loading the rows of the formset: %w", err))
+			return nil
+		}
+		s.st.objects = make([]*T, len(rows))
+		for i := range rows {
+			s.st.objects[i] = &rows[i]
+		}
 	}
-	s.st.objects = make([]*T, len(rows))
-	for i := range rows {
-		obj := &rows[i]
-		s.st.objects[i] = obj
+	for _, obj := range s.st.objects {
 		if key, ok := instancePK(s.model, obj); ok {
 			s.st.byPK[key] = obj
 		}

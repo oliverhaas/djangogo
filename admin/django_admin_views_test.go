@@ -314,14 +314,14 @@ func saveAsModels() []any {
 	return append(adminViewsModels(), djangotest.App("admin_views", &Person{}, &Parent{}, &Child{}))
 }
 
-// parentAdmin returns ParentAdmin of tests/admin_views/admin.py. Its
-// list_editable has no Go counterpart.
+// parentAdmin returns ParentAdmin of tests/admin_views/admin.py.
 func parentAdmin() admin.ModelAdmin {
 	return admin.ModelAdmin{
 		SaveAs:           true,
 		Inlines:          []admin.Inline{admin.StackedInline[Parent, Child](admin.InlineModelAdmin{})},
 		ListDisplay:      []string{"id", "name"},
 		ListDisplayLinks: []string{"id"},
+		ListEditable:     []string{"name"},
 		// Give each child with one name the last name of the parent.
 		SaveRelated: func(r *http.Request, sc *admin.SaveContext) error {
 			ctx := r.Context()
@@ -357,7 +357,7 @@ func parentAdmin() admin.ModelAdmin {
 func saveAsEnv(t *testing.T, db *orm.DB) (env, env2 *adminTestEnv, per1 *Person) {
 	t.Helper()
 	env = newAdminTestEnv(t, db, func(site *admin.AdminSite) {
-		admin.Register[Person](site, admin.ModelAdmin{SaveAs: true})
+		admin.Register[Person](site, personAdmin())
 		admin.Register[Parent](site, parentAdmin())
 	})
 	continueFalse := false
@@ -553,8 +553,28 @@ func TestShouldBeAbleToEditRelatedObjectsOnChangeView(t *testing.T) {
 	})
 }
 
-// FIXME-PORT: tests/admin_views/tests.py::AdminCustomSaveRelatedTests.test_should_be_able_to_edit_related_objects_on_changelist_view
-// needs list_editable.
+// Ported from Django: tests/admin_views/tests.py::AdminCustomSaveRelatedTests.test_should_be_able_to_edit_related_objects_on_changelist_view
+func TestShouldBeAbleToEditRelatedObjectsOnChangelistView(t *testing.T) {
+	djangotest.EachDB(t, saveAsModels(), func(t *testing.T, db *orm.DB) {
+		env := saveRelatedEnv(t, db)
+		parent := mustCreate(t, db, &Parent{Name: "Josh Rock"})
+		paul := &Child{Name: "Paul"}
+		paul.Parent.SetPK(parent.ID)
+		mustCreate(t, db, paul)
+		catherine := &Child{Name: "Catherine"}
+		catherine.Parent.SetPK(parent.ID)
+		mustCreate(t, db, catherine)
+		env.client.Post(mustReverse(t, env.router, "admin:admin_views_parent_changelist"), url.Values{
+			"form-TOTAL_FORMS":   {"1"},
+			"form-INITIAL_FORMS": {"1"},
+			"form-MAX_NUM_FORMS": {"0"},
+			"form-0-id":          {fmt.Sprint(parent.ID)},
+			"form-0-name":        {"Josh Stone"},
+			"_save":              {"Save"},
+		})
+		assertParentAndChildren(t, db, "Josh Stone", []string{"Catherine Stone", "Paul Stone"})
+	})
+}
 
 // The Go Article has no section, so SectionedPost stands in for Article in
 // the inline of Section.

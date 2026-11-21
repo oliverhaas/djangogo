@@ -444,6 +444,16 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `SaveContext` or `DeleteContext` whose `Save`, `SaveRelated` and `Delete`
   run the default, the counterpart of calling `super()`. The hooks run in
   the transaction of the page, and `r.Context()` carries it.
+- Admin: `ModelAdmin.ListEditable` edits fields in the changelist rows,
+  Django's `list_editable`. Each row shows a form with the fields, and the
+  Save button saves the changed rows in one transaction through the
+  `SaveModel` and `SaveRelated` hooks, with a log entry each. A row that the
+  user cannot change keeps its read-only cells. Invalid rows show their
+  errors in place, under an "Error:" title. `ChangelistFormSet` customizes
+  the formset, for example with a check across the rows. The checks report
+  admin.E121 to admin.E125.
+- Forms: `ModelFormSet.Objects` sets the objects of the initial forms in
+  place of the queryset.
 
 ### Changed
 

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"net/url"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -55,4 +56,21 @@ func (t TestOps) Del(ctx context.Context, pk int64) error {
 // app.slug of site, as Django's add_preserved_filters template tag.
 func AddPreservedFilters(site *AdminSite, app, slug, u, preserved string) string {
 	return site.addPreservedFilters(site.byKey[entryKey{app: app, slug: slug}], u, preserved, nil, false, "")
+}
+
+// EditedObjectPKs returns the primary keys that data submits for the formset
+// with prefix on the changelist of the model app.slug of site, Django's
+// ModelAdmin._get_edited_object_pks.
+func EditedObjectPKs(site *AdminSite, app, slug string, data url.Values, prefix string) []string {
+	e := site.byKey[entryKey{app: app, slug: slug}]
+	return editedObjectPKs(data, prefix, e.model.PrimaryKey().Attr)
+}
+
+// ListEditableCount counts the rows that the changelist of the model
+// app.slug of site binds to the formset with prefix for data, Django's
+// ModelAdmin._get_list_editable_queryset(...).count().
+func ListEditableCount(ctx context.Context, site *AdminSite, app, slug string, data url.Values, prefix string) (int64, error) {
+	e := site.byKey[entryKey{app: app, slug: slug}]
+	spec := listEditableSpec(e, querySpec{}, editedObjectPKs(data, prefix, e.model.PrimaryKey().Attr))
+	return e.ops.count(ctx, spec)
 }

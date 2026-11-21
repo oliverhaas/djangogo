@@ -2,9 +2,11 @@ package admin_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1373,5 +1375,320 @@ func TestSelectRelatedDefault(t *testing.T) {
 	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
 		_, sql := invitationChangelist(t, db, admin.ModelAdmin{ListDisplay: []string{"band", "player"}})
 		assertJoins(t, sql, true, true)
+	})
+}
+
+// swallowAdmin mirrors tests/admin_changelist/admin.py::SwallowAdmin without
+// the swallowonetoone column, a reverse one-to-one that list_display cannot
+// show in Go.
+func swallowAdmin() admin.ModelAdmin {
+	return admin.ModelAdmin{
+		DisableActions: true,
+		ListDisplay:    []string{"origin", "load", "speed"},
+		ListEditable:   []string{"load", "speed"},
+		ListPerPage:    3,
+	}
+}
+
+// swallowEnv returns an admin with swallowAdmin registered and a logged-in
+// superuser, and the URL of the swallow changelist.
+func swallowEnv(t *testing.T, db *orm.DB) (*adminTestEnv, string) {
+	t.Helper()
+	super := createTestUser(t, db, "super", "secret", true, true)
+	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[CLSwallow](site, swallowAdmin())
+	})
+	env.client.ForceLogin(super)
+	return env, mustReverse(t, env.router, "admin:admin_changelist_clswallow_changelist")
+}
+
+// createSwallow saves a swallow with the values given.
+func createSwallow(t *testing.T, db *orm.DB, origin string, load, speed float64) *CLSwallow {
+	t.Helper()
+	s := &CLSwallow{Origin: origin, Load: load, Speed: speed}
+	if err := orm.Query[CLSwallow](db).Create(context.Background(), s); err != nil {
+		t.Fatalf("create swallow %q: %v", origin, err)
+	}
+	return s
+}
+
+// assertSwallow asserts the stored load and speed of s.
+func assertSwallow(t *testing.T, db *orm.DB, s *CLSwallow, load, speed float64) {
+	t.Helper()
+	got, err := orm.Query[CLSwallow](db).Filter("id", s.ID).Get(context.Background())
+	if err != nil {
+		t.Fatalf("swallow %q: %v", s.Origin, err)
+	}
+	if got.Load != load || got.Speed != speed {
+		t.Errorf("swallow %q load, speed = %v, %v, want %v, %v", s.Origin, got.Load, got.Speed, load, speed)
+	}
+}
+
+// swallowFormData returns the management form of a formset with total
+// initial forms and the fields given. Django's Swallow has a uuid primary
+// key; CLSwallow has an integer id, so the rows submit form-N-id.
+func swallowFormData(total int, fields map[string]string) url.Values {
+	data := url.Values{
+		"form-TOTAL_FORMS":   {strconv.Itoa(total)},
+		"form-INITIAL_FORMS": {strconv.Itoa(total)},
+		"form-MIN_NUM_FORMS": {"0"},
+		"form-MAX_NUM_FORMS": {"1000"},
+		"_save":              {"Save"},
+	}
+	for k, v := range fields {
+		data.Set(k, v)
+	}
+	return data
+}
+
+func pkString(id int64) string { return strconv.FormatInt(id, 10) }
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_result_list_editable_html
+func TestResultListEditableHTML(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		super := createTestUser(t, db, "super", "secret", true, true)
+		p := &CLParent{Name: "parent"}
+		_ = orm.Query[CLParent](db).Create(ctx, p)
+		c := &CLChild{Name: "name"}
+		c.Parent.SetPK(p.ID)
+		_ = orm.Query[CLChild](db).Create(ctx, c)
+
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[CLChild](site, admin.ModelAdmin{
+				ListDisplay:      []string{"id", "name", "parent"},
+				ListDisplayLinks: []string{"id"},
+				ListEditable:     []string{"name"},
+			})
+		})
+		env.client.ForceLogin(super)
+
+		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_changelist_clchild_changelist"))
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		// The hidden fields are in a div outside the table.
+		djangotest.AssertContains(t, resp,
+			`<div class="hiddenfields"><input type="hidden" name="form-0-id" value="`+pkString(c.ID)+`" id="id_form-0-id"></div>`,
+			djangotest.HTML())
+		// The list_editable field renders in its cell.
+		djangotest.AssertContains(t, resp,
+			`<td class="field-name"><input name="form-0-name" value="name" class="vTextField" maxlength="30" type="text" id="id_form-0-name"></td>`,
+			djangotest.HTML())
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_result_list_editable
+func TestResultListEditable(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		super := createTestUser(t, db, "super", "secret", true, true)
+		p := &CLParent{Name: "parent"}
+		_ = orm.Query[CLParent](db).Create(ctx, p)
+		for i := 1; i <= 200; i++ {
+			c := &CLChild{Name: fmt.Sprintf("name %d", i)}
+			c.Parent.SetPK(p.ID)
+			_ = orm.Query[CLChild](db).Create(ctx, c)
+		}
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[CLChild](site, admin.ModelAdmin{
+				ListDisplay:      []string{"id", "name", "parent"},
+				ListDisplayLinks: []string{"id"},
+				ListEditable:     []string{"name"},
+			})
+		})
+		env.client.ForceLogin(super)
+
+		// A page outside the range is Django's IncorrectLookupParameters,
+		// which changelist_view answers with a redirect to ?e=1.
+		u := mustReverse(t, env.router, "admin:admin_changelist_clchild_changelist")
+		resp := env.client.Get(u, djangotest.Query(url.Values{"p": {"-1"}}))
+		djangotest.AssertRedirects(t, resp, u+"?e=1", djangotest.FetchRedirectResponse(false))
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_list_editable_atomicity
+func TestListEditableAtomicity(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		a := createSwallow(t, db, "Swallow A", 4, 1)
+		b := createSwallow(t, db, "Swallow B", 2, 2)
+		super := createTestUser(t, db, "super", "secret", true, true)
+
+		// Django makes log_change raise; a SaveRelated hook that fails
+		// stands in for it, inside the same transaction.
+		failOn := 0
+		calls := 0
+		a2 := swallowAdmin()
+		a2.SaveRelated = func(r *http.Request, sc *admin.SaveContext) error {
+			calls++
+			if calls == failOn {
+				return errors.New("database error")
+			}
+			return sc.SaveRelated(r.Context())
+		}
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[CLSwallow](site, a2)
+		})
+		env.client.ForceLogin(super)
+		u := mustReverse(t, env.router, "admin:admin_changelist_clswallow_changelist")
+		data := swallowFormData(2, map[string]string{
+			"form-0-id":    pkString(a.ID),
+			"form-1-id":    pkString(b.ID),
+			"form-0-load":  "9.0",
+			"form-0-speed": "3.0",
+			"form-1-load":  "5.0",
+			"form-1-speed": "1.0",
+		})
+
+		for _, fail := range []int{1, 2} {
+			failOn, calls = fail, 0
+			resp := env.client.Post(u, data)
+			djangotest.AssertStatus(t, resp, http.StatusInternalServerError)
+			// Original values are preserved.
+			assertSwallow(t, db, a, 4, 1)
+			assertSwallow(t, db, b, 2, 2)
+		}
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_multiuser_edit
+func TestListEditableMultiuserEdit(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		// The changelist orders by speed and shows 3 swallows per page. The
+		// state is the one after user 2 changed the speed of swallow A from
+		// 4 to 1.
+		a := createSwallow(t, db, "Swallow A", 4, 1)
+		b := createSwallow(t, db, "Swallow B", 2, 2)
+		c := createSwallow(t, db, "Swallow C", 5, 5)
+		d := createSwallow(t, db, "Swallow D", 9, 9)
+		env, u := swallowEnv(t, db)
+
+		// User 1 posts with the order from before the edit of user 2.
+		// Django passes o=-2 in extra, which sets a WSGI environ key and
+		// not a query parameter, so the request has no ordering.
+		data := swallowFormData(3, map[string]string{
+			"form-0-id":    pkString(d.ID),
+			"form-1-id":    pkString(c.ID),
+			"form-2-id":    pkString(a.ID),
+			"form-0-load":  "9.0",
+			"form-0-speed": "9.0",
+			"form-1-load":  "5.0",
+			"form-1-speed": "5.0",
+			"form-2-load":  "5.0",
+			"form-2-speed": "4.0",
+		})
+		resp := env.client.Post(u, data, djangotest.Follow())
+
+		// The edit of user 1 goes to swallow A, which the page shows.
+		djangotest.AssertContains(t, resp, "1 swallow was changed successfully.")
+		djangotest.AssertContains(t, resp, a.Origin)
+		assertSwallow(t, db, a, 5, 4)
+		assertSwallow(t, db, b, 2, 2)
+		assertSwallow(t, db, c, 5, 5)
+		assertSwallow(t, db, d, 9, 9)
+		// No new swallows were created.
+		n, err := orm.Query[CLSwallow](db).Count(context.Background())
+		if err != nil || n != 4 {
+			t.Errorf("swallow count = %d, %v, want 4", n, err)
+		}
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_get_edited_object_ids
+func TestGetEditedObjectIDs(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		a := createSwallow(t, db, "Swallow A", 4, 1)
+		b := createSwallow(t, db, "Swallow B", 2, 2)
+		c := createSwallow(t, db, "Swallow C", 5, 5)
+		env, _ := swallowEnv(t, db)
+		data := swallowFormData(3, map[string]string{
+			"form-0-id":    pkString(a.ID),
+			"form-1-id":    pkString(b.ID),
+			"form-2-id":    pkString(c.ID),
+			"form-0-load":  "9.0",
+			"form-0-speed": "9.0",
+			"form-1-load":  "5.0",
+			"form-1-speed": "5.0",
+			"form-2-load":  "5.0",
+			"form-2-speed": "4.0",
+		})
+		got := admin.EditedObjectPKs(env.site, "admin_changelist", "clswallow", data, "form")
+		want := []string{pkString(a.ID), pkString(b.ID), pkString(c.ID)}
+		slices.Sort(want)
+		djangotest.AssertEqual(t, got, want)
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_get_list_editable_queryset
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_get_list_editable_queryset_with_regex_chars_in_prefix
+func TestGetListEditableQueryset(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		a := createSwallow(t, db, "Swallow A", 4, 1)
+		createSwallow(t, db, "Swallow B", 2, 2)
+		env, _ := swallowEnv(t, db)
+		count := func(data url.Values, prefix string) int64 {
+			t.Helper()
+			n, err := admin.ListEditableCount(ctx, env.site, "admin_changelist", "clswallow", data, prefix)
+			if err != nil {
+				t.Fatalf("ListEditableCount: %v", err)
+			}
+			return n
+		}
+
+		data := swallowFormData(2, map[string]string{"form-0-id": pkString(a.ID), "form-0-load": "10"})
+		djangotest.AssertEqual(t, count(data, "form"), int64(1))
+		// The unfiltered queryset is returned if there's invalid data.
+		data.Set("form-0-id", "INVALD_PRIMARY_KEY")
+		djangotest.AssertEqual(t, count(data, "form"), int64(2))
+
+		regex := url.Values{
+			"form$-TOTAL_FORMS":   {"2"},
+			"form$-INITIAL_FORMS": {"2"},
+			"form$-MIN_NUM_FORMS": {"0"},
+			"form$-MAX_NUM_FORMS": {"1000"},
+			"form$-0-id":          {pkString(a.ID)},
+			"form$-0-load":        {"10"},
+			"_save":               {"Save"},
+		}
+		djangotest.AssertEqual(t, count(regex, "form$"), int64(1))
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_changelist_view_list_editable_changed_objects_uses_filter
+func TestChangelistViewListEditableChangedObjectsUsesFilter(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		a := createSwallow(t, db, "Swallow A", 4, 1)
+		createSwallow(t, db, "Swallow B", 2, 2)
+		env, u := swallowEnv(t, db)
+		data := swallowFormData(2, map[string]string{"form-0-id": pkString(a.ID), "form-0-load": "10"})
+
+		capture := djangotest.CaptureQueries(db)
+		resp := env.client.Post(u, data)
+		capture.Stop()
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		// Django checks the fifth query; the Go admin runs other queries
+		// before it, so look for the query that loads the edited rows.
+		found := false
+		for _, q := range capture.Queries() {
+			if strings.Contains(q.SQL, "clswallow") && strings.Contains(q.SQL, "WHERE") &&
+				strings.Contains(q.SQL, " IN ") && slices.Contains(q.Args, any(a.ID)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("no query loads the edited swallows with WHERE ... IN (%d): %v", a.ID, capture.Queries())
+		}
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_list_editable_error_title
+func TestListEditableErrorTitle(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		a := createSwallow(t, db, "Swallow A", 4, 1)
+		createSwallow(t, db, "Swallow B", 2, 2)
+		env, u := swallowEnv(t, db)
+		data := swallowFormData(2, map[string]string{"form-0-id": pkString(a.ID), "form-0-load": "invalid"})
+		resp := env.client.Post(u, data)
+		djangotest.AssertContains(t, resp, "Error: Select swallow to change")
 	})
 }

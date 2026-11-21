@@ -12,8 +12,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/messages"
 	"github.com/oliverhaas/djangogo/orm"
+	"github.com/oliverhaas/djangogo/templates"
 	"github.com/oliverhaas/djangogo/views"
 )
 
@@ -56,6 +58,7 @@ type changeList struct {
 	listDisplay      []resolvedColumn
 	listDisplayLinks map[string]bool
 	noLinks          bool
+	listEditable     []string
 	hasActions       bool
 	sortableBy       map[string]bool
 	sortableRestrict bool
@@ -261,6 +264,13 @@ func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action)
 		listFilter = e.admin.ListFilter
 	}
 
+	// A popup edits nothing in place, as Django's ChangeList drops
+	// list_editable there.
+	var listEditable []string
+	if !isPopup {
+		listEditable = e.admin.ListEditable
+	}
+
 	var baseSpec querySpec
 	if e.admin.GetQuerysetFilter != nil {
 		if c := e.admin.GetQuerysetFilter(r); c.String() != "(AND: )" {
@@ -274,6 +284,7 @@ func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action)
 		listDisplay:         cols,
 		listDisplayLinks:    linkSet,
 		noLinks:             noLinks,
+		listEditable:        listEditable,
 		hasActions:          hasActions,
 		sortableBy:          sortableSet,
 		sortableRestrict:    sortableRestrict,
@@ -669,13 +680,28 @@ func (cl *changeList) resultHeaders(r *http.Request) ([]map[string]any, int) {
 }
 
 // buildRows renders every row's table cells as pre-escaped HTML strings
-// matching Django's items_for_result.
-func (cl *changeList) buildRows() ([]map[string]any, []int64) {
+// matching Django's items_for_result, and the hidden primary keys of the
+// forms of list_editable (Django's result_hidden_fields). Row i shows the
+// editable fields of rowForms[i] when there is one.
+func (cl *changeList) buildRows(rowForms []*forms.Form) ([]map[string]any, []int64, []string) {
 	emptyVal := cl.entry.emptyValue(cl.site)
 	rows := make([]map[string]any, len(cl.objects))
 	pks := make([]int64, len(cl.objects))
+	var hidden []string
+	pkName := ""
+	if pkf := cl.entry.model.PrimaryKey(); pkf != nil {
+		pkName = pkf.Attr
+	}
 
 	for i, obj := range cl.objects {
+		var form *forms.Form
+		if i < len(rowForms) {
+			form = rowForms[i]
+		}
+		var pkField *forms.BoundField
+		if form != nil {
+			pkField = form.Field(pkName)
+		}
 		elem := reflect.ValueOf(obj).Elem()
 		pk := pkOf(elem, cl.entry)
 		pks[i] = pk
@@ -720,18 +746,38 @@ func (cl *changeList) buildRows() ([]map[string]any, []int64) {
 				linkHTML := fmt.Sprintf(`<a href="%s"%s>%s</a>`, html.EscapeString(changeURL), opener, valHTML)
 				cellsHTML = append(cellsHTML, fmt.Sprintf(`<%s class="%s">%s</%s>`, tag, classAttr, linkHTML, tag))
 			} else {
+				if form != nil {
+					name := formName(cl.entry.model, col.rawName)
+					if bf := form.Field(name); bf != nil && (name != pkName || !bf.IsHidden()) {
+						valHTML = bf.Errors().HTML() + bf.HTML()
+					}
+				}
 				cellsHTML = append(cellsHTML, fmt.Sprintf(`<td class="%s">%s</td>`, classAttr, valHTML))
 			}
 		}
+		if pkField != nil {
+			if pkField.IsHidden() {
+				hidden = append(hidden, pkField.HTML())
+			} else {
+				cellsHTML = append(cellsHTML, "<td>"+pkField.HTML()+"</td>")
+			}
+		}
 
-		rows[i] = map[string]any{
+		row := map[string]any{
 			"pk":         pk,
 			"label":      objLabel,
 			"change_url": changeURL,
 			"cells_html": cellsHTML,
+			"colspan":    len(cellsHTML),
 		}
+		if form != nil {
+			if errs := form.NonFieldErrors(); errs.Len() > 0 {
+				row["non_field_errors"] = errs.HTML()
+			}
+		}
+		rows[i] = row
 	}
-	return rows, pks
+	return rows, pks, hidden
 }
 
 // buildPageLinks formats cl.pageRange into template-ready pagination entries.
@@ -817,12 +863,15 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 		return
 	}
 
-	// Dispatch bulk actions on POST before loading the paginated page.
-	if r.Method == http.MethodPost && len(actions) > 0 && !cl.isPopup {
+	if r.Method == http.MethodPost {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
+	}
+
+	// Dispatch bulk actions on POST before loading the paginated page.
+	if r.Method == http.MethodPost && len(actions) > 0 && !cl.isPopup {
 		if !r.PostForm.Has("_save") {
 			selected := r.PostForm[ActionCheckboxName]
 			selectAcross := isTruthyParam(r.PostForm.Get("select_across"))
@@ -850,13 +899,36 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 		}
 	}
 
+	// Save the rows of list_editable, or keep the bound formset with its
+	// errors for the page.
+	canChange := e.hasChangePermission(s, r, nil)
+	var set changelistSet
+	if r.Method == http.MethodPost && len(cl.listEditable) > 0 && r.PostForm.Has("_save") {
+		var handled bool
+		if set, handled = s.saveListEditable(w, r, e, cl); handled {
+			return
+		}
+	}
+
 	if err := cl.loadResults(r.Context()); err != nil {
 		s.handleChangeListError(w, r, err)
 		return
 	}
 
+	if set == nil && len(cl.listEditable) > 0 && canChange {
+		var err error
+		if set, err = s.changelistFormSet(r, e, cl.listEditable, cl.objects, nil, nil); err != nil {
+			http.Error(w, "invalid list_editable: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	var rowForms []*forms.Form
+	if set != nil {
+		rowForms = set.base().Forms()
+	}
+
 	headers, numSorted := cl.resultHeaders(r)
-	rows, pks := cl.buildRows()
+	rows, pks, hiddenFields := cl.buildRows(rowForms)
 
 	// Build filter sidebar context.
 	filterContext := make([]map[string]any, 0, len(cl.filterSpecs))
@@ -886,7 +958,6 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	}
 
 	singular, plural := modelVerboseNames(e.model)
-	canChange := e.hasChangePermission(s, r, nil)
 	title := "Select " + singular + " to view"
 	if cl.isPopup {
 		title = "Select " + singular
@@ -961,6 +1032,27 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	ctx["show_select_across"] = cl.resultCount != len(cl.objects)
 	ctx["media"] = e.media(s)
 	ctx["jsi18n_url"] = s.jsi18nURL()
+
+	// The formset of list_editable.
+	ctx["has_formset"] = set != nil
+	ctx["list_editable"] = cl.listEditable
+	ctx["result_hidden_fields"] = hiddenFields
+	if set != nil {
+		fs := set.base()
+		ctx["media"] = e.media(s).Add(fs.Media())
+		ctx["management_form"] = templates.MarkSafe(fs.ManagementForm().String())
+		ctx["formset_multipart"] = fs.IsMultipart()
+		// Django tests the list of the errors of the forms, which a bound
+		// formset with forms always has.
+		if fs.IsBound() && len(fs.Errors()) > 0 {
+			ctx["formset_errors"] = true
+			ctx["error_note"] = "Please correct the errors below."
+			if fs.TotalErrorCount() == 1 {
+				ctx["error_note"] = "Please correct the error below."
+			}
+			ctx["non_form_errors"] = templates.MarkSafe(fs.NonFormErrors().HTML())
+		}
+	}
 
 	// Results & pagination context.
 	ctx["result_headers"] = headers

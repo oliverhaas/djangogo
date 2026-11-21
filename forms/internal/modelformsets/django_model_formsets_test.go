@@ -615,6 +615,31 @@ func TestCustomQuerysetInit(t *testing.T) {
 	})
 }
 
+// No Django test exists: Django passes an evaluated queryset as the queryset
+// argument, and Objects is the Go form of that. The formset builds its forms
+// from the given rows in their order and runs no query.
+func TestObjectsReplaceTheQuerySet(t *testing.T) {
+	eachDB(t, func(t *testing.T, db *orm.DB) {
+		a := &Author{Name: "Charles Baudelaire"}
+		b := &Author{Name: "Paul Verlaine"}
+		create(t, db, a)
+		create(t, db, b)
+
+		formset := forms.NewModelFormSet[Author](db, forms.WithFields("name"))
+		formset.Extra = 0
+		formset.Objects = []*Author{b, a}
+		djangotest.AssertNumQueries(t, db, 0, func() {
+			mfs := formset.ModelForms()
+			djangotest.AssertEqual(t, len(mfs), 2)
+			djangotest.AssertEqual(t, mfs[0].Instance() == b, true)
+			djangotest.AssertEqual(t, mfs[1].Instance() == a, true)
+			if html := mfs[0].Form.Field("id").HTML(); !strings.Contains(html, fmt.Sprintf(`value="%d"`, b.ID)) {
+				t.Errorf("the first form edits %q, want the row of %q", html, b.Name)
+			}
+		})
+	})
+}
+
 // Ported from Django: tests/model_formsets/tests.py::ModelFormsetTest.test_model_inheritance
 func TestModelInheritance(t *testing.T) {
 	t.Skip("FIXME-PORT: Go: the ORM has no multi-table inheritance, " +

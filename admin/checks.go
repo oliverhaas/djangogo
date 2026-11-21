@@ -31,7 +31,8 @@ func (o adminObject) Label() string { return o.kind + " of " + o.model.Label() }
 // ExcludeFields (admin.E015), FilterVertical and FilterHorizontal
 // (admin.E013, admin.E019, admin.E020), PrepopulatedFields (admin.E027,
 // admin.E028, admin.E030), ReadonlyFields (admin.E035), the inlines (see
-// checkInlines), then ListDisplay (admin.E108, admin.E109).
+// checkInlines), ListDisplay (admin.E108, admin.E109), then ListEditable
+// (admin.E121, admin.E122, admin.E123, admin.E124, admin.E125).
 func (s *AdminSite) Check() []checks.Message {
 	var out []checks.Message
 	for _, e := range s.entries {
@@ -40,6 +41,9 @@ func (s *AdminSite) Check() []checks.Message {
 		out = append(out, s.checkInlines(e, obj)...)
 		for i, name := range e.admin.ListDisplay {
 			out = append(out, checkListDisplayItem(e, obj, name, fmt.Sprintf("list_display[%d]", i))...)
+		}
+		for i, name := range e.admin.ListEditable {
+			out = append(out, checkListEditableItem(e, obj, name, fmt.Sprintf("list_editable[%d]", i))...)
 		}
 	}
 	return out
@@ -350,6 +354,50 @@ func checkListDisplayItem(e *entry, obj adminObject, name, label string) []check
 	return []checks.Message{checks.Error(fmt.Sprintf(
 		"The value of '%s' refers to '%s', which is not a callable or attribute of 'ModelAdmin', or an attribute, method, or field on '%s'.",
 		label, name, e.model.Label()), checks.Obj(obj), checks.ID("admin.E108"))}
+}
+
+// checkListEditableItem checks one entry of ListEditable, Django's
+// _check_list_editable_item: a field of the model that ListDisplay shows,
+// that is not a link, and that the admin can edit. The Go name and the
+// attribute name of a field name the same field.
+func checkListEditableItem(e *entry, obj adminObject, name, label string) []checks.Message {
+	f, ok := e.model.FieldByName(name)
+	if !ok {
+		f, ok = e.model.FieldByAttr(name)
+	}
+	if !ok {
+		f = manyToManyField(e.model, name)
+	}
+	if f == nil {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"The value of '%s' refers to '%s', which is not a field of '%s'.", label, name, e.model.Label()),
+			checks.Obj(obj), checks.ID("admin.E121"))}
+	}
+	display := formNames(e.model, e.admin.ListDisplay)
+	if !slices.Contains(display, f.Attr) {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"The value of '%s' refers to '%s', which is not contained in 'list_display'.", label, name),
+			checks.Obj(obj), checks.ID("admin.E122"))}
+	}
+	links := e.admin.ListDisplayLinks
+	if len(links) > 0 && slices.Contains(formNames(e.model, links), f.Attr) {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"The value of '%s' cannot be in both 'list_editable' and 'list_display_links'.", name),
+			checks.Obj(obj), checks.ID("admin.E123"))}
+	}
+	// A nil ListDisplayLinks links the first column, Django's empty
+	// list_display_links; an empty one links none, Django's None.
+	if display[0] == f.Attr && links == nil {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"The value of '%s' refers to the first field in 'list_display' ('%s'), which cannot be used unless 'list_display_links' is set.",
+			label, e.admin.ListDisplay[0]), checks.Obj(obj), checks.ID("admin.E124"))}
+	}
+	if !f.Editable || f.PrimaryKey {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"The value of '%s' refers to '%s', which is not editable through the admin.", label, name),
+			checks.Obj(obj), checks.ID("admin.E125"))}
+	}
+	return nil
 }
 
 // manyToManyField returns the forward many-to-many field of m with the Go

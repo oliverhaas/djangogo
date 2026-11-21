@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/auth"
@@ -51,6 +52,7 @@ type ValidationTestModel struct {
 	Name       string             `orm:"max_length=100"`
 	Slug       string             `orm:"type=slug"`
 	Users      orm.M2M[auth.User] `orm:"related_name=validationtestmodels"`
+	PubDate    time.Time
 	Band       orm.FK[Band]       `orm:"on_delete=cascade"`
 	BestFriend orm.O2O[auth.User] `orm:"on_delete=cascade;related_name=best_friend"`
 }
@@ -704,3 +706,72 @@ func TestAutocompleteFieldsCheck(t *testing.T) {
 // No Go counterpart: tests/modeladmin/test_checks.py::SaveAsCheckTests and
 // SaveOnTopCheckTests check that save_as and save_on_top are booleans, which
 // Go fixes at compile time: ModelAdmin.SaveAs and SaveOnTop are bools.
+
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayEditableTests.test_list_display_links_is_none
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayEditableTests.test_list_display_first_item_same_as_list_editable_first_item
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayEditableTests.test_list_display_first_item_in_list_editable
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayEditableTests.test_list_display_first_item_same_as_list_editable_no_list_display_links
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayEditableTests.test_list_display_first_item_in_list_editable_no_list_display_links
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayEditableTests.test_both_list_editable_and_list_display_links
+func TestListDisplayEditableCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		const model = "modeladmin.ValidationTestModel"
+		register := func(a admin.ModelAdmin) *admin.AdminSite {
+			return checkSite(t, db, func(site *admin.AdminSite) { admin.Register[ValidationTestModel](site, a) })
+		}
+
+		t.Run("test_list_display_links_is_none", func(t *testing.T) {
+			// An empty ListDisplayLinks is Django's list_display_links = None.
+			display := []string{"name", "slug", "pub_date"}
+			assertIsValid(t, register(admin.ModelAdmin{
+				ListDisplay: display, ListEditable: display, ListDisplayLinks: []string{},
+			}))
+		})
+
+		t.Run("test_list_display_first_item_same_as_list_editable_first_item", func(t *testing.T) {
+			assertIsValid(t, register(admin.ModelAdmin{
+				ListDisplay:      []string{"name", "slug", "pub_date"},
+				ListEditable:     []string{"name", "slug"},
+				ListDisplayLinks: []string{"pub_date"},
+			}))
+		})
+
+		t.Run("test_list_display_first_item_in_list_editable", func(t *testing.T) {
+			assertIsValid(t, register(admin.ModelAdmin{
+				ListDisplay:      []string{"name", "slug", "pub_date"},
+				ListEditable:     []string{"slug", "name"},
+				ListDisplayLinks: []string{"pub_date"},
+			}))
+		})
+
+		t.Run("test_list_display_first_item_same_as_list_editable_no_list_display_links", func(t *testing.T) {
+			site := register(admin.ModelAdmin{ListDisplay: []string{"name"}, ListEditable: []string{"name"}})
+			assertIsInvalid(t, site, model,
+				"The value of 'list_editable[0]' refers to the first field in 'list_display' ('name'), "+
+					"which cannot be used unless 'list_display_links' is set.",
+				"admin.E124")
+		})
+
+		t.Run("test_list_display_first_item_in_list_editable_no_list_display_links", func(t *testing.T) {
+			site := register(admin.ModelAdmin{
+				ListDisplay:  []string{"name", "slug", "pub_date"},
+				ListEditable: []string{"slug", "name"},
+			})
+			assertIsInvalid(t, site, model,
+				"The value of 'list_editable[1]' refers to the first field in 'list_display' ('name'), "+
+					"which cannot be used unless 'list_display_links' is set.",
+				"admin.E124")
+		})
+
+		t.Run("test_both_list_editable_and_list_display_links", func(t *testing.T) {
+			site := register(admin.ModelAdmin{
+				ListEditable:     []string{"name"},
+				ListDisplay:      []string{"name"},
+				ListDisplayLinks: []string{"name"},
+			})
+			assertIsInvalid(t, site, model,
+				"The value of 'name' cannot be in both 'list_editable' and 'list_display_links'.",
+				"admin.E123")
+		})
+	})
+}

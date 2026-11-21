@@ -269,6 +269,16 @@ type ModelAdmin struct {
 	// change page. nil defaults to the first column; a non-nil empty slice
 	// ([]string{}) disables links on all columns (Django's list_display_links=None).
 	ListDisplayLinks []string
+	// ListEditable names the fields of ListDisplay that the changelist edits
+	// in place (Django's list_editable): each row shows a form with these
+	// fields and the page a Save button that saves the changed rows. A field
+	// cannot also be a link, and a popup edits nothing.
+	ListEditable []string
+	// ChangelistFormSet customizes the formset of ListEditable for r (Django's
+	// get_changelist_formset with a formset class of its own). Add a check
+	// across the rows with fs.CleanWith: the cleaned value of the primary key
+	// of each form is its row.
+	ChangelistFormSet func(r *http.Request, fs *forms.FormSet)
 	// DisplayColumns defines custom computed columns referenced by name in
 	// ListDisplay.
 	DisplayColumns map[string]DisplayColumn
@@ -461,14 +471,16 @@ type ModelAdmin struct {
 	GetQuerysetFilter func(r *http.Request) orm.Cond
 	// GetActions filters or customizes the resolved action list for r.
 	GetActions func(r *http.Request, actions []Action) []Action
-	// SaveModel replaces how the add and change pages save the object
-	// (Django's save_model). Call sc.Save to keep the default save. The hook
-	// runs in the transaction of the save, which r.Context() carries.
+	// SaveModel replaces how the add and change pages, and the changelist
+	// rows of ListEditable, save the object (Django's save_model). Call
+	// sc.Save to keep the default save. The hook runs in the transaction of
+	// the save, which r.Context() carries.
 	SaveModel func(r *http.Request, sc *SaveContext) error
-	// SaveRelated replaces how the add and change pages save the
-	// many-to-many fields and the inlines after the object (Django's
-	// save_related). Call sc.SaveRelated to keep the default. The hook runs
-	// in the transaction of the save, which r.Context() carries.
+	// SaveRelated replaces how the add and change pages, and the changelist
+	// rows of ListEditable, save the many-to-many fields and the inlines
+	// after the object (Django's save_related). Call sc.SaveRelated to keep
+	// the default. The hook runs in the transaction of the save, which
+	// r.Context() carries.
 	SaveRelated func(r *http.Request, sc *SaveContext) error
 	// DeleteModel replaces how the delete page deletes the object (Django's
 	// delete_model). Call dc.Delete to keep the default deletion. The hook

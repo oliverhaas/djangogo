@@ -1,3 +1,8 @@
+{% if result_hidden_fields %}
+<div class="hiddenfields">{# DIV for HTML validation #}
+{% for item in result_hidden_fields %}{{ item|safe }}{% endfor %}
+</div>
+{% endif %}
 {% if rows %}
 <div class="results">
   <table id="result_list">
@@ -20,6 +25,9 @@
     </thead>
     <tbody>
       {% for row in rows %}
+      {% if row.non_field_errors %}
+      <tr><td colspan="{{ row.colspan }}">{{ row.non_field_errors|safe }}</td></tr>
+      {% endif %}
       <tr>{% for cell in row.cells_html %}{{ cell|safe }}{% endfor %}</tr>
       {% endfor %}
     </tbody>

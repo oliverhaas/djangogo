@@ -1,8 +1,13 @@
 {% extends "admin/base_site.html" %}
+{% block title %}{% if formset_errors %}Error: {% endif %}{{ block.super }}{% endblock %}
 {% block extrastyle %}
   {{ block.super }}
   <link rel="stylesheet" href="{% static "admin/css/changelists.css" %}">
-  {% if has_actions %}
+  {% if has_formset %}
+    <link rel="stylesheet" href="{% static "admin/css/widgets.css" %}">
+    <link rel="stylesheet" href="{% static "admin/css/forms.css" %}">
+  {% endif %}
+  {% if has_formset or has_actions %}
     <script src="{{ jsi18n_url }}"></script>
   {% endif %}
   {{ media.css }}
@@ -40,6 +45,12 @@
 {% endblock %}
 {% block content %}
 <div id="content-main">
+  {% if formset_errors %}
+  <p class="errornote">
+  {{ error_note }}
+  </p>
+  {{ non_form_errors }}
+  {% endif %}
   <div class="module{% if has_filters %} filtered{% endif %}" id="changelist">
     <div class="changelist-form-container">
       {% block filters %}
@@ -67,8 +78,11 @@
       <div>
         {% block search %}{% include includes.search_form %}{% endblock %}
 
-        <form id="changelist-form" method="post" novalidate>
+        <form id="changelist-form" method="post"{% if formset_multipart %} enctype="multipart/form-data"{% endif %} novalidate>
           {% csrf_token %}
+          {% if has_formset %}
+          <div>{{ management_form }}</div>
+          {% endif %}
           {% block result_list %}
           {% if show_admin_actions and actions_on_top %}{% include includes.actions with action_index=0 %}{% endif %}
 
@@ -80,6 +94,7 @@
           {% block pagination %}
           <div class="changelist-footer">
             {% include includes.pagination %}
+            {% if has_formset and result_count %}<input type="submit" name="_save" class="default" value="Save">{% endif %}
           </div>
           {% endblock %}
         </form>

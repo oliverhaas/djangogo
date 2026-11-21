@@ -2,8 +2,10 @@ package admin
 
 import (
 	"context"
+	"net/url"
 	"reflect"
 
+	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -78,6 +80,11 @@ type modelOps struct {
 	update func(ctx context.Context, pk int64, obj any) error
 	// del removes the row with the given primary key.
 	del func(ctx context.Context, pk int64) error
+	// changelistSet returns the formset of the list_editable fields with
+	// opts and no extra form, Django's get_changelist_formset: over rows,
+	// which the changelist has loaded, when spec is nil, else over the rows
+	// that spec selects.
+	changelistSet func(opts []forms.ModelFormOption, rows []any, spec *querySpec) changelistSet
 }
 
 // buildOps constructs the type-erased modelOps for model T against db, capturing
@@ -177,5 +184,51 @@ func buildOps[T any](db *orm.DB, m *orm.Model) modelOps {
 			_, err := orm.Query[T](db).Filter("id", pk).Delete(ctx)
 			return err
 		},
+
+		changelistSet: func(opts []forms.ModelFormOption, rows []any, spec *querySpec) changelistSet {
+			fs := forms.NewModelFormSet[T](db, opts...)
+			fs.Extra = 0
+			if spec != nil {
+				fs.QuerySet = applySpec(orm.Query[T](db), *spec)
+			} else {
+				fs.Objects = make([]*T, len(rows))
+				for i, row := range rows {
+					fs.Objects[i] = row.(*T)
+				}
+			}
+			return &typedChangelistSet[T]{fs: fs}
+		},
 	}
+}
+
+// changelistSet is the type-independent view of the forms.ModelFormSet of a
+// changelist with list_editable.
+type changelistSet interface {
+	// base returns the formset.
+	base() *forms.FormSet
+	// bind binds the formset to data.
+	bind(data url.Values)
+	// instances returns the instance of each form, aligned with Forms.
+	instances() []any
+}
+
+// typedChangelistSet is the changelistSet of a ModelFormSet of T.
+type typedChangelistSet[T any] struct {
+	fs *forms.ModelFormSet[T]
+}
+
+// base returns the formset.
+func (t *typedChangelistSet[T]) base() *forms.FormSet { return t.fs.FormSet }
+
+// bind binds the formset to data.
+func (t *typedChangelistSet[T]) bind(data url.Values) { t.fs = t.fs.Bind(data) }
+
+// instances returns the instance of each form, aligned with Forms.
+func (t *typedChangelistSet[T]) instances() []any {
+	mfs := t.fs.ModelForms()
+	out := make([]any, len(mfs))
+	for i, mf := range mfs {
+		out[i] = mf.Instance()
+	}
+	return out
 }

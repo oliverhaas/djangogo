@@ -332,3 +332,62 @@ func TestFieldLayoutEntryTypesCheck(t *testing.T) {
 			"admin.E006", "Remove duplicates of 'title'.")
 	})
 }
+
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_field_name_not_in_list_display
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_list_editable_missing_field
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_readonly_and_editable
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_pk_not_editable
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_editable
+func TestAdminChecksListEditable(t *testing.T) {
+	djangotest.EachDB(t, adminChecksModels(), func(t *testing.T, db *orm.DB) {
+		// No Go counterpart: test_list_editable_not_a_list_or_tuple
+		// (admin.E120) checks an option type that Go fixes at compile time:
+		// ListEditable is a []string.
+		const song = "admin_checks.CheckSong"
+		register := func(a admin.ModelAdmin) *admin.AdminSite {
+			return checkSite(t, db, func(site *admin.AdminSite) { admin.Register[CheckSong](site, a) })
+		}
+		fieldsets := []admin.Fieldset{{Fields: []any{"title", "original_release"}}}
+
+		t.Run("test_field_name_not_in_list_display", func(t *testing.T) {
+			site := register(admin.ModelAdmin{ListEditable: []string{"original_release"}})
+			assertIsInvalid(t, site, song,
+				"The value of 'list_editable[0]' refers to 'original_release', which is not contained in 'list_display'.",
+				"admin.E122")
+		})
+
+		t.Run("test_list_editable_missing_field", func(t *testing.T) {
+			site := register(admin.ModelAdmin{ListEditable: []string{"test"}})
+			assertIsInvalid(t, site, song,
+				"The value of 'list_editable[0]' refers to 'test', which is not a field of '"+song+"'.",
+				"admin.E121")
+		})
+
+		t.Run("test_readonly_and_editable", func(t *testing.T) {
+			site := register(admin.ModelAdmin{
+				ReadonlyFields: []string{"original_release"},
+				ListDisplay:    []string{"pk", "original_release"},
+				ListEditable:   []string{"original_release"},
+				Fieldsets:      fieldsets,
+			})
+			assertIsInvalid(t, site, song,
+				"The value of 'list_editable[0]' refers to 'original_release', which is not editable through the admin.",
+				"admin.E125")
+		})
+
+		t.Run("test_pk_not_editable", func(t *testing.T) {
+			site := register(admin.ModelAdmin{ListDisplay: []string{"title", "id"}, ListEditable: []string{"id"}})
+			assertIsInvalid(t, site, song,
+				"The value of 'list_editable[0]' refers to 'id', which is not editable through the admin.",
+				"admin.E125")
+		})
+
+		t.Run("test_editable", func(t *testing.T) {
+			assertIsValid(t, register(admin.ModelAdmin{
+				ListDisplay:  []string{"pk", "title"},
+				ListEditable: []string{"title"},
+				Fieldsets:    fieldsets,
+			}))
+		})
+	})
+}
