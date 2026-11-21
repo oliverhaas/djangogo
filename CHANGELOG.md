@@ -165,6 +165,17 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   manager (Add, Remove, Clear, Set, Create, GetOrCreate, filters), filters
   follow it with `__`, `orm.OnM2MChanged` receives the `m2m_changed` signal,
   and migrations create, alter and drop the join tables.
+- `PrefetchRelated` loads forward and reverse foreign keys, one-to-one and
+  many-to-many relations, and chained `__` paths, with one batched `IN` query
+  per level. `orm.Prefetch` takes a custom queryset and a `ToAttr` name, as
+  Django's `Prefetch`, and `orm.PrefetchRelatedObjects` prefetches onto rows
+  already loaded. The related managers read `All`, `Count`, `Exists` and
+  `First` from the prefetched rows; a model keeps them when it embeds
+  `orm.RelCache`.
+- Templates read the relations a view loaded: one-to-one fields both ways
+  (`{{ user.profile }}`), foreign keys loaded by `PrefetchRelated`, and
+  prefetched sets (`{% for c in post.comment_set.all %}`,
+  `{{ post.tags.count }}`). Rendering still runs no query.
 - Deletes run Django's collector: `on_delete=cascade` and `set_null` also apply
   where the database does not enforce them, and `restrict` and the new
   `protect` and `do_nothing` options work as in Django: a blocked delete fails
@@ -236,6 +247,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - **BREAKING**: SQLite now enforces foreign keys: the backend turns on the
   `foreign_keys` pragma, so an insert or update with a missing target fails as
   on PostgreSQL. Add `_pragma=foreign_keys(0)` to the DSN to turn it off.
+- **BREAKING**: the helper `orm.Prefetch[Child](ctx, db, fkColumn, pks)` is
+  removed. Use `Query[T](db).PrefetchRelated(...)` or
+  `orm.PrefetchRelatedObjects`. `orm.Prefetch` is now Django's `Prefetch`
+  option.
 - **BREAKING**: `migrations.Autodetector.PreserveModelOptions` is removed.
   `makemigrations` reads indexes and `unique_together` from `orm.Meta`.
 - Templates print a `time.Duration` like Python's `timedelta` (`1:30:00`), a

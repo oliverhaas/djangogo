@@ -38,7 +38,7 @@ unstable and can change between commits.
 - **M9 spec completion.** Django's URL dispatch, auth tables and password
   hashers, sessions, CSRF, messages, generic views and commands; Django's field
   kinds, `orm.Meta`, model validation, reverse, one-to-one and many-to-many
-  relations; the admin's URL layout, permissions, changelist and actions; and
+  relations with `PrefetchRelated`; the admin's URL layout, permissions, changelist and actions; and
   SQL fidelity tests for queries and migrations.
 
 ## Quickstart
@@ -167,8 +167,10 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   inheritance.
 - **Database:** one database per application. Two models with foreign keys to
   each other cannot be created on PostgreSQL.
-- **Querying:** no `prefetch_related`, no transforms (`__date`, `Length`), no
-  `extra()`, no fetch modes and no `select_related()` without arguments. `Raw` leaves the fields missing
+- **Querying:** no transforms (`__date`, `Length`), no `extra()`, no fetch
+  modes and no `select_related()` without arguments. A model keeps prefetched
+  reverse and many-to-many sets only when it embeds `orm.RelCache`, and the
+  queryset of an `orm.Prefetch` cannot be sliced. `Raw` leaves the fields missing
   from a result at their zero value, where Django defers and loads them.
   Transactions have no `savepoint=False` or `set_rollback`, so on PostgreSQL a
   failed statement inside `Atomic` aborts the transaction until the block ends.
@@ -185,7 +187,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `querystring`, `debug`, `partialdef`/`partial`, and the `i18n`, `l10n`, `tz` and
   `cache` libraries. Missing filter: `pprint`. Output is English only. Lists and
   maps print in Go syntax, not as Python's repr. `{% extends %}` takes only a
-  literal name, and `{% lorem %}` is pongo2's tag.
+  literal name, and `{% lorem %}` is pongo2's tag. A template never runs a
+  query: a relation renders empty unless the view loaded it with
+  `SelectRelated` or `PrefetchRelated`.
 - **Forms:** no formsets, file fields, option groups, `MultiValueField` or
   `SplitDateTimeField`, no localization and no custom renderers. A template
   cannot loop over a form with `{% for field in form %}`: use `form.fields`.
