@@ -8,33 +8,11 @@ import (
 	"github.com/oliverhaas/djangogo/orm"
 )
 
-// modelVerboseNames returns the lowercase singular and plural verbose names of
-// m, derived from its type name the way Django derives defaults before model
-// Meta options exist ("Article" -> "article", "articles"; "ReadOnlyPizza" ->
-// "read only pizza", "read only pizzas"). Once orm.Model exposes Meta verbose
-// names, update this function to read them first.
+// modelVerboseNames returns the singular and plural verbose names of m: its
+// Meta.VerboseName and Meta.VerboseNamePlural, or Django's defaults derived
+// from the type name.
 func modelVerboseNames(m *orm.Model) (singular, plural string) {
-	singular = camelCaseToSpaces(m.Name())
-	plural = singular + "s"
-	return singular, plural
-}
-
-// camelCaseToSpaces splits a Go type name at uppercase boundaries and
-// lowercases it, matching django.utils.text.camel_case_to_spaces.
-func camelCaseToSpaces(name string) string {
-	runes := []rune(name)
-	var b strings.Builder
-	for i, r := range runes {
-		if unicode.IsUpper(r) && i > 0 {
-			afterLower := unicode.IsLower(runes[i-1])
-			beforeNonUpper := i+1 < len(runes) && !unicode.IsUpper(runes[i+1])
-			if afterLower || beforeNonUpper {
-				b.WriteByte(' ')
-			}
-		}
-		b.WriteRune(unicode.ToLower(r))
-	}
-	return strings.TrimSpace(b.String())
+	return m.VerboseName(), m.VerboseNamePlural()
 }
 
 // capFirst uppercases the first rune of s without altering the rest, matching
