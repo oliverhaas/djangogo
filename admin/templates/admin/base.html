@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{% endblock %}</title>
+</head>
+<body class="{% block bodyclass %}{% endblock %}">
+<div id="container">
+  <header id="header">
+    <div id="branding">
+      {% block branding %}{% endblock %}
+    </div>
+    {% block usertools %}
+    {% if has_permission %}
+    <div id="user-tools">
+      Welcome, <strong>{% firstof user.get_short_name user.get_username %}</strong>.
+      {% block userlinks %}
+      {% if site_url %}<a href="{{ site_url }}">View site</a> / {% endif %}
+      {% if user_has_usable_password %}<a href="{% url 'admin:password_change' %}">Change password</a> / {% endif %}
+      <form id="logout-form" method="post" action="{% url 'admin:logout' %}">
+        {% csrf_token %}
+        <button type="submit">Log out</button>
+      </form>
+      {% endblock %}
+    </div>
+    {% endif %}
+    {% endblock %}
+  </header>
+  {% block nav_breadcrumbs %}
+  <nav aria-label="Breadcrumbs">
+    {% block breadcrumbs %}
+    <ol class="breadcrumbs">
+      <li><a href="{% url 'admin:index' %}">Home</a></li>
+      {% if title %}<li aria-current="page">{{ title }}</li>{% endif %}
+    </ol>
+    {% endblock %}
+  </nav>
+  {% endblock %}
+  <div class="main" id="main">
+    <main id="content-start" class="content" tabindex="-1">
+      {% block messages %}
+      {% if messages %}
+      <ul class="messagelist">
+        {% for message in messages %}
+        <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% endblock %}
+      <div id="content">
+        {% block content_title %}{% if title %}<h1>{{ title }}</h1>{% endif %}{% endblock %}
+        {% block content_subtitle %}{% if subtitle %}<h2>{{ subtitle }}</h2>{% endif %}{% endblock %}
+        {% block object_tools %}{% endblock %}
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+  <footer id="footer">{% block footer %}{% endblock %}</footer>
+</div>
+</body>
+</html>

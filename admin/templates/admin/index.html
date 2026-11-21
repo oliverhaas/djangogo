@@ -1,0 +1,8 @@
+{% extends "admin/base_site.html" %}
+{% block bodyclass %}dashboard{% endblock %}
+{% block nav_breadcrumbs %}{% endblock %}
+{% block content %}
+<div id="content-main" class="app-list">
+  {% include "admin/app_list.html" %}
+</div>
+{% endblock %}

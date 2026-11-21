@@ -1,0 +1,44 @@
+{% extends "admin/base_site.html" %}
+{% block bodyclass %}app-{{ app_label }} model-{{ slug }} change-list{% endblock %}
+{% block breadcrumbs %}
+<ol class="breadcrumbs">
+  <li><a href="{% url 'admin:index' %}">Home</a></li>
+  {% if app_url %}<li><a href="{{ app_url }}">{{ app_verbose_name }}</a></li>{% endif %}
+  <li aria-current="page">{{ verbose_name_plural }}</li>
+</ol>
+{% endblock %}
+{% block object_tools %}
+{% if has_add_permission %}
+<ul class="object-tools">
+  <li><a href="{{ add_url }}" class="addlink">Add {{ verbose_name }}</a></li>
+</ul>
+{% endif %}
+{% endblock %}
+{% block content %}
+<div id="content-main">
+  <div class="module" id="changelist">
+    <div class="results">
+      <table id="result_list">
+        <thead>
+          <tr>
+            <th scope="col">{{ model }}</th>
+            {% for column in columns %}<th scope="col">{{ column }}</th>{% endfor %}
+            {% if has_delete_permission %}<th scope="col">Actions</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <th scope="row"><a href="{{ row.change_url }}">{{ row.label }}</a></th>
+            {% for cell in row.cells %}<td>{{ cell }}</td>{% endfor %}
+            {% if has_delete_permission %}
+            <td><a href="{{ row.delete_url }}">Delete</a></td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
