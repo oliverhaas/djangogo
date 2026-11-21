@@ -9,6 +9,7 @@ import (
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/djangotest"
+	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -90,7 +91,21 @@ func registerViewOnSiteAdmins(site *admin.AdminSite) {
 	admin.Register[City](site, admin.ModelAdmin{
 		ViewOnSite: &yes,
 		Inlines: []admin.Inline{
-			admin.TabularInline[City, Restaurant](admin.InlineModelAdmin{ViewOnSite: &yes}),
+			admin.TabularInline[City, Restaurant](admin.InlineModelAdmin{
+				ViewOnSite: &yes,
+				// Django's CityAdmin.get_formset_kwargs gives each form of the
+				// inline the initial name "overridden_name".
+				FormSet: func(_ *http.Request, _ any, fs *forms.FormSet) {
+					configure := fs.ConfigureForm
+					fs.ConfigureForm = func(form *forms.Form, i int) {
+						configure(form, i)
+						if form.Initial == nil {
+							form.Initial = map[string]any{}
+						}
+						form.Initial["name"] = "overridden_name"
+					}
+				},
+			}),
 		},
 	})
 	admin.Register[Worker](site, admin.ModelAdmin{ViewOnSiteURL: func(obj any) string {
@@ -252,5 +267,14 @@ func TestInlineAdminViewOnSiteCallable(t *testing.T) {
 		env, d := viewOnSiteEnv(t, db)
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_restaurant_change", d.r1.ID))
 		djangotest.AssertContains(t, resp, fmt.Sprintf(`"/worker_inline/%s/%s/"`, d.w1.Surname, d.w1.Name))
+	})
+}
+
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_formset_kwargs_can_be_overridden
+func TestFormsetKwargsCanBeOverridden(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		env, _ := viewOnSiteEnv(t, db)
+		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_city_add"))
+		djangotest.AssertContains(t, resp, "overridden_name")
 	})
 }

@@ -200,7 +200,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   Django loads them on each render.
 - **Admin:** a registered model needs an integer primary key. An
   inline cannot edit the auto-created through model of a many-to-many field,
-  there are no generic inlines, and an inline has no custom formset class.
+  and there are no generic inlines.
   The `FormClass` of `FormfieldOverrides` does not apply to a relation, which
   keeps its choice field. The scripts and
   pages are in English only. The date

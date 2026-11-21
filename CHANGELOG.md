@@ -527,6 +527,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   []forms.FieldOption{forms.Strip(false)}}}` for `strip=False` and
   `FormClass: forms.Class(forms.NewEmailField)` for `form_class`. A
   `FormClass` on `DateTimeField` replaces the split date and time field.
+- Admin: `InlineModelAdmin.FormSet` customizes the formset of an inline,
+  Django's `formset` class of an inline and `get_formset_kwargs`. Add a
+  check across the rows with `fs.CleanWith`, or wrap `fs.ConfigureForm` to
+  change each form.
 - forms: `WithFieldOptions` adds field options to the form field of a model
   field, the arguments of Django's `Field.formfield()`, and `forms.Class`
   turns a field constructor such as `forms.NewEmailField` into a

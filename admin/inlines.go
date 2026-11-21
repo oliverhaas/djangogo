@@ -102,6 +102,12 @@ type InlineModelAdmin struct {
 	// of an inline.
 	Media forms.Media
 
+	// FormSet customizes the formset of the inline for r and obj, Django's
+	// formset class of an inline and ModelAdmin.get_formset_kwargs. Add a
+	// check across the rows with fs.CleanWith, or wrap fs.ConfigureForm to
+	// change each form, calling the admin's ConfigureForm first.
+	FormSet func(r *http.Request, obj any, fs *forms.FormSet)
+
 	// GetExtra returns the number of extra forms for r and obj in place of
 	// Extra, Django's get_extra.
 	GetExtra func(r *http.Request, obj any) int
@@ -587,6 +593,9 @@ func (s *AdminSite) buildInlineFormSet(r *http.Request, ifs *inlineFormSet, pare
 		ifs.guardForm(form, i)
 	}
 	fs.CleanWith(func(fs *forms.FormSet) error { return s.protectedDeleteError(r, ifs, fs) })
+	if in.cfg.FormSet != nil {
+		in.cfg.FormSet(r, obj, fs)
+	}
 	return nil
 }
 

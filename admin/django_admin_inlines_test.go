@@ -1827,3 +1827,50 @@ func TestInlineWithFieldsetsHeadings(t *testing.T) {
 		}
 	})
 }
+
+// No Django test exists: Django's InlineModelAdmin.formset names a formset
+// class whose clean() checks the rows together. The FormSet hook of an
+// inline adds such a check with fs.CleanWith.
+func TestInlineFormSetClean(t *testing.T) {
+	djangotest.EachDB(t, inlinesModels(), func(t *testing.T, db *orm.DB) {
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[TitleCollection](site, admin.ModelAdmin{Inlines: []admin.Inline{
+				admin.TabularInline[TitleCollection, Title](admin.InlineModelAdmin{
+					FormSet: func(_ *http.Request, _ any, fs *forms.FormSet) {
+						fs.CleanWith(func(fs *forms.FormSet) error {
+							seen := map[any]bool{}
+							for _, form := range fs.Forms() {
+								title := form.Cleaned()["title1"]
+								if title != nil && seen[title] {
+									return forms.NewValidationError("The titles must differ.", "")
+								}
+								seen[title] = true
+							}
+							return nil
+						})
+					},
+				}),
+			}})
+		})
+		env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+		data := url.Values{
+			"title_set-TOTAL_FORMS":   {"2"},
+			"title_set-INITIAL_FORMS": {"0"},
+			"title_set-MAX_NUM_FORMS": {"1000"},
+			"_save":                   {"Save"},
+			"title_set-0-title1":      {"a title"},
+			"title_set-0-title2":      {"a title"},
+			"title_set-1-title1":      {"a title"},
+			"title_set-1-title2":      {"a title"},
+		}
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_inlines_titlecollection_add"), data)
+		djangotest.AssertStatus(t, resp, 200)
+		djangotest.AssertContains(t, resp, `<ul class="errorlist nonform"><li>The titles must differ.</li></ul>`,
+			djangotest.HTML())
+		n, err := orm.Query[TitleCollection](db).Count(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		djangotest.AssertEqual(t, n, int64(0))
+	})
+}
