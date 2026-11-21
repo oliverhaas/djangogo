@@ -203,7 +203,9 @@ func (c *compiler) addFilters() error {
 			return cond.err
 		}
 		existing := c.joins.innerJoins()
+		c.reuse = make(map[*join]bool)
 		node, _, err := c.addQ(cond, false)
+		c.reuse = nil
 		if err != nil {
 			return err
 		}
@@ -271,7 +273,7 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 		if err != nil {
 			return nil, nil, err
 		}
-		pred, err := c.buildPredicate(lookup, n, nil, value)
+		pred, err := c.buildPredicate(lookup, n, nil, value, nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -282,22 +284,26 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 	if err != nil {
 		return nil, nil, err
 	}
-	// A negated condition across a relation that can match several rows has to
-	// be a subquery (Django's split_exclude): as a join it would only drop the
-	// related rows that match, not the row itself.
-	if currentNegated {
-		for _, h := range path.hops {
-			if h.many {
-				return nil, nil, errors.New("orm: excluding across a multi-valued relation is not supported")
-			}
-		}
-	}
 	lookup, err := c.lookupOf(path.rest, &path)
 	if err != nil {
 		return nil, nil, err
 	}
+	// A negated condition across a relation that can match several rows has to
+	// be a correlated EXISTS subquery (Django's split_exclude): as a join it
+	// would only drop the related rows that match, not the parent row itself.
+	if currentNegated {
+		for _, h := range path.hops {
+			if h.many {
+				node, err := c.splitExclude(path, lookup, value)
+				if err != nil {
+					return nil, nil, err
+				}
+				return node, nil, nil
+			}
+		}
+	}
 	col := c.column(path)
-	pred, err := c.buildPredicate(lookup, col, path.field, value)
+	pred, err := c.buildPredicate(lookup, col, path.field, value, path.expectedModel())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -347,6 +353,10 @@ func (c *compiler) lookupOf(rest []string, path *fieldPath) (string, error) {
 		if path.relation {
 			supported = relationLookupNames
 			kind = "ForeignKey"
+			if (path.reverse != nil && path.reverse.Kind == RelO2O) ||
+				(path.reverse == nil && path.field != nil && path.field.Rel != nil && path.field.Rel.Kind == RelO2O) {
+				kind = "OneToOneField"
+			}
 		}
 	}
 	if len(rest) == 1 && slices.Contains(supported, name) {

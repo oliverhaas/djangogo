@@ -80,8 +80,13 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 
 	// Step 4: collect fields.
 	var fields []*Field
+	cacheIndex := -1
 	for i := range st.NumField() {
 		sf := st.Field(i)
+		if sf.Type == relCacheType {
+			cacheIndex = i
+			continue
+		}
 		f, keep, err := parseStructField(sf, i)
 		if err != nil {
 			return nil, fmt.Errorf("orm: model %s: %w", name, err)
@@ -133,9 +138,10 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 			)
 		}
 	}
-	// Promote the pk field.
+	// Promote the pk field. Relation primary keys (O2O) remain KindInt rather
+	// than becoming autoincrementing KindAuto columns.
 	pkField.PrimaryKey = true
-	if pkField.Kind == KindInt {
+	if pkField.Kind == KindInt && pkField.Rel == nil {
 		pkField.Kind = KindAuto
 	}
 	if pkField.Kind == KindAuto && pkField.HasDefault {
@@ -176,15 +182,16 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 
 	// Step 8: construct and store the Model.
 	m := &Model{
-		app:      app,
-		name:     name,
-		table:    table,
-		fields:   fields,
-		pk:       pkField,
-		byName:   byName,
-		byAttr:   byAttr,
-		byColumn: byColumn,
-		goType:   st,
+		app:        app,
+		name:       name,
+		table:      table,
+		fields:     fields,
+		pk:         pkField,
+		byName:     byName,
+		byAttr:     byAttr,
+		byColumn:   byColumn,
+		goType:     st,
+		cacheIndex: cacheIndex,
 	}
 	if err := applyModelMeta(m, model); err != nil {
 		return nil, err
@@ -224,6 +231,7 @@ func (r *Registry) Resolve() error {
 			f.Rel.Target = tm
 		}
 	}
+	r.resolveReverseRelations()
 	return nil
 }
 

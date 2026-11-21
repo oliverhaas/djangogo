@@ -153,8 +153,8 @@ var timeType = reflect.TypeOf(time.Time{})
 // It returns (field, true, nil) for included fields, (nil, false, nil) for skipped
 // fields, and (nil, false, err) on a tag or type error.
 func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
-	// Step 1: skip unexported fields and fields tagged orm:"-".
-	if sf.PkgPath != "" {
+	// Step 1: skip unexported fields, embedded RelCache, and fields tagged orm:"-".
+	if sf.PkgPath != "" || sf.Type == relCacheType {
 		return nil, false, nil
 	}
 	tag := sf.Tag.Get("orm")
@@ -171,13 +171,16 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 		Editable: true,
 	}
 
-	// Relation fields (e.g. FK[T]) are detected before the scalar type switch.
+	// Relation fields (e.g. FK[T], O2O[T]) are detected before the scalar type switch.
 	// They map to an integer FK column and carry a *Relation; the column defaults
 	// to "<snake>_id" and may be overridden by a column= tag.
 	if rm, ok := reflect.Zero(sf.Type).Interface().(relationMarker); ok {
 		f.Kind = KindInt
 		f.Column = toSnakeCase(sf.Name) + "_id"
 		f.Rel = &Relation{Kind: rm.relKind(), targetType: rm.relTarget()}
+		if f.Rel.Kind == RelO2O {
+			f.Unique = true
+		}
 		if tag != "" {
 			for _, token := range strings.Split(tag, ";") {
 				token = strings.TrimSpace(token)
@@ -370,8 +373,23 @@ func applyRelationTagOption(f *Field, fieldName, token string) error {
 			return fmt.Errorf("orm: field %s: %w", fieldName, err)
 		}
 		f.Rel.OnDelete = od
+	case strings.HasPrefix(token, "related_name="):
+		rn := token[len("related_name="):]
+		if rn == "" {
+			return fmt.Errorf("orm: field %s: related_name must not be empty", fieldName)
+		}
+		f.Rel.RelatedName = rn
+	case strings.HasPrefix(token, "related_query_name="):
+		rqn := token[len("related_query_name="):]
+		if rqn == "" {
+			return fmt.Errorf("orm: field %s: related_query_name must not be empty", fieldName)
+		}
+		f.Rel.RelatedQueryName = rqn
 	case token == "pk":
-		return fmt.Errorf("orm: field %s: pk is not valid on a relation field", fieldName)
+		if f.Rel.Kind != RelO2O {
+			return fmt.Errorf("orm: field %s: pk is not valid on a relation field", fieldName)
+		}
+		f.PrimaryKey = true
 	case token == "type=text" || strings.HasPrefix(token, "max_length="),
 		token == "auto_now", token == "auto_now_add", strings.HasPrefix(token, "default="):
 		return fmt.Errorf("orm: field %s: %q is not valid on a relation field", fieldName, token)

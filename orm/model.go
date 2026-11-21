@@ -7,20 +7,26 @@ import "reflect"
 // All mutation happens during Register; after Freeze the registry and its
 // models are read-only by convention (no exported setters exist).
 type Model struct {
-	app               string
-	name              string
-	table             string
-	fields            []*Field
-	pk                *Field
-	byName            map[string]*Field
-	byAttr            map[string]*Field
-	byColumn          map[string]*Field
-	goType            reflect.Type
-	ordering          []string
-	uniqueTogether    [][]string
-	indexes           []Index
-	verboseName       string
-	verboseNamePlural string
+	app                   string
+	name                  string
+	table                 string
+	fields                []*Field
+	pk                    *Field
+	byName                map[string]*Field
+	byAttr                map[string]*Field
+	byColumn              map[string]*Field
+	goType                reflect.Type
+	cacheIndex            int
+	reverseRels           []*ReverseRelation
+	byReverseName         map[string]*ReverseRelation
+	byReverseQuery        map[string]*ReverseRelation
+	ambiguousReverseName  map[string]bool
+	ambiguousReverseQuery map[string]bool
+	ordering              []string
+	uniqueTogether        [][]string
+	indexes               []Index
+	verboseName           string
+	verboseNamePlural     string
 }
 
 // Name returns the Go struct type name (e.g. "Author").

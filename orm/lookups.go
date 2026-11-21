@@ -29,6 +29,7 @@ const (
 	lookupIsNull      = "isnull"
 	lookupRegex       = "regex"
 	lookupIRegex      = "iregex"
+	lookupExists      = "exists"
 )
 
 // comparisonOps maps the comparison lookups to their SQL operator.
@@ -192,7 +193,7 @@ type predicate struct {
 
 // containsAggregate reports whether either side references an aggregate.
 func (p *predicate) containsAggregate() bool {
-	if p.lhs.aggregate() {
+	if p.lhs != nil && p.lhs.aggregate() {
 		return true
 	}
 	for _, r := range p.rhs {
@@ -222,6 +223,10 @@ func (p *predicate) render(w *sqlWriter) {
 		return
 	}
 	switch p.lookup {
+	case lookupExists:
+		w.write("EXISTS(")
+		p.sub.render(w)
+		w.write(")")
 	case lookupIsNull:
 		p.lhs.render(w)
 		if p.flag {
@@ -287,7 +292,9 @@ func supportsRegex(d Dialect) bool {
 
 // buildPredicate resolves the comparison of lhs with value under lookup. field
 // is the model field behind lhs, or nil when lhs is an annotation.
-func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, value any) (*predicate, error) {
+// expectedModel, when non-nil, overrides the model type checked when value is
+// a registered model instance.
+func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, value any, expectedModel *Model) (*predicate, error) {
 	p := &predicate{lookup: lookup, lhs: lhs}
 	if lookup == lookupIsNull {
 		b, ok := value.(bool)
@@ -298,10 +305,10 @@ func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, valu
 		return p, nil
 	}
 	if lookup == lookupIn {
-		return p, c.buildIn(p, field, value)
+		return p, c.buildIn(p, field, value, expectedModel)
 	}
 	if lookup == lookupRange {
-		return p, c.buildRange(p, field, value)
+		return p, c.buildRange(p, field, value, expectedModel)
 	}
 	if sq, ok := value.(subqueryer); ok {
 		if lookup != lookupExact {
@@ -315,7 +322,7 @@ func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, valu
 	}
 
 	if patternLookups[lookup] {
-		rhs, err := c.prepPatternValue(field, value)
+		rhs, err := c.prepPatternValue(field, value, expectedModel)
 		if err != nil {
 			return nil, err
 		}
@@ -342,7 +349,7 @@ func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, valu
 		return p, nil
 	}
 
-	rhs, err := c.prepValue(field, value)
+	rhs, err := c.prepValue(field, value, expectedModel)
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +406,7 @@ func likePattern(lookup, s string) string {
 // buildIn fills p for an "in" lookup. value is a slice or array, whose nil
 // elements are dropped since NULL is never equal to anything, or a queryset,
 // which becomes a subquery.
-func (c *compiler) buildIn(p *predicate, field *Field, value any) error {
+func (c *compiler) buildIn(p *predicate, field *Field, value any, expectedModel *Model) error {
 	if sq, ok := value.(subqueryer); ok {
 		return c.setSubquery(p, sq.subquery(), "'in'")
 	}
@@ -408,7 +415,7 @@ func (c *compiler) buildIn(p *predicate, field *Field, value any) error {
 		return fmt.Errorf("orm: in lookup requires a slice, got %T", value)
 	}
 	for i := range rv.Len() {
-		n, err := c.prepValue(field, rv.Index(i).Interface())
+		n, err := c.prepValue(field, rv.Index(i).Interface(), expectedModel)
 		if err != nil {
 			return err
 		}
@@ -443,13 +450,13 @@ func (c *compiler) setSubquery(p *predicate, sub *query, lookup string) error {
 
 // buildRange fills p for a "range" lookup. value is a slice or array of the
 // two inclusive bounds.
-func (c *compiler) buildRange(p *predicate, field *Field, value any) error {
+func (c *compiler) buildRange(p *predicate, field *Field, value any, expectedModel *Model) error {
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() || (rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array) || rv.Len() != 2 {
 		return fmt.Errorf("orm: range lookup requires a slice of two values, got %T", value)
 	}
 	for i := range 2 {
-		n, err := c.prepValue(field, rv.Index(i).Interface())
+		n, err := c.prepValue(field, rv.Index(i).Interface(), expectedModel)
 		if err != nil {
 			return err
 		}
@@ -473,9 +480,9 @@ type subqueryer interface {
 // with, or nil.
 //
 // A value may be a model instance or a pointer to one, which stands for its
-// primary key, and an orm.FK[T] or any other driver.Valuer, which stands for
-// the value it yields.
-func (c *compiler) prepValue(field *Field, value any) (sqlNode, error) {
+// primary key, and an orm.FK[T], orm.O2O[T], or any other driver.Valuer, which
+// stands for the value it yields.
+func (c *compiler) prepValue(field *Field, value any, expectedModel *Model) (sqlNode, error) {
 	switch e := value.(type) {
 	case nil:
 		return nil, nil
@@ -487,7 +494,7 @@ func (c *compiler) prepValue(field *Field, value any) (sqlNode, error) {
 		}
 		return c.resolveExpr(*e)
 	}
-	v, err := plainValue(c.q.db.Registry(), field, value)
+	v, err := plainValueForModel(c.q.db.Registry(), field, expectedModel, value)
 	if err != nil || v == nil {
 		return nil, err
 	}
@@ -500,7 +507,7 @@ func (c *compiler) prepValue(field *Field, value any) (sqlNode, error) {
 
 // prepPatternValue resolves a right-hand value for a text pattern lookup
 // without parsing fragments as full typed values (e.g. UUID substrings).
-func (c *compiler) prepPatternValue(field *Field, value any) (sqlNode, error) {
+func (c *compiler) prepPatternValue(field *Field, value any, expectedModel *Model) (sqlNode, error) {
 	switch e := value.(type) {
 	case nil:
 		return nil, nil
@@ -512,7 +519,7 @@ func (c *compiler) prepPatternValue(field *Field, value any) (sqlNode, error) {
 		}
 		return c.resolveExpr(*e)
 	}
-	v, err := plainValue(c.q.db.Registry(), field, value)
+	v, err := plainValueForModel(c.q.db.Registry(), field, expectedModel, value)
 	if err != nil || v == nil {
 		return nil, err
 	}
@@ -524,6 +531,12 @@ func (c *compiler) prepPatternValue(field *Field, value any) (sqlNode, error) {
 // registered model by its primary key. field is the field the value is meant
 // for, or nil; when it is a relation, an instance must be of its target model.
 func plainValue(reg *Registry, field *Field, value any) (any, error) {
+	return plainValueForModel(reg, field, nil, value)
+}
+
+// plainValueForModel is plainValue with an optional expectedModel override
+// (used for reverse relations and O2O primary-key filters).
+func plainValueForModel(reg *Registry, field *Field, expectedModel *Model, value any) (any, error) {
 	if value == nil {
 		return nil, nil
 	}
@@ -542,8 +555,12 @@ func plainValue(reg *Registry, field *Field, value any) (any, error) {
 	if !ok {
 		return value, nil
 	}
-	if field != nil && field.Rel != nil && field.Rel.Target != nil && field.Rel.Target != m {
-		return nil, fmt.Errorf("orm: cannot query %q: must be %q instance", m.Name(), field.Rel.Target.Name())
+	want := expectedModel
+	if want == nil && field != nil && field.Rel != nil && field.Rel.Target != nil {
+		want = field.Rel.Target
+	}
+	if want != nil && want != m {
+		return nil, fmt.Errorf("orm: cannot query %q: must be %q instance", m.Name(), want.Name())
 	}
 	pk := m.PrimaryKey()
 	if pk == nil {
@@ -553,6 +570,16 @@ func plainValue(reg *Registry, field *Field, value any) (any, error) {
 		rv = rv.Elem()
 	}
 	pv := rv.Field(pk.Index)
+	if valuer, ok := pv.Interface().(driver.Valuer); ok {
+		v, err := valuer.Value()
+		if err != nil {
+			return nil, fmt.Errorf("orm: query value %T: %w", value, err)
+		}
+		if v == nil {
+			return nil, errors.New("orm: model instances passed to related filters must be saved")
+		}
+		return v, nil
+	}
 	if pv.IsZero() {
 		return nil, errors.New("orm: model instances passed to related filters must be saved")
 	}
