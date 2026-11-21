@@ -132,6 +132,10 @@ type AdminSite struct {
 	// when non-nil. Return a non-nil error to reject the login with that error
 	// message.
 	LoginConfirmAllowed func(r *http.Request, u *auth.User) error
+	// GetLogEntries narrows the log entries that the "Recent actions" of the
+	// index show, Django's AdminSite.get_log_entries. It receives the default
+	// entries and returns the ones to show. Nil shows all of them.
+	GetLogEntries func(r *http.Request, entries *orm.QuerySet[LogEntry]) *orm.QuerySet[LogEntry]
 
 	actions   []Action
 	revMu     sync.RWMutex

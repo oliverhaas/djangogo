@@ -3,6 +3,7 @@ package admin_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/auth"
+	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/messages"
 	"github.com/oliverhaas/djangogo/orm"
@@ -409,6 +411,23 @@ func TestAddViewPermissions(t *testing.T) {
 		djangotest.AssertEqual(t, count, int64(4))
 		env.client.Post(logoutURL, nil)
 
+		// The addition was logged correctly.
+		additionLog, err := orm.Query[admin.LogEntry](db).OrderBy("-action_time", "-id").First(ctx)
+		if err != nil {
+			t.Fatalf("latest log entry: %v", err)
+		}
+		newArticle, err := orm.Query[Article](db).OrderBy("-id").First(ctx)
+		if err != nil {
+			t.Fatalf("latest article: %v", err)
+		}
+		articleCT := contentTypeOf(t, db, &Article{})
+		djangotest.AssertEqual(t, additionLog.User.PK(), u.addUser.ID)
+		djangotest.AssertEqual(t, additionLog.ContentType.PK(), articleCT.ID)
+		djangotest.AssertEqual(t, *additionLog.ObjectID, fmt.Sprint(newArticle.ID))
+		djangotest.AssertEqual(t, additionLog.ObjectRepr, "Døm ikke")
+		djangotest.AssertEqual(t, additionLog.ActionFlag, admin.Addition)
+		djangotest.AssertEqual(t, additionLog.GetChangeMessage(), "Added.")
+
 		// Superuser sees changelist link in breadcrumbs and redirects to changelist.
 		env.client.ForceLogin(u.super)
 		addPage = env.client.Get(addURL)
@@ -614,7 +633,27 @@ func TestDeleteViewPermissions(t *testing.T) {
 		djangotest.AssertRedirects(t, post, indexURL)
 		count, _ = orm.Query[Article](db).Count(ctx)
 		djangotest.AssertEqual(t, count, int64(2))
+		articleCT := contentTypeOf(t, db, &Article{})
+		logged, err := orm.Query[admin.LogEntry](db).Get(ctx, "content_type", articleCT.ID, "action_flag", admin.Deletion)
+		if err != nil {
+			t.Fatalf("deletion log entry: %v", err)
+		}
+		djangotest.AssertEqual(t, *logged.ObjectID, fmt.Sprint(u.a1.ID))
 	})
+}
+
+// contentTypeOf returns the content type of the model of obj.
+func contentTypeOf(t *testing.T, db *orm.DB, obj any) contenttypes.ContentType {
+	t.Helper()
+	m, ok := db.Registry().ModelOf(obj)
+	if !ok {
+		t.Fatalf("%T is not registered", obj)
+	}
+	ct, err := contenttypes.GetForModel(context.Background(), db, m)
+	if err != nil {
+		t.Fatalf("GetForModel(%T): %v", obj, err)
+	}
+	return ct
 }
 
 // Ported from Django: tests/admin_views/tests.py::AdminViewPermissionsTest.test_delete_view_nonexistent_obj

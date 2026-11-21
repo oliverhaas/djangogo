@@ -181,6 +181,7 @@ func changelistModels() []any {
 	return []any{
 		auth.App{},
 		contenttypes.App{},
+		admin.App{},
 		djangotest.App("admin_changelist",
 			&CLParent{},
 			&CLChild{},

@@ -119,7 +119,7 @@ type WidgetVideoStream struct {
 // widgetRelatedModels returns the model set of the ported raw-id and
 // autocomplete widget tests.
 func widgetRelatedModels() []any {
-	return []any{auth.App{}, contenttypes.App{}, djangotest.App("admin_widgets",
+	return []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_widgets",
 		&Company{}, &Advisor{}, &WidgetMember{}, &WidgetBand{}, &WidgetAlbum{}, &WidgetReleaseEvent{},
 		&WidgetEvent{}, &Honeycomb{}, &Bee{}, &Individual{}, &WidgetVideoStream{},
 	)}
@@ -566,7 +566,7 @@ func (a Answer) String() string { return a.Answer }
 // autocompleteViewModels returns the model set of the ported
 // AutocompleteJsonViewTests.
 func autocompleteViewModels() []any {
-	return []any{auth.App{}, contenttypes.App{}, djangotest.App("admin_views", &Question{}, &Answer{})}
+	return []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_views", &Question{}, &Answer{})}
 }
 
 // questionAdmin is the QuestionAdmin of tests/admin_views/admin.py.

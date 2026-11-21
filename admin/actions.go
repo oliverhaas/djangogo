@@ -247,6 +247,9 @@ func handleDeleteSelected(w http.ResponseWriter, r *http.Request, act *ActionCon
 		}
 		n := len(objs)
 		if n > 0 {
+			if err := s.logActions(ctx, r, objs, Deletion, ""); err != nil {
+				return false, err
+			}
 			if e.admin.DeleteQueryset != nil {
 				if err := e.admin.DeleteQueryset(r, act); err != nil {
 					return false, err

@@ -108,6 +108,16 @@ func (f *Form) AddField(name string, field Field) {
 	if _, ok := f.fields[name]; !ok {
 		f.names = append(f.names, name)
 	}
+	// A form that loaded its fields already loads a field added later, such
+	// as the primary key field that a formset adds after its form hook.
+	if cf, ok := field.(ContextField); ok && f.resolved {
+		loaded, err := cf.WithContext(f.Context())
+		if err != nil {
+			f.fail(fmt.Errorf("forms: field %q: %w", name, err))
+		} else {
+			field = loaded
+		}
+	}
 	f.fields[name] = field
 	delete(f.boundFields, name)
 }

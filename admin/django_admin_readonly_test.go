@@ -104,7 +104,7 @@ type LVEmptyModelMixin struct {
 
 // readonlyModels returns the model set of the ported ReadonlyTest tests.
 func readonlyModels() []any {
-	return []any{auth.App{}, contenttypes.App{}, djangotest.App("admin_views",
+	return []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_views",
 		&Section{}, &ROPost{}, &ROLink{}, &ROChoice{}, &ROBook{}, &ROChapter{}, &ROReadOnlyRelatedField{},
 		&LVEmptyModelVisible{}, &LVEmptyModelHidden{}, &LVEmptyModelMixin{},
 	)}

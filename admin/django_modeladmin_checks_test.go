@@ -98,6 +98,7 @@ func modeladminCheckModels() []any {
 	return []any{
 		auth.App{},
 		contenttypes.App{},
+		admin.App{},
 		djangotest.App("modeladmin",
 			&Band{}, &Song{}, &Concert{}, &ValidationTestModel{}, &ValidationTestInlineModel{},
 			&Contact{}, &Customer{}, &Artist{}, &BandArtist{},

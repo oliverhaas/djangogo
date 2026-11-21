@@ -281,7 +281,7 @@ type Photo struct {
 
 // inlinesModels returns the model set of the ported admin_inlines tests.
 func inlinesModels() []any {
-	return []any{auth.App{}, contenttypes.App{}, djangotest.App("admin_inlines",
+	return []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_inlines",
 		&Holder{}, &Inner{}, &Holder2{}, &Inner2{}, &Holder3{}, &Inner3{},
 		&Holder4{}, &Inner4Stacked{}, &Inner4Tabular{}, &TitleCollection{}, &Title{},
 		&Poll{}, &PollQuestion{}, &Novel{}, &Chapter{}, &FootNote{},

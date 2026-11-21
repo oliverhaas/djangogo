@@ -118,7 +118,7 @@ list and detail pages and the admin together; run it with `go run ./examples/blo
 | `templates`       | A pongo2 engine with `{% static %}`, `{% url %}`, `{% csrf_token %}` tags. |
 | `forms`           | Form fields, widgets, and `ModelForm` derived from model metadata.         |
 | `validators`      | Django's validators and `ValidationError`, shared by models and forms.     |
-| `admin`           | The admin site: changelist, actions, add/change/delete and permissions.    |
+| `admin`           | The admin site: changelist, actions, add/change/delete, history, permissions. |
 | `scaffold`        | Project and app scaffolding used by `startproject`/`startapp`.             |
 | `contenttypes`    | Content types of the installed models.                                     |
 | `messages`        | One-time messages for the next page, stored in the session.                |
@@ -198,8 +198,8 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `ModelChoiceField` and `ModelMultipleChoiceField` have no `to_field_name` or
   `label_from_instance`, and they load their options once per form, where
   Django loads them on each render.
-- **Admin:** no `list_editable`, `date_hierarchy` or facets, no history
-  (`LogEntry`) and no "View on site" links. An
+- **Admin:** no `list_editable`, `date_hierarchy` or facets and no "View on
+  site" links. A registered model needs an integer primary key. An
   inline cannot edit the auto-created through model of a many-to-many field,
   there are no generic inlines, and an inline has no custom formset class.
   There are no `radio_fields`, and `FormOptions` sets widgets per field name,

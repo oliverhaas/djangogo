@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/oliverhaas/djangogo"
+	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/sessions"
@@ -23,6 +24,7 @@ import (
 
 	// Importing the migrations of an app registers them with migrate.
 	_ "[[.Module]]/migrations/[[.AppName]]"
+	_ "[[.Module]]/migrations/admin"
 	_ "[[.Module]]/migrations/auth"
 	_ "[[.Module]]/migrations/contenttypes"
 	_ "[[.Module]]/migrations/sessions"
@@ -42,10 +44,11 @@ func run() int {
 		return 1
 	}
 	// The installed apps, Django's INSTALLED_APPS. The admin needs auth,
-	// auth needs contenttypes, and sessions keeps the sessions in the
-	// database.
+	// auth needs contenttypes, admin.App keeps the admin's history in the
+	// database, and sessions keeps the sessions in the database.
 	app, err := djangogo.New(s,
 		&[[.AppName]].App{},
+		admin.App{},
 		auth.App{},
 		contenttypes.App{},
 		sessions.App{},

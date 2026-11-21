@@ -26,6 +26,15 @@ func (s *AdminSite) index(w http.ResponseWriter, r *http.Request) {
 	ctx["title"] = s.indexTitle()
 	ctx["subtitle"] = ""
 	ctx["app_list"] = ctx["available_apps"]
+	if s.logEnabled() {
+		recent, err := s.recentActions(r)
+		if err != nil {
+			http.Error(w, "failed to load the recent actions", http.StatusInternalServerError)
+			return
+		}
+		ctx["log_enabled"] = true
+		ctx["admin_log"] = recent
+	}
 	s.render(w, r, "admin/index.html", ctx)
 }
 
@@ -328,7 +337,10 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 				if err := s.saveManyToMany(ctx, e, form, obj); err != nil {
 					return err
 				}
-				return saveInlines(ctx, inlines)
+				if err := saveInlines(ctx, inlines); err != nil {
+					return err
+				}
+				return s.logFormChange(ctx, r, obj, form, inlines, true)
 			})
 			if err != nil {
 				http.Error(w, "failed to create row", http.StatusInternalServerError)
@@ -472,7 +484,10 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 				if err := s.saveManyToMany(ctx, e, form, obj); err != nil {
 					return err
 				}
-				return saveInlines(ctx, inlines)
+				if err := saveInlines(ctx, inlines); err != nil {
+					return err
+				}
+				return s.logFormChange(ctx, r, obj, form, inlines, false)
 			})
 			if err != nil {
 				http.Error(w, "failed to update row", http.StatusInternalServerError)
@@ -555,7 +570,14 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 			forbidden(w)
 			return
 		}
-		if err := e.ops.del(r.Context(), pk); err != nil {
+		// Log first, as Django's log_deletions must run before the deletion.
+		err := s.db.Atomic(r.Context(), func(ctx context.Context) error {
+			if err := s.logActions(ctx, r, []any{obj}, Deletion, ""); err != nil {
+				return err
+			}
+			return e.ops.del(ctx, pk)
+		})
+		if err != nil {
 			http.Error(w, "failed to delete row", http.StatusInternalServerError)
 			return
 		}
@@ -641,6 +663,13 @@ func (s *AdminSite) history(w http.ResponseWriter, r *http.Request, e *entry) {
 	ctx["has_view_permission"] = e.hasViewOrChangePermission(s, r, nil)
 	ctx["changelist_url"] = s.changelistURL(e)
 	ctx["change_url"] = s.changeURL(e, pk)
+	ctx["module_name"] = capFirst(plural)
+	ctx["opts_verbose_name"], _ = modelVerboseNames(e.model)
+	ctx["page_var"] = pageVar
+	if err := s.historyContext(r, e, objectID, ctx); err != nil {
+		http.Error(w, "failed to load the history", http.StatusInternalServerError)
+		return
+	}
 	s.render(w, r, "admin/object_history.html", ctx)
 }
 

@@ -1,0 +1,4 @@
+// Package admin holds the migrations of the admin app: makemigrations writes
+// them here, and main.go imports the package so that they register with
+// migrate.
+package admin

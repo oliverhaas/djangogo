@@ -15,3 +15,34 @@
   {% include "admin/app_list.html" with app_list=app_list show_changelinks=true %}
 </div>
 {% endblock %}
+
+{% block sidebar %}{% if log_enabled %}
+<div id="content-related">
+    <div class="module" id="recent-actions-module">
+        <h2>Recent actions</h2>
+        <h3>My actions</h3>
+            {% if not admin_log %}
+            <p>None available</p>
+            {% else %}
+            <ul class="actionlist">
+            {% for entry in admin_log %}
+            <li class="{% if entry.is_addition %}addlink{% endif %}{% if entry.is_change %}changelink{% endif %}{% if entry.is_deletion %}deletelink{% endif %}">
+                <span class="visually-hidden">{% if entry.is_addition %}Added:{% elif entry.is_change %}Changed:{% elif entry.is_deletion %}Deleted:{% endif %}</span>
+                {% if entry.is_deletion or not entry.admin_url %}
+                    {{ entry.object_repr }}
+                {% else %}
+                    <a href="{{ entry.admin_url }}">{{ entry.object_repr }}</a>
+                {% endif %}
+                <br>
+                {% if entry.has_content_type %}
+                    <span class="mini quiet">{{ entry.content_type_name }}</span>
+                {% else %}
+                    <span class="mini quiet">Unknown content</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+            </ul>
+            {% endif %}
+    </div>
+</div>
+{% endif %}{% endblock %}

@@ -107,10 +107,6 @@ func TestChangelistDisallowsPasswordLookups(t *testing.T) {
 	})
 }
 
-// FIXME-PORT: the change messages of the LogEntry rows ("Changed Email
-// address.", "No fields changed.") need the admin log, which the Go admin does
-// not have yet.
-//
 // Ported from Django: tests/auth_tests/test_views.py::ChangelistTests.test_user_change_email
 // Ported from Django: tests/auth_tests/test_views.py::ChangelistTests.test_user_not_change
 func TestUserChangeEmail(t *testing.T) {
@@ -127,15 +123,16 @@ func TestUserChangeEmail(t *testing.T) {
 		djangotest.AssertEqual(t, got.Email, "new_testclient@example.com")
 		// The password is a disabled field of the form, so it keeps its value.
 		djangotest.AssertEqual(t, got.Password, testclient.Password)
+		row := newestLogEntry(t, db)
+		djangotest.AssertEqual(t, row.GetChangeMessage(), "Changed Email address.")
 
 		resp = env.client.Post(changeURL, userData(&got))
 		djangotest.AssertRedirects(t, resp, changelistURL)
+		row = newestLogEntry(t, db)
+		djangotest.AssertEqual(t, row.GetChangeMessage(), "No fields changed.")
 	})
 }
 
-// FIXME-PORT: the LogEntry row with the change message "Changed password."
-// needs the admin log, which the Go admin does not have yet.
-//
 // Ported from Django: tests/auth_tests/test_views.py::ChangelistTests.test_user_with_usable_password_change_password
 func TestUserWithUsablePasswordChangePassword(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
@@ -163,6 +160,8 @@ func TestUserWithUsablePasswordChangePassword(t *testing.T) {
 		resp = env.client.Post(passwordChangeURL, url.Values{"password1": {"password1"}, "password2": {"password1"}})
 		djangotest.AssertRedirects(t, resp, userChangeURL)
 		djangotest.AssertMessages(t, resp, []messages.Message{{Level: messages.LevelSuccess, Message: "Password changed successfully."}})
+		row := newestLogEntry(t, db)
+		djangotest.AssertEqual(t, row.GetChangeMessage(), "Changed password.")
 		env.client.Logout()
 		if !env.client.Login("testclient", "password1") {
 			t.Fatalf("Login with the new password failed")
@@ -194,6 +193,8 @@ func TestUserWithUsablePasswordChangePassword(t *testing.T) {
 		djangotest.AssertMessages(t, resp, []messages.Message{
 			{Level: messages.LevelSuccess, Message: "Password-based authentication was disabled."},
 		})
+		row = newestLogEntry(t, db)
+		djangotest.AssertEqual(t, row.GetChangeMessage(), "Changed password.")
 		env.client.Logout()
 		// Password-based authentication was disabled.
 		if env.client.Login("testclient", "password1") {
@@ -204,9 +205,6 @@ func TestUserWithUsablePasswordChangePassword(t *testing.T) {
 	})
 }
 
-// FIXME-PORT: the LogEntry row with the change message "Changed password."
-// needs the admin log, which the Go admin does not have yet.
-//
 // Ported from Django: tests/auth_tests/test_views.py::ChangelistTests.test_user_with_unusable_password_change_password
 func TestUserWithUnusablePasswordChangePassword(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
@@ -241,6 +239,8 @@ func TestUserWithUnusablePasswordChangePassword(t *testing.T) {
 		resp = env.client.Post(passwordChangeURL, url.Values{"password1": {"password1"}, "password2": {"password1"}})
 		djangotest.AssertRedirects(t, resp, userChangeURL)
 		djangotest.AssertMessages(t, resp, []messages.Message{{Level: messages.LevelSuccess, Message: "Password changed successfully."}})
+		row := newestLogEntry(t, db)
+		djangotest.AssertEqual(t, row.GetChangeMessage(), "Changed password.")
 	})
 }
 
@@ -260,13 +260,10 @@ func assertPasswordLink(t *testing.T, resp *djangotest.Response, label, changeUR
 	djangotest.AssertEqual(t, base.ResolveReference(rel).String(), passwordChangeURL)
 }
 
-// FIXME-PORT: the LogEntry row of the change needs the admin log, which the
-// Go admin does not have yet.
-//
 // Ported from Django: tests/auth_tests/test_views.py::ChangelistTests.test_user_change_different_user_password
 func TestUserChangeDifferentUserPassword(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
-		env, _ := changelistTestEnv(t, db)
+		env, admin := changelistTestEnv(t, db)
 		u, err := orm.Query[auth.User](db).Get(context.Background(), "email", "staffmember@example.com")
 		if err != nil {
 			t.Fatalf("Get staff: %v", err)
@@ -274,10 +271,10 @@ func TestUserChangeDifferentUserPassword(t *testing.T) {
 		resp := env.client.Post(mustReverse(t, env.router, "admin:auth_user_password_change", u.ID),
 			url.Values{"password1": {"password1"}, "password2": {"password1"}})
 		djangotest.AssertRedirects(t, resp, mustReverse(t, env.router, "admin:auth_user_change", u.ID))
-		got := getUser(t, db, u.ID)
-		if !got.CheckPassword("password1") {
-			t.Errorf("the password of staff did not change")
-		}
+		row := newestLogEntry(t, db)
+		djangotest.AssertEqual(t, row.User.PK(), admin.ID)
+		djangotest.AssertEqual(t, *row.ObjectID, fmt.Sprint(u.ID))
+		djangotest.AssertEqual(t, row.GetChangeMessage(), "Changed password.")
 	})
 }
 

@@ -187,6 +187,10 @@ func (s *AdminSite) userChangePassword(w http.ResponseWriter, r *http.Request, e
 				http.Error(w, "failed to change the password", http.StatusInternalServerError)
 				return
 			}
+			if err := s.logPasswordChange(r, user, form); err != nil {
+				http.Error(w, "failed to log the change", http.StatusInternalServerError)
+				return
+			}
 			msg := "Password changed successfully."
 			if !user.HasUsablePassword() {
 				msg = "Password-based authentication was disabled."
@@ -259,4 +263,18 @@ func pyRepr(s string) string {
 	}
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	return quote + strings.ReplaceAll(s, quote, `\`+quote) + quote
+}
+
+// logPasswordChange records the change of the password of user, as Django's
+// user_change_password does with construct_change_message and log_change:
+// the message is "Changed password.".
+func (s *AdminSite) logPasswordChange(r *http.Request, user *auth.User, form *auth.AdminPasswordChangeForm) error {
+	if !s.logEnabled() {
+		return nil
+	}
+	cm, err := constructChangeMessage(r.Context(), s.db, form.Form, form.ChangedData(), nil, false)
+	if err != nil {
+		return err
+	}
+	return s.logActions(r.Context(), r, []any{user}, Change, cm.String())
 }

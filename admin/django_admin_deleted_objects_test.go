@@ -104,6 +104,7 @@ func deletedObjectsModels() []any {
 	return []any{
 		auth.App{},
 		contenttypes.App{},
+		admin.App{},
 		djangotest.App("admin_views",
 			&Villain{}, &Plot{}, &PlotDetails{}, &SecretHideout{},
 			&ActQuestion{}, &ActAnswer{}, &ActBook{},
@@ -218,7 +219,7 @@ func TestDeletedObjectsNesting(t *testing.T) {
 // CyclicTwo, which reference each other. Django adds the constraints after
 // the tables, DEFERRABLE INITIALLY DEFERRED.
 func TestDeletedObjectsCyclic(t *testing.T) {
-	db := djangotest.NewDB(t, auth.App{}, contenttypes.App{}, djangotest.App("admin_views", &CyclicOne{}, &CyclicTwo{}))
+	db := djangotest.NewDB(t, auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_views", &CyclicOne{}, &CyclicTwo{}))
 	superuser := createTestUser(t, db, "super", "secret", true, true)
 	cy1 := mustCreate(t, db, &CyclicOne{Name: "I am recursive"})
 	cy2 := &CyclicTwo{Name: "I am recursive too"}
@@ -552,8 +553,30 @@ func TestDisplayConsecutiveWhitespaceObjectInDeletedObject(t *testing.T) {
 	})
 }
 
-// FIXME-PORT: tests/admin_views/tests.py::AdminConsecutiveWhiteSpaceObjectDisplayTest.test_display_consecutive_whitespace_object_in_recent_action
-// needs LogEntry, which the admin does not have yet.
+// Django passes the change message [] as a list, which log_actions dumps to
+// the JSON "[]"; the Go test passes the JSON text.
+//
+// Ported from Django: tests/admin_views/tests.py::AdminConsecutiveWhiteSpaceObjectDisplayTest.test_display_consecutive_whitespace_object_in_recent_action
+func TestDisplayConsecutiveWhitespaceObjectInRecentAction(t *testing.T) {
+	djangotest.EachDB(t, deletedObjectsModels(), func(t *testing.T, db *orm.DB) {
+		env := newWhitespaceEnv(t, db)
+		for _, action := range []int16{admin.Addition, admin.Deletion} {
+			if _, err := admin.LogActions(context.Background(), db, env.user.ID, []any{env.obj}, action, "[]"); err != nil {
+				t.Fatalf("LogActions: %v", err)
+			}
+		}
+
+		resp := env.client.Get(mustReverse(t, env.router, "admin:index"))
+		djangotest.AssertContains(t, resp, fmt.Sprintf(
+			`<li class="addlink"><span class="visually-hidden">Added:</span>`+
+				`<a href="%s">-</a><br><span class="mini quiet">Cover letter</span></li>`, env.changeLink),
+			djangotest.HTML())
+		djangotest.AssertContains(t, resp,
+			`<li class="deletelink"><span class="visually-hidden">Deleted:</span>-`+
+				`<br><span class="mini quiet">Cover letter</span></li>`,
+			djangotest.HTML())
+	})
+}
 
 // Ported from Django: tests/admin_views/tests.py::AdminConsecutiveWhiteSpaceObjectDisplayTest.test_display_consecutive_whitespace_object_in_messages
 func TestDisplayConsecutiveWhitespaceObjectInMessages(t *testing.T) {

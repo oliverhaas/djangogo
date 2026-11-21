@@ -49,7 +49,7 @@ type Advisor struct {
 
 // adminWidgetsModels returns the model set of the ported admin_widgets tests.
 func adminWidgetsModels() []any {
-	return []any{auth.App{}, contenttypes.App{}, djangotest.App("admin_widgets", &Company{}, &Advisor{})}
+	return []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_widgets", &Company{}, &Advisor{})}
 }
 
 // advisorAddPage renders the add page of Advisor under ma for user.
@@ -136,7 +136,7 @@ func (p Pizza) String() string { return p.Name }
 
 // pizzaModels returns the model set of the ported Pizza and Topping tests.
 func pizzaModels() []any {
-	return []any{auth.App{}, contenttypes.App{}, djangotest.App("admin_views", &Topping{}, &Pizza{})}
+	return []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_views", &Topping{}, &Pizza{})}
 }
 
 // pizzaEnv registers Pizza and Topping with the readonly fields of
@@ -242,8 +242,7 @@ func TestChangeViewLogsManyToManyFieldChanges(t *testing.T) {
 		})
 		djangotest.AssertRedirects(t, resp, mustReverse(t, env.router, "admin:admin_views_pizza_changelist"))
 		djangotest.AssertEqual(t, toppingNames(t, db, pizza), []string{"cheese"})
-		// FIXME-PORT: the change message "Changed Toppings." of the LogEntry
-		// needs the admin log (django_admin_log), which the Go admin lacks.
+		djangotest.AssertEqual(t, newestLogEntry(t, db).GetChangeMessage(), "Changed Toppings.")
 	})
 }
 

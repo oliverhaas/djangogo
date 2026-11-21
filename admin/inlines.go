@@ -237,6 +237,16 @@ type inlineSet interface {
 	instances() []any
 	// save saves the rows of the forms.
 	save(ctx context.Context) error
+	// changes returns the rows that the last save added, changed and
+	// deleted.
+	changes() (added []any, changed []changedRow, deleted []any)
+}
+
+// changedRow is a row that an inline save changed, with the names of the
+// changed fields.
+type changedRow struct {
+	obj    any
+	fields []string
 }
 
 // typedInlineSet is the inlineSet of an InlineFormSet of T in P.
@@ -264,6 +274,20 @@ func (t *typedInlineSet[P, T]) instances() []any {
 func (t *typedInlineSet[P, T]) save(ctx context.Context) error {
 	_, err := t.fs.Save(ctx)
 	return err
+}
+
+// changes returns the rows that the last save added, changed and deleted.
+func (t *typedInlineSet[P, T]) changes() (added []any, changed []changedRow, deleted []any) {
+	for _, o := range t.fs.NewObjects() {
+		added = append(added, o)
+	}
+	for _, c := range t.fs.ChangedObjects() {
+		changed = append(changed, changedRow{obj: c.Object, fields: c.Fields})
+	}
+	for _, o := range t.fs.DeletedObjects() {
+		deleted = append(deleted, o)
+	}
+	return added, changed, deleted
 }
 
 // hasAdd reports whether r may add rows of the inline, Django's

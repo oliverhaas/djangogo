@@ -369,6 +369,19 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   protect the object, or the user lacks the delete permission of a model that
   the deletion reaches, the page shows "Cannot delete" with those objects or
   models.
+- Admin: the admin keeps a history of the changes made through it, Django's
+  `LogEntry` in the `django_admin_log` table. To use it in an existing
+  project, add `admin.App{}` to the installed apps, then run `makemigrations`
+  and `migrate`. A project from `startproject` installs it. The add, change,
+  delete, `delete_selected` and password pages log each change with Django's
+  change message ("Added.", "Changed Title.", "Changed password."). The
+  history page of an object lists its entries, 100 per page, and the index
+  shows the recent actions of the user. `AdminSite.GetLogEntries` filters the
+  recent actions, Django's `get_log_entries`. `admin.LogActions` logs entries
+  of your own, and `LogEntry.GetChangeMessage`, `GetEditedObject` and
+  `GetAdminURL` read them.
+- ORM: `orm.GetByPK` loads an instance of a registered model by its primary
+  key when only the model metadata is known.
 
 ### Changed
 

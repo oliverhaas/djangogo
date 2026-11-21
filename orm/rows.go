@@ -127,3 +127,45 @@ func LabeledRowsOrdered(ctx context.Context, db *DB, m *Model, ordering []string
 	_ = rows.Close()
 	return labelRows(ctx, db, m, objs)
 }
+
+// GetByPK returns the row of model m whose primary key is pk, as a pointer to
+// a new instance of m, or ErrDoesNotExist. It is Query[T](db).Get(ctx, "pk",
+// pk) for code that knows the model only at run time, such as Django's
+// ContentType.get_object_for_this_type.
+func GetByPK(ctx context.Context, db *DB, m *Model, pk any) (any, error) {
+	pkf := m.PrimaryKey()
+	if pkf == nil {
+		return nil, fmt.Errorf("orm: model %s has no primary key", m.Name())
+	}
+	w := newSQLWriter(db.dialect)
+	w.write("SELECT ")
+	for i, f := range m.fields {
+		if i > 0 {
+			w.write(", ")
+		}
+		w.ident(f.Column)
+	}
+	w.write(" FROM ")
+	w.ident(m.Table())
+	w.write(" WHERE ")
+	w.ident(pkf.Column)
+	w.write(" = ")
+	w.param(pk)
+	rows, err := db.conn(ctx).QueryContext(ctx, w.String(), w.args...)
+	if err != nil {
+		return nil, fmt.Errorf("orm: get %s: %w", m.Name(), err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("orm: get %s: %w", m.Name(), err)
+		}
+		return nil, fmt.Errorf("%s: %w", m.Name(), ErrDoesNotExist)
+	}
+	plan := &rowPlan{model: m, ncols: len(m.fields)}
+	elem, _, err := plan.scan(rows)
+	if err != nil {
+		return nil, fmt.Errorf("orm: get %s: %w", m.Name(), err)
+	}
+	return elem.Addr().Interface(), nil
+}

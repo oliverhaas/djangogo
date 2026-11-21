@@ -87,6 +87,7 @@ func adminActionModels() []any {
 	return []any{
 		auth.App{},
 		contenttypes.App{},
+		admin.App{},
 		djangotest.App("admin_views",
 			&ActSubscriber{},
 			&ActSubscriptionNote{},
