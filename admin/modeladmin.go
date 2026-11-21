@@ -297,6 +297,15 @@ type FormfieldOverride struct {
 	Widget forms.Widget
 	// EmptyLabel is the label of the empty option of a foreign key.
 	EmptyLabel *string
+	// FormClass builds the form field in place of the class that the model
+	// field implies, Django's form_class, such as
+	// forms.Class(forms.NewEmailField). It receives the options of the
+	// model field and Options. A relation keeps its choice field.
+	FormClass func(opts ...forms.FieldOption) forms.Field
+	// Options are the other arguments of the form field, such as
+	// forms.Strip(false) or forms.MaxLength(50). They win over the options
+	// that the model field implies.
+	Options []forms.FieldOption
 }
 
 // DeletedObjects holds what the delete page and the delete_selected

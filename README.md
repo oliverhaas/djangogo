@@ -201,9 +201,8 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
 - **Admin:** a registered model needs an integer primary key. An
   inline cannot edit the auto-created through model of a many-to-many field,
   there are no generic inlines, and an inline has no custom formset class.
-  `FormfieldOverrides` sets only the widget and the empty label of a model
-  field class, not the other arguments of `formfield_overrides`, such as
-  `form_class`. The scripts and
+  The `FormClass` of `FormfieldOverrides` does not apply to a relation, which
+  keeps its choice field. The scripts and
   pages are in English only. The date
   hierarchy reads a datetime in UTC. A search field with `@` uses
   `icontains`, not full-text search. A template option such as

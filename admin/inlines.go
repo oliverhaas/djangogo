@@ -548,7 +548,7 @@ func (s *AdminSite) buildInlineFormSet(r *http.Request, ifs *inlineFormSet, pare
 	opts := slices.Concat([]forms.ModelFormOption{
 		forms.WithFields(fields...),
 		forms.WithFormFieldCallback(ie.formfieldCallback(r, built)),
-	}, s.relationWidgets(r, ie), in.cfg.FormOptions, []forms.ModelFormOption{excludeOption(ie.model, ifs.exclude, own)})
+	}, s.relationWidgets(r, ie), ie.overrideOptions(), in.cfg.FormOptions, []forms.ModelFormOption{excludeOption(ie.model, ifs.exclude, own)})
 	ordering := make([]string, len(in.cfg.Ordering))
 	for i, o := range in.cfg.Ordering {
 		ordering[i] = normalizeFieldPath(ie.model, o)

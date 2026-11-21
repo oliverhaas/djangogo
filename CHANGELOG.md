@@ -521,6 +521,16 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   values do not replace the permission flags and the buttons, and a false
   `show_save`, `show_save_and_continue`, `show_save_and_add_another` or
   `show_delete` hides that button, as Django's `submit_row` tag does.
+- Admin: `FormfieldOverride.Options` and `FormfieldOverride.FormClass` give
+  the model fields of a class the other arguments of Django's
+  `formfield_overrides`, such as `{admin.CharField: {Options:
+  []forms.FieldOption{forms.Strip(false)}}}` for `strip=False` and
+  `FormClass: forms.Class(forms.NewEmailField)` for `form_class`. A
+  `FormClass` on `DateTimeField` replaces the split date and time field.
+- forms: `WithFieldOptions` adds field options to the form field of a model
+  field, the arguments of Django's `Field.formfield()`, and `forms.Class`
+  turns a field constructor such as `forms.NewEmailField` into a
+  `func(...forms.FieldOption) forms.Field`.
 
 ### Changed
 

@@ -30,7 +30,9 @@ func (e *entry) formfieldCallback(r *http.Request, built map[string]bool) func(m
 // autocomplete field or a raw-id field or FormfieldOverrides gives it a
 // widget. A foreign key takes the empty label of FormfieldOverrides. Any
 // other field takes the widget of formfieldOverride, and a date and time
-// field becomes a SplitDateTimeField. relationWidgets sets the other widgets
+// field becomes a SplitDateTimeField unless its entry has a FormClass. The
+// FormClass and the Options of an entry apply through overrideOptions,
+// before the field is built. relationWidgets sets the other widgets
 // of the relations. ModelAdmin.FormOptions apply after it, as the Meta
 // options of a Django ModelAdmin.form win over the defaults.
 func (e *entry) formfieldForDBField(mf *orm.Field, f forms.Field, autocomplete []string) forms.Field {
@@ -51,12 +53,35 @@ func (e *entry) formfieldForDBField(mf *orm.Field, f forms.Field, autocomplete [
 		if field, ok := f.(*forms.ModelChoiceField); ok && o.EmptyLabel != nil {
 			field.EmptyLabel = o.EmptyLabel
 		}
-	case class == DateTimeField:
+	case class == DateTimeField && o.FormClass == nil:
 		return splitDateTimeField(f, o.Widget)
 	case o.Widget != nil:
 		f.Base().Widget = o.Widget
 	}
 	return f
+}
+
+// overrideOptions returns the form options that give the model fields of e
+// the FormClass and the Options of their FormfieldOverrides entry, as
+// Django's formfield_for_dbfield passes the entry to formfield(). A field
+// with choices takes none, as in Django, and a relation keeps its choice
+// field. Pass them before the form options of the admin, which win, as the
+// Meta options of a Django ModelAdmin.form do.
+func (e *entry) overrideOptions() []forms.ModelFormOption {
+	var out []forms.ModelFormOption
+	for _, mf := range slices.Concat(e.model.Fields(), e.model.ManyToMany()) {
+		if mf.HasChoices {
+			continue
+		}
+		_, o := e.formfieldOverride(mf)
+		if len(o.Options) > 0 {
+			out = append(out, forms.WithFieldOptions(mf.Attr, o.Options...))
+		}
+		if o.FormClass != nil && mf.Rel == nil {
+			out = append(out, forms.WithFieldClass(mf.Attr, o.FormClass))
+		}
+	}
+	return out
 }
 
 // formfieldOverride returns the class of mf whose FormfieldOverrides entry

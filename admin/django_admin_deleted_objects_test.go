@@ -456,13 +456,8 @@ func newWhitespaceEnv(t *testing.T, db *orm.DB) *whitespaceEnv {
 		admin.Register[ActAnswer](site, admin.ModelAdmin{})
 		// Django's CoverLetterAdmin: formfield_overrides with strip=False.
 		admin.Register[CoverLetter](site, admin.ModelAdmin{
-			FormOptions: []forms.ModelFormOption{
-				forms.WithFormFieldCallback(func(_ *orm.Field, f forms.Field) forms.Field {
-					if cf, ok := f.(*forms.CharField); ok {
-						cf.Strip = false
-					}
-					return f
-				}),
+			FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+				admin.CharField: {Options: []forms.FieldOption{forms.Strip(false)}},
 			},
 		})
 	})

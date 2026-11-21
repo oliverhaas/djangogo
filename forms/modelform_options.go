@@ -43,6 +43,7 @@ type modelFormConfig struct {
 	formFields    map[string]Field
 	factories     map[string]fieldFactory
 	classes       map[string]fieldClass
+	extraOptions  map[string][]FieldOption
 	callback      func(mf *orm.Field, f Field) Field
 	cleaners      []func(*Form) error
 	fieldCleaners map[string]func(*Form, any) (any, error)
@@ -151,7 +152,17 @@ func WithFormField(field string, f Field) ModelFormOption {
 // as in Django. A relation keeps its choice field, where Django uses class:
 // use WithQuerySet or WithFormField for it.
 func WithFieldClass[F Field](field string, class func(opts ...FieldOption) F) ModelFormOption {
-	return func(c *modelFormConfig) { c.classes[field] = ctor(class) }
+	return func(c *modelFormConfig) { c.classes[field] = Class(class) }
+}
+
+// WithFieldOptions adds options to the form field of a model field, the
+// keyword arguments that Django's formfield_callback passes to
+// Field.formfield, such as forms.Strip(false). They apply after the options
+// that the model field implies, so they win, and before WithLabel,
+// WithWidget and the other Meta options. Name the field the same way in
+// every WithFieldOptions: the options of one name add up.
+func WithFieldOptions(field string, opts ...FieldOption) ModelFormOption {
+	return func(c *modelFormConfig) { c.extraOptions[field] = append(c.extraOptions[field], opts...) }
 }
 
 // WithQuerySet restricts the options of a foreign key or many-to-many field
@@ -215,6 +226,7 @@ func newModelFormConfig(opts []ModelFormOption) *modelFormConfig {
 		formFields:    map[string]Field{},
 		factories:     map[string]fieldFactory{},
 		classes:       map[string]fieldClass{},
+		extraOptions:  map[string][]FieldOption{},
 		fieldCleaners: map[string]func(*Form, any) (any, error){},
 	}
 	for _, opt := range opts {
@@ -265,6 +277,7 @@ func (c *modelFormConfig) normalize(m *orm.Model) {
 	c.formFields = renamed(m, c.formFields)
 	c.factories = renamed(m, c.factories)
 	c.classes = renamed(m, c.classes)
+	c.extraOptions = renamed(m, c.extraOptions)
 	c.fieldCleaners = renamed(m, c.fieldCleaners)
 }
 

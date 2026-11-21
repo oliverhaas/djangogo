@@ -398,3 +398,119 @@ func TestAdminUUIDWidgetAttrs(t *testing.T) {
 		`<input value="550e8400-e29b-41d4-a716-446655440000" type="text" `+
 			`class="myUUIDInput" name="test">`)
 }
+
+// No Django test exists: Django's formfield_overrides passes any argument of
+// the model field's formfield(), such as the strip=False of CoverLetterAdmin
+// and MainPrepopulatedAdmin in tests/admin_views/admin.py, or a form_class.
+// FormfieldOverride.Options and FormClass are the Go form of those arguments.
+func TestFormfieldOverridesOptionsAndFormClass(t *testing.T) {
+	djangotest.EachDB(t, widgetRelatedModels(), func(t *testing.T, db *orm.DB) {
+		super := createTestUser(t, db, "super", "secret", true, true)
+		// addPage returns the add page of model under ma, with the other
+		// models under a default admin.
+		addPage := func(t *testing.T, model string, ma admin.ModelAdmin) *djangotest.Response {
+			t.Helper()
+			admins := map[string]admin.ModelAdmin{model: ma}
+			env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+				admin.Register[WidgetBand](site, admins["widgetband"])
+				admin.Register[WidgetMember](site, admins["widgetmember"])
+				admin.Register[WidgetEvent](site, admins["widgetevent"])
+			})
+			env.client.ForceLogin(super)
+			resp := env.client.Get(mustReverse(t, env.router, "admin:admin_widgets_"+model+"_add"))
+			djangotest.AssertStatus(t, resp, 200)
+			return resp
+		}
+
+		// The arguments win over those that the model field implies.
+		t.Run("options", func(t *testing.T) {
+			resp := addPage(t, "widgetband", admin.ModelAdmin{
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.CharField: {Options: []forms.FieldOption{forms.Strip(false), forms.MaxLength(50)}},
+				},
+			})
+			f, ok := formField(t, resp, "name").(*forms.CharField)
+			if !ok {
+				t.Fatalf("name = %T, want *forms.CharField", formField(t, resp, "name"))
+			}
+			djangotest.AssertEqual(t, f.Strip, false)
+			djangotest.AssertContains(t, resp,
+				`<input type="text" name="name" class="vTextField" maxlength="50" required id="id_name">`,
+				djangotest.HTML())
+		})
+
+		// The admin's widget of the class stays, as the entry merges over
+		// Django's FORMFIELD_FOR_DBFIELD_DEFAULTS.
+		t.Run("form_class", func(t *testing.T) {
+			resp := addPage(t, "widgetband", admin.ModelAdmin{
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.CharField: {FormClass: forms.Class(forms.NewEmailField)},
+				},
+			})
+			if f := formField(t, resp, "name"); !isEmailField(f) {
+				t.Errorf("name = %T, want *forms.EmailField", f)
+			}
+			djangotest.AssertContains(t, resp,
+				`<input type="text" name="name" class="vTextField" maxlength="100" required id="id_name">`,
+				djangotest.HTML())
+		})
+
+		// A field class of FormOptions wins, as Meta.field_classes passes a
+		// form_class that wins over formfield_overrides.
+		t.Run("form_options_win", func(t *testing.T) {
+			resp := addPage(t, "widgetband", admin.ModelAdmin{
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.CharField: {FormClass: forms.Class(forms.NewEmailField)},
+				},
+				FormOptions: []forms.ModelFormOption{forms.WithFieldClass("name", forms.NewSlugField)},
+			})
+			if f, ok := formField(t, resp, "name").(*forms.SlugField); !ok {
+				t.Errorf("name = %T, want *forms.SlugField", f)
+			}
+			if f := formField(t, resp, "style"); !isEmailField(f) {
+				t.Errorf("style = %T, want *forms.EmailField", f)
+			}
+		})
+
+		// A form class replaces the SplitDateTimeField of a date and time
+		// field.
+		t.Run("datetime_form_class", func(t *testing.T) {
+			resp := addPage(t, "widgetmember", admin.ModelAdmin{
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.DateTimeField: {FormClass: forms.Class(forms.NewDateTimeField), Widget: forms.DateTimeInput{}},
+				},
+			})
+			if f, ok := formField(t, resp, "birthdate").(*forms.DateTimeField); !ok {
+				t.Errorf("birthdate = %T, want *forms.DateTimeField", f)
+			}
+		})
+
+		// A field with choices takes no arguments, as Django's
+		// formfield_for_dbfield returns formfield_for_choice_field first.
+		t.Run("choices", func(t *testing.T) {
+			resp := addPage(t, "widgetmember", admin.ModelAdmin{
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.CharField: {Options: []forms.FieldOption{forms.HelpText("Some help")}},
+				},
+			})
+			djangotest.AssertEqual(t, formField(t, resp, "gender").Base().HelpText, "")
+			djangotest.AssertEqual(t, formField(t, resp, "name").Base().HelpText, "Some help")
+		})
+
+		// A relation takes the arguments of its class.
+		t.Run("foreign_key", func(t *testing.T) {
+			resp := addPage(t, "widgetevent", admin.ModelAdmin{
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.ForeignKey: {Options: []forms.FieldOption{forms.HelpText("Pick a band")}},
+				},
+			})
+			djangotest.AssertEqual(t, formField(t, resp, "main_band").Base().HelpText, "Pick a band")
+		})
+	})
+}
+
+// isEmailField reports whether f is a *forms.EmailField.
+func isEmailField(f forms.Field) bool {
+	_, ok := f.(*forms.EmailField)
+	return ok
+}

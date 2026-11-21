@@ -35,7 +35,7 @@ func (s *AdminSite) changelistFormSet(r *http.Request, e *entry, editable []stri
 	opts := slices.Concat([]forms.ModelFormOption{
 		forms.WithFields(fields...),
 		forms.WithFormFieldCallback(e.formfieldCallback(r, built)),
-	}, s.relationWidgets(r, e))
+	}, s.relationWidgets(r, e), e.overrideOptions())
 	set := e.ops.changelistSet(opts, rows, spec)
 	fs := set.base()
 	fs.Prefix = listEditablePrefix

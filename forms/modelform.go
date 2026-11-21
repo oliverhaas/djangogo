@@ -74,7 +74,7 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[
 		case isAutoPK(mf):
 			continue
 		default:
-			field = formFieldFor(db, mf, cfg.factories[name], cfg.classes[name])
+			field = formFieldFor(db, mf, cfg.factories[name], cfg.classes[name], cfg.extraOptions[name])
 			if cfg.callback != nil && field != nil {
 				field = cfg.callback(mf, field)
 			}

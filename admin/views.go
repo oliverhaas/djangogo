@@ -149,7 +149,7 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj, instance any, can
 	opts := slices.Concat([]forms.ModelFormOption{
 		forms.WithFields(fields...),
 		forms.WithFormFieldCallback(e.formfieldCallback(r, built)),
-	}, s.relationWidgets(r, e), adminOpts, []forms.ModelFormOption{excludeOption(e.model, exclude, own)})
+	}, s.relationWidgets(r, e), e.overrideOptions(), adminOpts, []forms.ModelFormOption{excludeOption(e.model, exclude, own)})
 	form := forms.FromInstance(s.db, e.model, instance, opts...)
 	syncAutocompleteRequired(form)
 	s.wrapRelatedWidgets(r, e, form, built)

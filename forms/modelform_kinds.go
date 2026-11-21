@@ -27,8 +27,10 @@ var (
 )
 
 // formFieldFor returns the form field of a model field, Django's
-// Field.formfield, or nil for a kind that has none (such as KindAuto).
-func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory, class fieldClass) Field {
+// Field.formfield, or nil for a kind that has none (such as KindAuto). extra
+// are the keyword arguments of formfield: they apply after the options that
+// mf implies, so they win.
+func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory, class fieldClass, extra []FieldOption) Field {
 	opts := []FieldOption{Required(!mf.Blank), Label(fieldLabel(mf)), HelpText(mf.HelpText)}
 	if mf.HasDefault {
 		if mf.Default == orm.DefaultUUID4 {
@@ -38,6 +40,7 @@ func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory, class fieldCl
 		}
 	}
 	if mf.Rel != nil {
+		opts = append(opts, extra...)
 		var field Field
 		if factory != nil {
 			field = factory(db, mf, opts)
@@ -63,9 +66,10 @@ func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory, class fieldCl
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return NewTypedChoiceField(opts...)
+		return NewTypedChoiceField(append(opts, extra...)...)
 	}
 	opts, def := kindField(mf, opts)
+	opts = append(opts, extra...)
 	switch {
 	case def == nil:
 		return nil
@@ -89,13 +93,13 @@ func kindField(mf *orm.Field, opts []FieldOption) ([]FieldOption, fieldClass) {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return opts, ctor(NewCharField)
+		return opts, Class(NewCharField)
 	case orm.KindText:
 		opts = append(opts, UseWidget(Textarea{}))
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
 		}
-		return opts, ctor(NewCharField)
+		return opts, Class(NewCharField)
 	case orm.KindSlug:
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
@@ -106,7 +110,7 @@ func kindField(mf *orm.Field, opts []FieldOption) ([]FieldOption, fieldClass) {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return opts, ctor(NewSlugField)
+		return opts, Class(NewSlugField)
 	case orm.KindEmail:
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
@@ -114,7 +118,7 @@ func kindField(mf *orm.Field, opts []FieldOption) ([]FieldOption, fieldClass) {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return opts, ctor(NewEmailField)
+		return opts, Class(NewEmailField)
 	case orm.KindURL:
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
@@ -122,7 +126,7 @@ func kindField(mf *orm.Field, opts []FieldOption) ([]FieldOption, fieldClass) {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return opts, ctor(NewURLField)
+		return opts, Class(NewURLField)
 	case orm.KindGenericIPAddress:
 		if mf.Protocol != "" {
 			opts = append(opts, Protocol(mf.Protocol))
@@ -133,7 +137,7 @@ func kindField(mf *orm.Field, opts []FieldOption) ([]FieldOption, fieldClass) {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return opts, ctor(NewGenericIPAddressField)
+		return opts, Class(NewGenericIPAddressField)
 	case orm.KindInt, orm.KindSmallInt:
 		if minVal, maxVal, ok := mf.IntRange(); ok {
 			// Match Django's IntegerField/SmallIntegerField widget (no min/max
@@ -141,49 +145,49 @@ func kindField(mf *orm.Field, opts []FieldOption) ([]FieldOption, fieldClass) {
 			// PopulateStruct writes to int16/int32.
 			opts = append(opts, Validators(MinValueValidator(minVal), MaxValueValidator(maxVal)))
 		}
-		return opts, ctor(NewIntegerField)
+		return opts, Class(NewIntegerField)
 	case orm.KindBigInt:
 		if minVal, maxVal, ok := mf.IntRange(); ok {
 			opts = append(opts, MinValue(minVal), MaxValue(maxVal))
 		}
-		return opts, ctor(NewIntegerField)
+		return opts, Class(NewIntegerField)
 	case orm.KindPositiveSmallInt, orm.KindPositiveInt:
 		if _, maxVal, ok := mf.IntRange(); ok {
 			opts = append(opts, MinValue(int64(0)), Validators(MaxValueValidator(maxVal)))
 		}
-		return opts, ctor(NewIntegerField)
+		return opts, Class(NewIntegerField)
 	case orm.KindPositiveBigInt:
 		if _, maxVal, ok := mf.IntRange(); ok {
 			opts = append(opts, MinValue(int64(0)), MaxValue(maxVal))
 		}
-		return opts, ctor(NewIntegerField)
+		return opts, Class(NewIntegerField)
 	case orm.KindFloat:
-		return opts, ctor(NewFloatField)
+		return opts, Class(NewFloatField)
 	case orm.KindDecimal:
 		if mf.MaxDigits > 0 {
 			opts = append(opts, MaxDigits(mf.MaxDigits), DecimalPlaces(mf.DecimalPlaces))
 		} else if mf.DecimalPlaces > 0 {
 			opts = append(opts, DecimalPlaces(mf.DecimalPlaces))
 		}
-		return opts, ctor(NewDecimalField)
+		return opts, Class(NewDecimalField)
 	case orm.KindBool:
 		// An unchecked box is a valid "false", so the field is never required.
 		if mf.Null {
-			return append(opts, Required(false)), ctor(NewNullBooleanField)
+			return append(opts, Required(false)), Class(NewNullBooleanField)
 		}
-		return append(opts, Required(false)), ctor(NewBooleanField)
+		return append(opts, Required(false)), Class(NewBooleanField)
 	case orm.KindDateTime:
-		return opts, ctor(NewDateTimeField)
+		return opts, Class(NewDateTimeField)
 	case orm.KindDate:
-		return opts, ctor(NewDateField)
+		return opts, Class(NewDateField)
 	case orm.KindTime:
-		return opts, ctor(NewTimeField)
+		return opts, Class(NewTimeField)
 	case orm.KindDuration:
-		return opts, ctor(NewDurationField)
+		return opts, Class(NewDurationField)
 	case orm.KindUUID:
-		return opts, ctor(NewUUIDField)
+		return opts, Class(NewUUIDField)
 	case orm.KindJSON:
-		return opts, ctor(NewJSONField)
+		return opts, Class(NewJSONField)
 	case orm.KindBinary:
 		if !mf.Editable {
 			return nil, nil
@@ -191,14 +195,16 @@ func kindField(mf *orm.Field, opts []FieldOption) ([]FieldOption, fieldClass) {
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
 		}
-		return opts, ctor(NewCharField)
+		return opts, Class(NewCharField)
 	default:
 		return nil, nil
 	}
 }
 
-// ctor returns fn as a fieldClass.
-func ctor[F Field](fn func(opts ...FieldOption) F) fieldClass {
+// Class returns the constructor of a form field class as a constructor of a
+// Field, for an option that takes any class, such as the FormClass of an
+// admin FormfieldOverride: Class(NewEmailField).
+func Class[F Field](fn func(opts ...FieldOption) F) func(opts ...FieldOption) Field {
 	return func(opts ...FieldOption) Field { return fn(opts...) }
 }
 
