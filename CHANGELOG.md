@@ -396,6 +396,34 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   now, turns this off when set to false. The change form posts to
   `?_changelist_filters=...` with filters and has no `action` attribute
   without them.
+- Admin: a project can override the admin's templates. Until now the admin
+  read only its own templates, so an `admin/base_site.html` in a template
+  folder of the project had no effect. A file of the same name in
+  `Settings.Templates.Dirs` now replaces the admin's, and the template trees
+  of the apps are searched after the admin's, as in a Django project with the
+  admin first in `INSTALLED_APPS`. As in Django, the change form,
+  changelist, delete, history and popup pages and their parts
+  (`submit_line.html`, `change_form_object_tools.html`,
+  `change_list_object_tools.html`, `search_form.html`, `actions.html`,
+  `change_list_results.html`, `pagination.html`) are looked up as
+  `admin/<app>/<model>/<name>`, then `admin/<app>/<name>`, then
+  `admin/<name>`, so one model's pages can differ. `ModelAdmin` takes
+  Django's template options `ChangeFormTemplate`, `AddFormTemplate`,
+  `ChangeListTemplate`, `DeleteConfirmationTemplate`,
+  `DeleteSelectedConfirmationTemplate`, `ObjectHistoryTemplate` and
+  `PopupResponseTemplate`, and `UserAdmin` sets `AddFormTemplate` to
+  `admin/auth/user/add_form.html`. `AdminSite` takes `IndexTemplate`,
+  `AppIndexTemplate`, `LoginTemplate`, `LogoutTemplate`,
+  `PasswordChangeTemplate` and `PasswordChangeDoneTemplate`. For a site
+  built with `NewAdminSite`, `AdminSite.SetTemplateSources` sets the lookup
+  and `admin.Templates()` returns the admin's own templates. The change form
+  has Django's `field_sets`, `after_field_sets`, `inline_field_sets` and
+  `after_related_objects` blocks and loads `admin/js/change_form.js`, and
+  the changelist has the `filters`, `search`, `result_list` and `pagination`
+  blocks. The change form, changelist and delete pages keep the `bodyclass`
+  of `admin/base_site.html`. A block that Django names with hyphens has
+  underscores here: `object_tools`, `object_tools_items`, `submit_row`,
+  `actions_form`, `actions_submit` and `actions_counter`.
 
 ### Changed
 

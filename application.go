@@ -458,6 +458,7 @@ func (a *Application) adminSite(appConfigs []apps.Config) (*admin.AdminSite, err
 	}
 	site.Apps = a.Apps
 	site.Debug = a.Settings.Debug
+	site.SetTemplateSources(a.adminTemplateSources()...)
 	// Django's auth app registers its models with the admin; an app can
 	// register them again to replace these admins.
 	if a.Apps.IsInstalled(auth.App{}.Name()) {
@@ -468,6 +469,27 @@ func (a *Application) adminSite(appConfigs []apps.Config) (*admin.AdminSite, err
 		ar.RegisterAdmin(site)
 	}
 	return site, nil
+}
+
+// adminTemplateSources returns where the admin looks its templates up: the
+// template directories of the settings, which override the admin's own
+// templates, then the admin's own, then the template trees of the apps, as in
+// a Django project that lists the admin first in INSTALLED_APPS. The auth app
+// ships pages of the same names as the admin's, and they must not replace
+// them.
+func (a *Application) adminTemplateSources() []templates.Source {
+	t := a.Settings.Templates
+	sources := make([]templates.Source, 0, len(t.Dirs)+1)
+	for _, dir := range t.Dirs {
+		sources = append(sources, templates.DirSource(dir))
+	}
+	sources = append(sources, templates.FSSource("admin", admin.Templates()))
+	if t.AppDirs {
+		for _, tree := range a.Apps.TemplateFS() {
+			sources = append(sources, templates.FSSource(tree.App, tree.FS))
+		}
+	}
+	return sources
 }
 
 // adminRegistrar is an app that registers models with the admin.

@@ -222,6 +222,36 @@ func TestAdminStaticFiles(t *testing.T) {
 	}
 }
 
+// No Django test exists: a project overrides an admin template with a file of
+// the same name in a folder of TEMPLATES["DIRS"], which Django searches
+// before the template folders of the installed apps.
+func TestAdminTemplateOverrideFromProjectDirs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "admin"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	baseSite := `{% extends "admin/base.html" %}{% block branding %}<div id="site-name">Project branding</div>{% endblock %}`
+	if err := os.WriteFile(filepath.Join(dir, "admin", "base_site.html"), []byte(baseSite), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := newWiredApp(t, conf.Settings{
+		Database:  memoryDB(t),
+		Templates: conf.Templates{Dirs: []string{dir}, AppDirs: true},
+	}, wiredApp{}, auth.App{})
+	rec := request(app, http.MethodGet, "/admin/login/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /admin/login/ status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `<div id="site-name">Project branding</div>`) {
+		t.Errorf("the login page does not use the project's admin/base_site.html:\n%s", body)
+	}
+	// The rest of the page still comes from the admin's templates.
+	if !strings.Contains(body, `id="login-form"`) {
+		t.Errorf("the login page lost the admin's login form:\n%s", body)
+	}
+}
+
 func TestNewWithoutURLProviderUsesLivenessHandler(t *testing.T) {
 	// testApp provides models but neither URLs nor an admin registration, so the
 	// handler falls back to the liveness stub.

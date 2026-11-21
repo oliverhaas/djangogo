@@ -21,8 +21,6 @@ type adminHooks struct {
 	// addFieldsets are the fieldsets of the add page when GetFieldsets is
 	// not set (UserAdmin.add_fieldsets).
 	addFieldsets []Fieldset
-	// addFormTemplate is the template of the add page (add_form_template).
-	addFormTemplate string
 	// allowAdd answers a request of the add page that must not go on and
 	// reports whether the view goes on (UserAdmin._add_view).
 	allowAdd func(s *AdminSite, w http.ResponseWriter, r *http.Request, e *entry) bool
@@ -83,10 +81,10 @@ func UserAdmin(db *orm.DB) ModelAdmin {
 		SearchFields:     []string{"username", "first_name", "last_name", "email"},
 		Ordering:         []string{"username"},
 		FilterHorizontal: []string{"groups", "user_permissions"},
+		AddFormTemplate:  "admin/auth/user/add_form.html",
 		hooks: &adminHooks{
 			routes:           userRoutes,
 			addFieldsets:     userAddFieldsets,
-			addFormTemplate:  "admin/auth/user/add_form.html",
 			allowAdd:         allowUserAdd,
 			beforeCreate:     prepareNewUser,
 			continueAfterAdd: true,

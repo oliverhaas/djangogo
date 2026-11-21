@@ -211,7 +211,10 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   checks cover `AutocompleteFields`, `RawIDFields`, `Fields`, `Fieldsets`,
   `ExcludeFields`, `FilterHorizontal`, `FilterVertical`, `ReadonlyFields`,
   `Inlines` and `ListDisplay` only. A search field with `@` uses
-  `icontains`, not full-text search.
+  `icontains`, not full-text search. The views take no `extra_context`, and
+  a template option such as `ChangeFormTemplate` names one template, not a
+  list. Blocks that Django names with hyphens, such as `object-tools-items`,
+  have underscores.
 - **Auth:** no custom user model. The login, logout and password change views
   are mounted by hand: there is no counterpart of `django.contrib.auth.urls`. No
   `LoginRequiredMiddleware`. In templates, `perms` does not grant an

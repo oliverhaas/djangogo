@@ -1,0 +1,22 @@
+{% if has_search %}
+<div id="toolbar">
+  <h2 id="changelist-search-form" class="visually-hidden">Search {{ verbose_name_plural_raw }}</h2>
+  <form id="changelist-search" method="get" role="search" aria-labelledby="changelist-search-form">
+    <div>
+      <label for="searchbar">Search</label>
+      <input type="text" size="40" name="{{ search_var }}" value="{{ search_query }}" id="searchbar"{% if search_help_text %} aria-describedby="searchbar_helptext"{% endif %}>
+      <input type="submit" value="Search">
+      {% if show_result_count %}
+      <span class="small quiet">{{ result_count }} {% if result_count == 1 %}result{% else %}results{% endif %} (<a href="{{ reset_search_url }}">{% if show_full_result_count %}{{ full_result_count }} total{% else %}Show all{% endif %}</a>)</span>
+      {% endif %}
+      {% for hp in search_hidden_params %}
+      <input type="hidden" name="{{ hp.name }}" value="{{ hp.value }}">
+      {% endfor %}
+    </div>
+    {% if search_help_text %}
+    <br class="clear">
+    <div class="help" id="searchbar_helptext">{{ search_help_text }}</div>
+    {% endif %}
+  </form>
+</div>
+{% endif %}

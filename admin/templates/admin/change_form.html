@@ -12,7 +12,7 @@
 {% endblock %}
 
 {% block coltype %}colM{% endblock %}
-{% block bodyclass %}app-{{ app_label }} model-{{ model_name }} change-form{% endblock %}
+{% block bodyclass %}{{ block.super }} app-{{ app_label }} model-{{ model_name }} change-form{% endblock %}
 {% block breadcrumbs %}
 <ol class="breadcrumbs">
   <li><a href="{% url 'admin:index' %}">Home</a></li>
@@ -25,9 +25,7 @@
 {% if change and not is_popup %}
   <ul class="object-tools">
     {% block object_tools_items %}
-    <li>
-        <a href="{{ history_url }}" class="historylink">History</a>
-    </li>
+      {% include includes.change_form_object_tools %}
     {% endblock %}
   </ul>
 {% endif %}
@@ -40,20 +38,29 @@
       {% if is_popup %}<input type="hidden" name="{{ is_popup_var }}" value="1">{% endif %}
       {% if to_field %}<input type="hidden" name="{{ to_field_var }}" value="{{ to_field }}">{% endif %}
       {% if source_model %}<input type="hidden" name="{{ source_model_var }}" value="{{ source_model }}">{% endif %}
-      {% if save_on_top %}{% block submit_buttons_top %}{% include "admin/submit_line.html" %}{% endblock %}{% endif %}
+      {% if save_on_top %}{% block submit_buttons_top %}{% include includes.submit_line %}{% endblock %}{% endif %}
       {% if errors %}
       <p class="errornote">
       {% if errors == 1 %}Please correct the error below.{% else %}Please correct the errors below.{% endif %}
       </p>
       {{ non_field_errors }}
       {% endif %}
+      {% block field_sets %}
       {% for fieldset in adminform %}
         {% include "admin/includes/fieldset.html" with heading_level=2 prefix="fieldset" id_prefix=0 id_suffix=forloop.counter0 %}
       {% endfor %}
+      {% endblock %}
+      {% block after_field_sets %}{% endblock %}
+      {% block inline_field_sets %}
       {% for inline_admin_formset in inline_admin_formsets %}
         {% include inline_admin_formset.template %}
       {% endfor %}
-      {% block submit_buttons_bottom %}{% include "admin/submit_line.html" %}{% endblock %}
+      {% endblock %}
+      {% block after_related_objects %}{% endblock %}
+      {% block submit_buttons_bottom %}{% include includes.submit_line %}{% endblock %}
+      {% block admin_change_form_document_ready %}
+      <script id="django-admin-form-add-constants" src="{% static 'admin/js/change_form.js' %}"{% if adminform and add %} data-model-name="{{ model_name }}"{% endif %} async></script>
+      {% endblock %}
     </div>
   </form>
 </div>

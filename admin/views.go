@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -35,7 +36,7 @@ func (s *AdminSite) index(w http.ResponseWriter, r *http.Request) {
 		ctx["log_enabled"] = true
 		ctx["admin_log"] = recent
 	}
-	s.render(w, r, "admin/index.html", ctx)
+	s.render(w, r, cmp.Or(s.IndexTemplate, "admin/index.html"), ctx)
 }
 
 // appIndex renders the per-app admin index page, or 404 when the user has no
@@ -53,7 +54,11 @@ func (s *AdminSite) appIndex(w http.ResponseWriter, r *http.Request) {
 	ctx["subtitle"] = ""
 	ctx["app_label"] = appLabel
 	ctx["app_list"] = appList
-	s.render(w, r, "admin/app_index.html", ctx)
+	names := []string{"admin/" + appLabel + "/app_index.html", "admin/app_index.html"}
+	if s.AppIndexTemplate != "" {
+		names = []string{s.AppIndexTemplate}
+	}
+	s.renderFirst(w, r, names, ctx)
 }
 
 // catchAllView runs for unmatched URLs under the admin prefix after
@@ -371,7 +376,7 @@ func (s *AdminSite) addForm(w http.ResponseWriter, r *http.Request, e *entry) {
 			if r.PostForm.Has(isPopupVar) {
 				s.checkSourceModel(r)
 				pk := pkOf(reflect.ValueOf(obj).Elem(), e)
-				s.popupResponse(w, r, "value", strconv.FormatInt(pk, 10), "obj", orm.Label(e.model, obj))
+				s.popupResponse(w, r, e, "value", strconv.FormatInt(pk, 10), "obj", orm.Label(e.model, obj))
 				return
 			}
 			// Link the object when the user can change it.
@@ -543,7 +548,7 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 			}
 			if r.PostForm.Has(isPopupVar) {
 				newPK := pkOf(reflect.ValueOf(obj).Elem(), e)
-				s.popupResponse(w, r, "action", "change", "value", objectID,
+				s.popupResponse(w, r, e, "action", "change", "value", objectID,
 					"obj", orm.Label(e.model, obj), "new_value", strconv.FormatInt(newPK, 10))
 				return
 			}
@@ -633,7 +638,7 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 			return
 		}
 		if r.PostForm.Has(isPopupVar) {
-			s.popupResponse(w, r, "action", "delete", "value", strconv.FormatInt(pk, 10))
+			s.popupResponse(w, r, e, "action", "delete", "value", strconv.FormatInt(pk, 10))
 			return
 		}
 		_ = messages.Success(r, fmt.Sprintf("The %s “%s” was deleted successfully.", singular, objDisplay))
@@ -681,7 +686,7 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 	ctx["is_popup_var"] = isPopupVar
 	ctx["to_field"] = r.FormValue(toFieldVar)
 	ctx["to_field_var"] = toFieldVar
-	s.render(w, r, "admin/delete_confirmation.html", ctx)
+	s.renderPage(w, r, e, e.admin.DeleteConfirmationTemplate, "delete_confirmation.html", ctx)
 }
 
 // history handles the per-object change history view: requires view or change
@@ -722,7 +727,7 @@ func (s *AdminSite) history(w http.ResponseWriter, r *http.Request, e *entry) {
 		http.Error(w, "failed to load the history", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, r, "admin/object_history.html", ctx)
+	s.renderPage(w, r, e, e.admin.ObjectHistoryTemplate, "object_history.html", ctx)
 }
 
 // formMode is the kind of page renderChangeForm draws.
@@ -832,11 +837,12 @@ func (s *AdminSite) renderChangeForm(
 	ctx["show_close"] = !showSave
 	ctx["show_delete_link"] = !popup && hasObjDelete
 
-	name := "admin/change_form.html"
-	if isAdd && e.admin.hooks != nil && e.admin.hooks.addFormTemplate != "" {
-		name = e.admin.hooks.addFormTemplate
+	ctx["includes"] = s.includes(e, "submit_line", "change_form_object_tools")
+	custom := e.admin.ChangeFormTemplate
+	if isAdd && e.admin.AddFormTemplate != "" {
+		custom = e.admin.AddFormTemplate
 	}
-	s.render(w, r, name, ctx)
+	s.renderPage(w, r, e, custom, "change_form.html", ctx)
 }
 
 // manyLabels returns the labels of the rows obj is related to through the
@@ -880,7 +886,7 @@ func isPopup(r *http.Request) bool {
 // the window that opened it, Django's admin/popup_response.html. pairs are
 // the keys and values of the data, written in order as Python's json.dumps
 // writes an object.
-func (s *AdminSite) popupResponse(w http.ResponseWriter, r *http.Request, pairs ...string) {
+func (s *AdminSite) popupResponse(w http.ResponseWriter, r *http.Request, e *entry, pairs ...string) {
 	var b strings.Builder
 	b.WriteByte('{')
 	for i := 0; i+1 < len(pairs); i += 2 {
@@ -890,7 +896,8 @@ func (s *AdminSite) popupResponse(w http.ResponseWriter, r *http.Request, pairs 
 		b.WriteString(templates.QuoteJSON(pairs[i]) + ": " + templates.QuoteJSON(pairs[i+1]))
 	}
 	b.WriteByte('}')
-	s.render(w, r, "admin/popup_response.html", map[string]any{"popup_response_data": b.String()})
+	s.renderPage(w, r, e, e.admin.PopupResponseTemplate, "popup_response.html",
+		map[string]any{"popup_response_data": b.String()})
 }
 
 // checkSourceModel adds Django's error message to the request when the
@@ -989,6 +996,53 @@ func neverCache(w http.ResponseWriter) {
 		h.Set("Expires", time.Now().UTC().Format(http.TimeFormat))
 	}
 	h.Set("Cache-Control", "max-age=0, no-cache, no-store, must-revalidate, private")
+}
+
+// templateNames returns the names of the template page of e, Django's search
+// list: the model's, the app's, then the admin's own.
+func (e *entry) templateNames(page string) []string {
+	if e.app == "" {
+		return []string{"admin/" + page}
+	}
+	return []string{"admin/" + e.app + "/" + e.slug + "/" + page, "admin/" + e.app + "/" + page, "admin/" + page}
+}
+
+// renderPage renders the template custom, or the first template of the
+// search list of page for e that exists when custom is empty.
+func (s *AdminSite) renderPage(w http.ResponseWriter, r *http.Request, e *entry, custom, page string, ctx map[string]any) {
+	if custom != "" {
+		s.render(w, r, custom, ctx)
+		return
+	}
+	s.renderFirst(w, r, e.templateNames(page), ctx)
+}
+
+// renderFirst renders the first of names that exists, as Django's
+// TemplateResponse with a list of names.
+func (s *AdminSite) renderFirst(w http.ResponseWriter, r *http.Request, names []string, ctx map[string]any) {
+	name, err := s.engine.SelectTemplate(names...)
+	if err != nil {
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, name, ctx)
+}
+
+// includes returns the templates that a page of e includes, keyed by their
+// page names without ".html": the first that exists of the search list of
+// each, as Django's InclusionAdminNode selects them.
+func (s *AdminSite) includes(e *entry, pages ...string) map[string]any {
+	out := make(map[string]any, len(pages))
+	for _, page := range pages {
+		names := e.templateNames(page + ".html")
+		name, err := s.engine.SelectTemplate(names...)
+		if err != nil {
+			// Render the admin's own, which reports the error.
+			name = names[len(names)-1]
+		}
+		out[page] = name
+	}
+	return out
 }
 
 // render writes the named template with ctx, reporting a 500 on failure. It

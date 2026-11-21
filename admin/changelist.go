@@ -951,7 +951,8 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	ctx["page_links"] = cl.buildPageLinks()
 	ctx["show_all_url"] = showAllURL
 
-	s.render(w, r, "admin/change_list.html", ctx)
+	ctx["includes"] = s.includes(e, "change_list_object_tools", "search_form", "actions", "change_list_results", "pagination")
+	s.renderPage(w, r, e, e.admin.ChangeListTemplate, "change_list.html", ctx)
 }
 
 // handleChangeListError maps errDisallowedLookup to 400 Bad Request,

@@ -122,6 +122,27 @@ type AdminSite struct {
 	// content of every page but the index (Django's
 	// AdminSite.enable_nav_sidebar, default true).
 	EnableNavSidebar bool
+	// IndexTemplate is the template of the index (Django's index_template,
+	// default "admin/index.html").
+	IndexTemplate string
+	// AppIndexTemplate is the template of the index of an app (Django's
+	// app_index_template). Empty, it is the first that exists of
+	// "admin/<app>/app_index.html" and "admin/app_index.html".
+	AppIndexTemplate string
+	// LoginTemplate is the template of the login page (Django's
+	// login_template, default "admin/login.html").
+	LoginTemplate string
+	// LogoutTemplate is the template of the page after the logout (Django's
+	// logout_template, default "registration/logged_out.html").
+	LogoutTemplate string
+	// PasswordChangeTemplate is the template of the password change page
+	// (Django's password_change_template, default
+	// "registration/password_change_form.html").
+	PasswordChangeTemplate string
+	// PasswordChangeDoneTemplate is the template of the page after a password
+	// change (Django's password_change_done_template, default
+	// "registration/password_change_done.html").
+	PasswordChangeDoneTemplate string
 	// Debug loads the unminified versions of the vendored scripts (jQuery,
 	// Select2, XRegExp), as Django does under settings.DEBUG. The application
 	// sets it from its Debug setting.
@@ -145,24 +166,8 @@ type AdminSite struct {
 // NewAdminSite returns an admin site bound to db with Django's default titles,
 // namespace ("admin"), prefix ("/admin"), and catch-all view enabled.
 func NewAdminSite(db *orm.DB) (*AdminSite, error) {
-	sub, err := fs.Sub(templateFS, "templates")
-	if err != nil {
-		return nil, fmt.Errorf("admin: open embedded templates: %w", err)
-	}
-	engine, err := templates.NewEngineFS(sub)
-	if err != nil {
-		return nil, fmt.Errorf("admin: build template engine: %w", err)
-	}
-	engine.SetModels(db.Registry())
-	engine.AddContextProcessor(
-		csrf.ContextProcessor,
-		auth.ContextProcessor,
-		messages.ContextProcessor,
-		templates.RequestProcessor,
-	)
 	site := &AdminSite{
 		db:                db,
-		engine:            engine,
 		byKey:             make(map[entryKey]*entry),
 		Name:              defaultSiteName,
 		Prefix:            defaultPrefix,
@@ -176,8 +181,40 @@ func NewAdminSite(db *orm.DB) (*AdminSite, error) {
 		EnableNavSidebar:  true,
 		actions:           []Action{defaultDeleteSelectedAction()},
 	}
-	engine.SetResolver(site.resolveURL)
+	site.SetTemplateSources(templates.FSSource("admin", Templates()))
 	return site, nil
+}
+
+// Templates returns the admin's own templates: "admin/..." and the
+// "registration/..." pages of the admin's login and password change.
+func Templates() fs.FS {
+	sub, err := fs.Sub(templateFS, "templates")
+	if err != nil {
+		// fs.Sub fails only for an invalid directory name, and the name is a
+		// constant.
+		panic(err)
+	}
+	return sub
+}
+
+// SetTemplateSources sets where the site looks its templates up, in order,
+// in place of the admin's own templates alone. Include
+// templates.FSSource("admin", admin.Templates()): a source before it
+// overrides the admin's templates of the same names, as the template
+// directories of a Django project do, and a source after it adds templates,
+// such as the custom templates of a ModelAdmin. Call it before the site
+// serves requests.
+func (s *AdminSite) SetTemplateSources(sources ...templates.Source) {
+	engine := templates.New(sources...)
+	engine.SetModels(s.db.Registry())
+	engine.AddContextProcessor(
+		csrf.ContextProcessor,
+		auth.ContextProcessor,
+		messages.ContextProcessor,
+		templates.RequestProcessor,
+	)
+	engine.SetResolver(s.resolveURL)
+	s.engine = engine
 }
 
 // AddAction registers a site-wide bulk action available on every registered

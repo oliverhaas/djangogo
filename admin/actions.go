@@ -308,7 +308,7 @@ func handleDeleteSelected(w http.ResponseWriter, r *http.Request, act *ActionCon
 	tplCtx["action_checkbox_name"] = ActionCheckboxName
 	tplCtx["media"] = e.media(s)
 
-	s.render(w, r, "admin/delete_selected_confirmation.html", tplCtx)
+	s.renderPage(w, r, e, e.admin.DeleteSelectedConfirmationTemplate, "delete_selected_confirmation.html", tplCtx)
 	return true, nil
 }
 

@@ -4,7 +4,7 @@
     {{ media }}
     <script src="{% static 'admin/js/cancel.js' %}" async></script>
 {% endblock %}
-{% block bodyclass %}app-{{ app_label }} model-{{ model_name }} delete-confirmation delete-selected-confirmation{% endblock %}
+{% block bodyclass %}{{ block.super }} app-{{ app_label }} model-{{ model_name }} delete-confirmation delete-selected-confirmation{% endblock %}
 {% block breadcrumbs %}
 <ol class="breadcrumbs">
   <li><a href="{% url 'admin:index' %}">Home</a></li>

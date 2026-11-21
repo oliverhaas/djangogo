@@ -1,0 +1,21 @@
+<div class="actions">
+  {% block actions %}
+  {% block actions_form %}
+  <label>Action: <select name="action" required>{% for opt in action_choices %}<option value="{{ opt.value }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>{% endfor %}</select></label>
+  <input type="hidden" name="select_across" value="0" class="select-across">
+  {% endblock %}
+  {% block actions_submit %}
+  <button type="submit" class="button" name="index" value="{{ action_index|default:0 }}">Run</button>
+  {% endblock %}
+  {% block actions_counter %}
+  {% if actions_selection_counter %}
+  <span class="action-counter" data-actions-icnt="{{ page_count }}" aria-live="polite" aria-atomic="true">{{ selection_note }}</span>
+  {% if show_select_across %}
+  <span class="all hidden">{{ selection_note_all }}</span>
+  <span class="question hidden"><a role="button" href="#">Select all {{ result_count }} {{ module_name }}</a></span>
+  <span class="clear hidden"><a role="button" href="#">Clear selection</a></span>
+  {% endif %}
+  {% endif %}
+  {% endblock %}
+  {% endblock %}
+</div>

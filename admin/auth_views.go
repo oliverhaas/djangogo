@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"cmp"
 	"errors"
 	"net/http"
 	"strings"
@@ -115,7 +116,7 @@ func (s *AdminSite) renderLogin(w http.ResponseWriter, r *http.Request, form *fo
 	ctx["redirect_field_name"] = auth.DefaultRedirectFieldName
 	ctx["form"] = form
 	ctx["action"] = r.URL.RequestURI()
-	s.render(w, r, "admin/login.html", ctx)
+	s.render(w, r, cmp.Or(s.LoginTemplate, "admin/login.html"), ctx)
 }
 
 // logout handles POST /admin/logout/ (Django's AdminSite.logout). GET returns
@@ -126,7 +127,7 @@ func (s *AdminSite) logout(w http.ResponseWriter, r *http.Request) {
 	ctx["has_permission"] = false
 	v := &auth.LogoutView{
 		Templates:    s.engine,
-		TemplateName: auth.LoggedOutTemplate,
+		TemplateName: cmp.Or(s.LogoutTemplate, auth.LoggedOutTemplate),
 		ExtraContext: ctx,
 	}
 	v.ServeHTTP(w, r.WithContext(templates.WithCurrentApp(r.Context(), s.siteName())))
@@ -138,7 +139,7 @@ func (s *AdminSite) passwordChange(w http.ResponseWriter, r *http.Request) {
 	v := &auth.PasswordChangeView{
 		DB:           s.db,
 		Templates:    s.engine,
-		TemplateName: auth.PasswordChangeTemplate,
+		TemplateName: cmp.Or(s.PasswordChangeTemplate, auth.PasswordChangeTemplate),
 		SuccessURL:   s.passwordChangeDoneURL(),
 		ExtraContext: s.EachContext(r),
 	}
@@ -150,7 +151,7 @@ func (s *AdminSite) passwordChange(w http.ResponseWriter, r *http.Request) {
 func (s *AdminSite) passwordChangeDone(w http.ResponseWriter, r *http.Request) {
 	v := &auth.PasswordChangeDoneView{
 		Templates:    s.engine,
-		TemplateName: auth.PasswordChangeDoneTemplate,
+		TemplateName: cmp.Or(s.PasswordChangeDoneTemplate, auth.PasswordChangeDoneTemplate),
 		ExtraContext: s.EachContext(r),
 	}
 	v.ServeHTTP(w, r.WithContext(templates.WithCurrentApp(r.Context(), s.siteName())))

@@ -328,6 +328,34 @@ type ModelAdmin struct {
 	// (Django's save_on_top).
 	SaveOnTop bool
 
+	// AddFormTemplate is the template of the add page (Django's
+	// add_form_template). Empty, the add page uses the change form's.
+	AddFormTemplate string
+	// ChangeFormTemplate is the template of the add and change pages
+	// (Django's change_form_template). Empty, it is the first that exists of
+	// "admin/<app>/<model>/change_form.html", "admin/<app>/change_form.html"
+	// and "admin/change_form.html". The other templates below default the
+	// same way.
+	ChangeFormTemplate string
+	// ChangeListTemplate is the template of the changelist (Django's
+	// change_list_template, default change_list.html).
+	ChangeListTemplate string
+	// DeleteConfirmationTemplate is the template of the delete page (Django's
+	// delete_confirmation_template, default delete_confirmation.html).
+	DeleteConfirmationTemplate string
+	// DeleteSelectedConfirmationTemplate is the template of the confirmation
+	// page of the "delete selected" action (Django's
+	// delete_selected_confirmation_template, default
+	// delete_selected_confirmation.html).
+	DeleteSelectedConfirmationTemplate string
+	// ObjectHistoryTemplate is the template of the history page (Django's
+	// object_history_template, default object_history.html).
+	ObjectHistoryTemplate string
+	// PopupResponseTemplate is the template of the page that closes a popup
+	// window after a save or delete (Django's popup_response_template,
+	// default popup_response.html).
+	PopupResponseTemplate string
+
 	// Actions registers custom bulk actions on this ModelAdmin (appended after
 	// site-wide actions such as delete_selected; an action with the same Name
 	// overrides the site-wide action).
