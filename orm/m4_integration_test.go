@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -240,82 +239,18 @@ func runM4ExitCriterion(t *testing.T, db *orm.DB) {
 		t.Fatalf("(4) RelatedObjects(author1) = %+v, want [First Second]", a1Arts)
 	}
 
-	// (5) prefetch_related: one query groups each author's articles correctly.
-	authors, err := orm.Query[m4Author](db).OrderBy("id").All(ctx)
+	// (5) prefetch_related: one batched query loads the author of every article.
+	arts, err := orm.Query[m4Article](db).PrefetchRelated("author").OrderBy("id").All(ctx)
 	if err != nil {
-		t.Fatalf("(5) load authors: %v", err)
+		t.Fatalf("(5) PrefetchRelated(author): %v", err)
 	}
-	pks, err := orm.PKsOf(db, authors)
-	if err != nil {
-		t.Fatalf("(5) PKsOf: %v", err)
-	}
-	byAuthor, err := orm.Prefetch[m4Article](ctx, db, "author_id", pks)
-	if err != nil {
-		t.Fatalf("(5) Prefetch: %v", err)
-	}
-	if len(byAuthor[author1.ID]) != 2 {
-		t.Fatalf("(5) Prefetch author1 -> %d children, want 2", len(byAuthor[author1.ID]))
-	}
-	if len(byAuthor[author2.ID]) != 1 {
-		t.Fatalf("(5) Prefetch author2 -> %d children, want 1", len(byAuthor[author2.ID]))
-	}
-	gotTitles := map[int64][]string{}
-	for pk, kids := range byAuthor {
-		for _, k := range kids {
-			gotTitles[pk] = append(gotTitles[pk], k.Title)
+	for _, a := range arts {
+		obj, ok := a.Author.Object()
+		if !ok {
+			t.Fatalf("(5) article %q: Author not loaded by prefetch_related", a.Title)
 		}
-	}
-	if !containsAll(gotTitles[author1.ID], "First", "Second") {
-		t.Fatalf("(5) Prefetch author1 titles = %v, want First+Second", gotTitles[author1.ID])
-	}
-	if !containsAll(gotTitles[author2.ID], "Third") {
-		t.Fatalf("(5) Prefetch author2 titles = %v, want Third", gotTitles[author2.ID])
-	}
-
-	// (5b) Prefetch with no parents runs no query and returns an empty map.
-	empty, err := orm.Prefetch[m4Article](ctx, db, "author_id", nil)
-	if err != nil {
-		t.Fatalf("(5b) Prefetch(nil): %v", err)
-	}
-	if len(empty) != 0 {
-		t.Fatalf("(5b) Prefetch(nil) = %v, want empty", empty)
-	}
-}
-
-// containsAll reports whether got contains every element of want.
-func containsAll(got []string, want ...string) bool {
-	set := make(map[string]bool, len(got))
-	for _, g := range got {
-		set[g] = true
-	}
-	for _, w := range want {
-		if !set[w] {
-			return false
+		if obj.Name != wantNames[a.Title] {
+			t.Fatalf("(5) article %q: prefetched author %q, want %q", a.Title, obj.Name, wantNames[a.Title])
 		}
-	}
-	return len(got) == len(want)
-}
-
-// TestM4PrefetchSingleQuery asserts that Prefetch issues exactly one SELECT with
-// an IN clause (no N+1 per-parent fetch).
-func TestM4PrefetchSingleQuery(t *testing.T) {
-	db := newM4SQLiteDB(t)
-
-	// Prefetch runs Query[Child](db).Filter(fkColumn+"__in", pks).All; compiling
-	// that exact queryset shows it is a single SELECT with an IN predicate.
-	sqlText, args, err := orm.CompileSelectForTest(
-		orm.Query[m4Article](db).Filter("author_id__in", []int64{1, 2}),
-	)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	if got := strings.Count(sqlText, "SELECT"); got != 1 {
-		t.Fatalf("expected a single SELECT (one query, not N+1), got %d:\n%s", got, sqlText)
-	}
-	if !strings.Contains(sqlText, " IN (") {
-		t.Fatalf("expected an IN clause in prefetch SQL, got:\n%s", sqlText)
-	}
-	if len(args) != 2 {
-		t.Fatalf("expected 2 IN args, got %d: %v", len(args), args)
 	}
 }

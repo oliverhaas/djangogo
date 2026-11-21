@@ -41,6 +41,14 @@ type Annotated[T any] struct {
 // fetch runs the SELECT of model rows and calls each with every row and its
 // annotation values.
 func (q *query) fetch(ctx context.Context, each func(row reflect.Value, plan *rowPlan, annots []any)) error {
+	return q.fetchWithParent(ctx, func(row reflect.Value, _ any, plan *rowPlan, annots []any) {
+		each(row, plan, annots)
+	})
+}
+
+// fetchWithParent runs the SELECT of model rows and calls each with every row,
+// its optional M2M prefetch parent key, the row plan, and annotation values.
+func (q *query) fetchWithParent(ctx context.Context, each func(row reflect.Value, parentKey any, plan *rowPlan, annots []any)) error {
 	query, args, plan, err := q.selectSQL()
 	if errors.Is(err, errEmptyResultSet) {
 		return nil
@@ -54,11 +62,11 @@ func (q *query) fetch(ctx context.Context, each func(row reflect.Value, plan *ro
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		row, annots, err := plan.scan(rows)
+		row, parentKey, annots, err := plan.scanWithParent(rows)
 		if err != nil {
 			return fmt.Errorf("orm: scan %s: %w", q.model.Name(), err)
 		}
-		each(row, plan, annots)
+		each(row, parentKey, plan, annots)
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("orm: scan %s: %w", q.model.Name(), err)
@@ -67,14 +75,31 @@ func (q *query) fetch(ctx context.Context, each func(row reflect.Value, plan *ro
 }
 
 // All runs the query and returns every matching row. The objects named by
-// SelectRelated are loaded in the same query.
+// SelectRelated are loaded in the same query, and those named by
+// PrefetchRelated are loaded with one batched IN query per level.
 func (qs *QuerySet[T]) All(ctx context.Context) ([]T, error) {
+	if qs.q.prefetchedList != nil {
+		if cached, ok := qs.q.prefetchedList.([]T); ok {
+			out := make([]T, len(cached))
+			copy(out, cached)
+			return out, nil
+		}
+	}
 	var out []T
 	err := qs.q.fetch(ctx, func(row reflect.Value, _ *rowPlan, _ []any) {
 		out = append(out, row.Interface().(T))
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(out) > 0 && len(qs.q.prefetchRelated) > 0 {
+		elems := make([]reflect.Value, len(out))
+		for i := range out {
+			elems[i] = reflect.ValueOf(&out[i]).Elem()
+		}
+		if err := prefetchRelatedObjects(ctx, qs.q.db, qs.q.model, elems, qs.q.prefetchRelated); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -92,6 +117,15 @@ func (qs *QuerySet[T]) AllAnnotated(ctx context.Context) ([]Annotated[T], error)
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(out) > 0 && len(qs.q.prefetchRelated) > 0 {
+		elems := make([]reflect.Value, len(out))
+		for i := range out {
+			elems[i] = reflect.ValueOf(&out[i].Object).Elem()
+		}
+		if err := prefetchRelatedObjects(ctx, qs.q.db, qs.q.model, elems, qs.q.prefetchRelated); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -136,6 +170,15 @@ func (qs *QuerySet[T]) Get(ctx context.Context, args ...any) (T, error) {
 // the queryset has no ordering. It returns ErrDoesNotExist when the queryset
 // is empty, where Django's first() returns None.
 func (qs *QuerySet[T]) First(ctx context.Context) (T, error) {
+	if qs.q.prefetchedList != nil {
+		if cached, ok := qs.q.prefetchedList.([]T); ok {
+			var zero T
+			if len(cached) == 0 {
+				return zero, doesNotExist(qs.q.model)
+			}
+			return cached[0], nil
+		}
+	}
 	q := qs.q
 	if len(q.effectiveOrders()) == 0 {
 		q = q.orderBy([]string{"pk"})
@@ -147,6 +190,15 @@ func (qs *QuerySet[T]) First(ctx context.Context) (T, error) {
 // ordering, with a queryset without an ordering ordered by primary key. It
 // returns ErrDoesNotExist when the queryset is empty.
 func (qs *QuerySet[T]) Last(ctx context.Context) (T, error) {
+	if qs.q.prefetchedList != nil {
+		if cached, ok := qs.q.prefetchedList.([]T); ok {
+			var zero T
+			if len(cached) == 0 {
+				return zero, doesNotExist(qs.q.model)
+			}
+			return cached[len(cached)-1], nil
+		}
+	}
 	return first[T](ctx, qs.q.reversed())
 }
 
@@ -171,12 +223,22 @@ func (qs *QuerySet[T]) Count(ctx context.Context) (int64, error) {
 	if qs.q.err != nil {
 		return 0, qs.q.err
 	}
+	if qs.q.prefetchedList != nil {
+		if cached, ok := qs.q.prefetchedList.([]T); ok {
+			return int64(len(cached)), nil
+		}
+	}
 	return qs.q.count(ctx)
 }
 
 // Exists reports whether any row matches the queryset, with a SELECT
 // EXISTS(...) that stops at the first match.
 func (qs *QuerySet[T]) Exists(ctx context.Context) (bool, error) {
+	if qs.q.prefetchedList != nil {
+		if cached, ok := qs.q.prefetchedList.([]T); ok {
+			return len(cached) > 0, nil
+		}
+	}
 	query, args, err := qs.q.existsSQL()
 	if errors.Is(err, errEmptyResultSet) {
 		return false, nil

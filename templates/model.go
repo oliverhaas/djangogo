@@ -17,7 +17,7 @@ const modelLabelKey = "__str__"
 
 // maxModelDepth bounds how deep loaded relations and nested containers are
 // followed, so that objects pointing at each other cannot loop.
-const maxModelDepth = 8
+const maxModelDepth = 12
 
 // ModelMap is the template-facing view of a model instance: a map keyed by the
 // names a Django template uses (see ModelContext). pongo2 resolves map keys by
@@ -108,11 +108,24 @@ func (e *Engine) modelLookup() ModelLookup {
 // names Django gives it:
 //
 //   - every field under its attribute name (created_at for CreatedAt),
-//   - pk and id for the primary key,
-//   - for a foreign key Author: author_id with the related primary key (nil
-//     when unset), and author with the related object, itself a ModelMap, when
-//     the query loaded it (SelectRelated, or FK.SetObject). An unloaded
-//     relation is nil and renders empty: a template never runs a query,
+//   - pk and id for the primary key (including O2O primary keys),
+//   - for a forward foreign key or one-to-one relation (e.g. Author or User):
+//     <attr>_id with the related primary key (nil when unset), and <attr> with
+//     the related object, itself a ModelMap, when loaded via SelectRelated,
+//     PrefetchRelated, or SetObject. An unloaded relation is nil and renders
+//     empty: a template never runs a query,
+//   - for a reverse one-to-one relation (e.g. user.profile): the related
+//     object when loaded via SelectRelated, PrefetchRelated, or RelatedOne on
+//     a model embedding orm.RelCache; otherwise nil (renders empty),
+//   - for a reverse foreign-key set or many-to-many set (e.g.
+//     post.comment_set, article.publications): when prefetched into
+//     orm.RelCache, a map exposing all (the slice of related objects), count,
+//     exists, first, and last, so {{ post.comment_set.count }} and
+//     {% for c in post.comment_set.all %} work without queries. An unloaded
+//     set is nil and renders empty, matching unloaded forward relations,
+//   - any custom Prefetch.ToAttr cached on orm.RelCache, exposed directly
+//     under its ToAttr name (a ModelMap for single objects or a slice of
+//     ModelMaps for multi-valued prefetches),
 //   - get_<field>_display with the label of the current choice, for a field
 //     that declares choices,
 //   - every exported method without parameters under its snake_case name
@@ -126,6 +139,15 @@ func ModelContext(m *orm.Model, instance any) ModelMap {
 	return ModelMap(c.instance(m, reflect.ValueOf(instance), 0))
 }
 
+// modelVisitKey identifies one persisted model instance on the active
+// conversion stack so circular back-references (such as post -> comment_set ->
+// comment.post) stop expanding nested relations instead of growing
+// exponentially.
+type modelVisitKey struct {
+	model *orm.Model
+	pk    any
+}
+
 // converter rewrites context values for the template.
 type converter struct {
 	// lookup recognizes model instances; nil leaves them as they are.
@@ -133,6 +155,9 @@ type converter struct {
 	// public makes nested objects ModelMap values, the type callers of
 	// ModelContext see, in place of the internal modelView.
 	public bool
+	// ancestors tracks model instances currently being converted on this call
+	// stack to break circular relation back-references.
+	ancestors map[modelVisitKey]bool
 }
 
 // value returns v as the template should see it.
@@ -343,10 +368,52 @@ func (c converter) instance(m *orm.Model, rv reflect.Value, depth int) map[strin
 
 	var pk any
 	hasPK := false
+	// Resolve primary key first so ancestor cycle detection knows this
+	// instance before expanding nested relations.
+	if pkField := m.PrimaryKey(); pkField != nil {
+		pfv := sv.Field(pkField.Index)
+		if pkField.Rel != nil {
+			if pfv.CanInterface() {
+				if keyed, ok := pfv.Interface().(interface{ PK() int64 }); ok {
+					if id := keyed.PK(); id != 0 {
+						pk, hasPK = id, true
+					}
+				}
+			}
+		} else {
+			pk, hasPK = pfv.Interface(), true
+		}
+	}
+
+	childDepth := depth
+	var visitKey modelVisitKey
+	trackVisit := false
+	if hasPK && isTrackablePK(pk) {
+		visitKey = modelVisitKey{model: m, pk: pk}
+		if c.ancestors != nil && c.ancestors[visitKey] {
+			// Already on the active conversion stack: keep scalar fields,
+			// foreign-key IDs, methods, and label, but stop recursing into
+			// further related objects.
+			childDepth = maxModelDepth
+		} else {
+			if c.ancestors == nil {
+				c.ancestors = make(map[modelVisitKey]bool)
+			}
+			c.ancestors[visitKey] = true
+			trackVisit = true
+		}
+	}
+	if trackVisit {
+		defer delete(c.ancestors, visitKey)
+	}
+
 	for _, f := range fields {
 		fv := sv.Field(f.Index)
 		if f.Rel != nil {
-			c.relation(out, f, fv, depth)
+			c.relation(out, f, fv, childDepth)
+			if f.PrimaryKey {
+				pk, hasPK = out[f.Attr+"_id"], true
+			}
 			continue
 		}
 		val := fv.Interface()
@@ -372,6 +439,9 @@ func (c converter) instance(m *orm.Model, rv reflect.Value, depth int) map[strin
 			out["id"] = pk
 		}
 	}
+
+	c.cachedRelations(out, m, ptr.Interface(), childDepth)
+
 	for _, meth := range methodsOf(ptr.Type()) {
 		if _, taken := out[meth.key]; !taken {
 			out[meth.key] = c.method(ptr, meth)
@@ -381,8 +451,124 @@ func (c converter) instance(m *orm.Model, rv reflect.Value, depth int) map[strin
 	return out
 }
 
-// relation adds the two attributes of a forward relation: <attr>_id with the
-// related primary key and <attr> with the related object when it is loaded.
+// isTrackablePK reports whether pk is a comparable non-zero primary key value
+// suitable as a map key in converter.ancestors.
+func isTrackablePK(pk any) bool {
+	if pk == nil {
+		return false
+	}
+	rv := reflect.ValueOf(pk)
+	if !rv.Type().Comparable() || rv.IsZero() {
+		return false
+	}
+	return true
+}
+
+// cachedRelations exposes reverse O2O, reverse FK sets, M2M sets (forward and
+// reverse), and custom Prefetch.ToAttr entries from orm.RelCache without
+// issuing any database queries. Unloaded relations remain nil and render empty.
+func (c converter) cachedRelations(out map[string]any, m *orm.Model, inst any, depth int) {
+	for _, rev := range m.ReverseRelations() {
+		if _, taken := out[rev.Name]; taken {
+			continue
+		}
+		out[rev.Name] = nil
+		if depth >= maxModelDepth {
+			continue
+		}
+		switch rev.Kind {
+		case orm.RelO2O:
+			obj, loaded := orm.CachedOne(m, inst, rev.Name)
+			if loaded && obj != nil && rev.Source != nil {
+				out[rev.Name] = c.wrap(c.instance(rev.Source, reflect.ValueOf(obj), depth+1))
+			}
+		case orm.RelFK, orm.RelM2M:
+			items, target, loaded := orm.CachedList(m, inst, rev.Name)
+			if loaded {
+				if target == nil {
+					target = rev.Source
+				}
+				out[rev.Name] = c.relatedSet(target, items, depth)
+			}
+		}
+	}
+	for _, mf := range m.ManyToMany() {
+		if _, taken := out[mf.Attr]; taken {
+			continue
+		}
+		out[mf.Attr] = nil
+		if depth >= maxModelDepth {
+			continue
+		}
+		items, target, loaded := orm.CachedList(m, inst, mf.Attr)
+		if loaded {
+			if target == nil && mf.Rel != nil {
+				target = mf.Rel.Target
+			}
+			out[mf.Attr] = c.relatedSet(target, items, depth)
+		}
+	}
+	for _, attr := range orm.CachedAttrs(m, inst) {
+		if _, taken := out[attr.Name]; taken {
+			continue
+		}
+		out[attr.Name] = nil
+		if depth >= maxModelDepth {
+			continue
+		}
+		if attr.Single {
+			if attr.Obj != nil && attr.Model != nil {
+				out[attr.Name] = c.wrap(c.instance(attr.Model, reflect.ValueOf(attr.Obj), depth+1))
+			}
+		} else {
+			out[attr.Name] = c.relatedSlice(attr.Model, attr.Items, depth)
+		}
+	}
+}
+
+// relatedSet builds the template-facing manager map for a prefetched reverse
+// FK or M2M set, exposing all, count, exists, first, and last.
+func (c converter) relatedSet(target *orm.Model, items any, depth int) map[string]any {
+	list := c.relatedSlice(target, items, depth)
+	var first, last any
+	if len(list) > 0 {
+		first = list[0]
+		last = list[len(list)-1]
+	}
+	return map[string]any{
+		"all":    list,
+		"count":  len(list),
+		"exists": len(list) > 0,
+		"first":  first,
+		"last":   last,
+	}
+}
+
+// relatedSlice converts a prefetched typed slice []T into a []any of wrapped
+// model maps.
+func (c converter) relatedSlice(target *orm.Model, items any, depth int) []any {
+	if items == nil {
+		return []any{}
+	}
+	rv := reflect.ValueOf(items)
+	if rv.Kind() != reflect.Slice {
+		return []any{}
+	}
+	n := rv.Len()
+	out := make([]any, n)
+	for i := range n {
+		elem := rv.Index(i)
+		if target != nil {
+			out[i] = c.wrap(c.instance(target, elem, depth+1))
+		} else {
+			out[i] = c.value(elem.Interface(), depth+1)
+		}
+	}
+	return out
+}
+
+// relation adds the two attributes of a forward FK or O2O relation: <attr>_id
+// with the related primary key and <attr> with the related object when loaded.
 func (c converter) relation(out map[string]any, f *orm.Field, fv reflect.Value, depth int) {
 	out[f.Attr] = nil
 	out[f.Attr+"_id"] = nil

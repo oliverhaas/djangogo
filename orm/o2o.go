@@ -86,6 +86,13 @@ func (O2O[T]) relTarget() reflect.Type { var z T; return reflect.TypeOf(z) }
 // ErrDoesNotExist without querying the database.
 func (o *O2O[T]) Fetch(ctx context.Context, db *DB) (*T, error) {
 	if o.loaded {
+		if o.obj == nil {
+			var zero T
+			if m, ok := db.Registry().ModelOf(zero); ok {
+				return nil, doesNotExist(m)
+			}
+			return nil, ErrDoesNotExist
+		}
 		return o.obj, nil
 	}
 	if o.pk == 0 {
@@ -141,13 +148,13 @@ func RelatedOne[Child any](ctx context.Context, db *DB, owner any, name string) 
 	child, err := Query[Child](db).Get(ctx, rev.Field.Column, ownerPK)
 	if err != nil {
 		if errors.Is(err, ErrDoesNotExist) {
-			setReverseOneCache(ownerModel, ownerVal, rev.Name, nil, true)
+			setReverseOneCacheModel(ownerModel, ownerVal, rev.Name, nil, rev.Source, true)
 			return nil, relatedDoesNotExist(ownerModel, rev.Name)
 		}
 		return nil, err
 	}
 	childPtr := &child
-	setReverseOneCache(ownerModel, ownerVal, rev.Name, childPtr, false)
+	setReverseOneCacheModel(ownerModel, ownerVal, rev.Name, childPtr, rev.Source, false)
 	// Cache the back-reference on child's forward O2O field so
 	// child.<field>.Fetch requires no query.
 	if !ownerPtr.IsValid() {

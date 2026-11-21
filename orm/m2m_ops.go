@@ -104,10 +104,14 @@ func (c *manyCore) addPKs(ctx context.Context, raw []any, opts ...ManyOption) er
 				}
 			}
 		}
-		return c.insertPairs(ctx, c.sourceFK, c.targetFK, pairs, nil, nil, true)
+		if err := c.insertPairs(ctx, c.sourceFK, c.targetFK, pairs, nil, nil, true); err != nil {
+			return err
+		}
+		c.clearPrefetch()
+		return nil
 	}
 
-	return runInTx(ctx, c.db, func(txCtx context.Context) error {
+	err = runInTx(ctx, c.db, func(txCtx context.Context) error {
 		if err := c.addDirection(txCtx, c.sourceFK, c.targetFK, pks, extraFields, extraVals, autoCreated, hasListeners); err != nil {
 			return err
 		}
@@ -119,6 +123,11 @@ func (c *manyCore) addPKs(ctx context.Context, raw []any, opts ...ManyOption) er
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	c.clearPrefetch()
+	return nil
 }
 
 // addDirection inserts missing (ownerPK, pk) rows for one direction, firing
@@ -413,7 +422,7 @@ func (c *manyCore) removePKs(ctx context.Context, raw []any) error {
 	if err != nil {
 		return err
 	}
-	return runInTx(ctx, c.db, func(txCtx context.Context) error {
+	err = runInTx(ctx, c.db, func(txCtx context.Context) error {
 		if err := fireM2MChanged(txCtx, c.declaringModel, c.field, M2MChangedEvent{
 			Sender:   c.through,
 			Instance: c.ownerInstance,
@@ -436,6 +445,11 @@ func (c *manyCore) removePKs(ctx context.Context, raw []any) error {
 			PKSet:    pks,
 		})
 	})
+	if err != nil {
+		return err
+	}
+	c.clearPrefetch()
+	return nil
 }
 
 // execDeletePairs deletes rows matching (c.ownerPK, pks) and, when symmetrical,
@@ -517,7 +531,7 @@ func (c *manyCore) clear(ctx context.Context) error {
 	if c.err != nil {
 		return c.err
 	}
-	return runInTx(ctx, c.db, func(txCtx context.Context) error {
+	err := runInTx(ctx, c.db, func(txCtx context.Context) error {
 		if err := fireM2MChanged(txCtx, c.declaringModel, c.field, M2MChangedEvent{
 			Sender:   c.through,
 			Instance: c.ownerInstance,
@@ -562,6 +576,11 @@ func (c *manyCore) clear(ctx context.Context) error {
 			PKSet:    nil,
 		})
 	})
+	if err != nil {
+		return err
+	}
+	c.clearPrefetch()
+	return nil
 }
 
 // setPKs replaces the related target set for c.ownerPK.
@@ -575,7 +594,7 @@ func (c *manyCore) setPKs(ctx context.Context, raw []any, opts ...ManyOption) er
 		return err
 	}
 	cfg := parseManyConfig(opts)
-	return runInTx(ctx, c.db, func(txCtx context.Context) error {
+	err = runInTx(ctx, c.db, func(txCtx context.Context) error {
 		if cfg.clear {
 			if err := c.clear(txCtx); err != nil {
 				return err
@@ -619,4 +638,9 @@ func (c *manyCore) setPKs(ctx context.Context, raw []any, opts ...ManyOption) er
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	c.clearPrefetch()
+	return nil
 }

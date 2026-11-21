@@ -30,6 +30,9 @@ type compiler struct {
 	// empty reports that the filters can match no row. The statement builders
 	// then return errEmptyResultSet, after they validated the rest of the query.
 	empty bool
+	// m2mPrefetchJoin holds the through-table join used by an M2M prefetch
+	// query so rowsStmt selects its parent FK column.
+	m2mPrefetchJoin *join
 }
 
 // compile runs the first phase for q: it resolves the annotations and then the

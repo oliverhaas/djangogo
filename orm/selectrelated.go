@@ -126,7 +126,15 @@ func (q *query) rowsStmt() (*selectStmt, *rowPlan, error) {
 		return nil, nil, err
 	}
 	plan := &rowPlan{dialect: c.d, model: q.model}
-	items := make([]selectItem, 0, len(q.model.fields))
+	items := make([]selectItem, 0, len(q.model.fields)+1)
+	if c.m2mPrefetchJoin != nil && q.m2mPrefetch != nil {
+		srcFK := q.m2mPrefetch.sourceFK
+		items = append(items, selectItem{
+			node:  colNode{join: c.m2mPrefetchJoin, field: srcFK},
+			alias: "_prefetch_related_val_" + srcFK.Column,
+		})
+		plan.prefetchParentField = q.m2mPrefetch.parentPKField
+	}
 	for _, f := range q.model.fields {
 		items = append(items, selectItem{node: c.baseColumn(f)})
 	}

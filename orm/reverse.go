@@ -235,6 +235,7 @@ func Related[Child any](db *DB, owner any, name string) *QuerySet[Child] {
 type RelatedManager[Child any] struct {
 	db         *DB
 	ownerModel *Model
+	ownerVal   reflect.Value
 	ownerPtr   reflect.Value
 	ownerPK    int64
 	rev        *ReverseRelation
@@ -268,13 +269,26 @@ func RelatedSet[Child any](db *DB, owner any, name string) *RelatedManager[Child
 		return mgr
 	}
 	mgr.ownerModel = ownerModel
+	mgr.ownerVal = ownerVal
 	mgr.ownerPtr = ownerPtr
 	mgr.ownerPK = pk
 	mgr.rev = rev
 	return mgr
 }
 
+// clearPrefetch removes any cached prefetch result for this relation on the
+// manager's owner instance.
+func (m *RelatedManager[Child]) clearPrefetch() {
+	if m.ownerModel != nil && m.rev != nil && m.ownerVal.IsValid() {
+		clearPrefetchListCache(m.ownerModel, m.ownerVal, m.rev.Name)
+	}
+}
+
 // QuerySet returns a QuerySet restricted to Child rows pointing to the owner.
+// When the owner has a prefetched result cached for this relation, terminal
+// reads on the returned QuerySet (All, Count, Exists, First, Last) read from
+// the cache without querying; any further chaining (Filter, Exclude, OrderBy,
+// etc.) clears the cache and queries the database.
 func (m *RelatedManager[Child]) QuerySet() *QuerySet[Child] {
 	if m.err != nil {
 		var zero Child
@@ -283,7 +297,11 @@ func (m *RelatedManager[Child]) QuerySet() *QuerySet[Child] {
 		q.setErr(m.err)
 		return &QuerySet[Child]{q: q}
 	}
-	return Query[Child](m.db).Filter(m.rev.Field.Column, m.ownerPK)
+	qs := Query[Child](m.db).Filter(m.rev.Field.Column, m.ownerPK)
+	if items, _, ok := getPrefetchListCache(m.ownerModel, m.ownerVal, m.rev.Name); ok {
+		qs.q.prefetchedList = items
+	}
+	return qs
 }
 
 // All returns every Child row belonging to the owner.
@@ -340,7 +358,11 @@ func (m *RelatedManager[Child]) Create(ctx context.Context, obj *Child) error {
 	} else {
 		setForwardPK(elem, m.rev.Field, m.ownerPK)
 	}
-	return Query[Child](m.db).Create(ctx, obj)
+	if err := Query[Child](m.db).Create(ctx, obj); err != nil {
+		return err
+	}
+	m.clearPrefetch()
+	return nil
 }
 
 // Add associates saved Child objects with the owner in a single UPDATE, like
@@ -368,6 +390,7 @@ func (m *RelatedManager[Child]) Add(ctx context.Context, objs ...*Child) error {
 			setForwardPK(elem, m.rev.Field, m.ownerPK)
 		}
 	}
+	m.clearPrefetch()
 	return nil
 }
 
@@ -390,6 +413,9 @@ func (m *RelatedManager[Child]) AddSave(ctx context.Context, objs ...*Child) err
 		if err := Query[Child](m.db).Save(ctx, obj); err != nil {
 			return err
 		}
+	}
+	if len(objs) > 0 {
+		m.clearPrefetch()
 	}
 	return nil
 }
@@ -417,6 +443,7 @@ func (m *RelatedManager[Child]) Remove(ctx context.Context, objs ...*Child) erro
 	for _, obj := range objs {
 		setForwardPK(reflect.ValueOf(obj).Elem(), m.rev.Field, 0)
 	}
+	m.clearPrefetch()
 	return nil
 }
 
@@ -430,8 +457,11 @@ func (m *RelatedManager[Child]) Clear(ctx context.Context) error {
 	if !m.rev.Field.Null {
 		return fmt.Errorf("orm: cannot clear non-nullable foreign key %s.%s", m.rev.Source.Name(), m.rev.Field.Attr)
 	}
-	_, err := Query[Child](m.db).Filter(m.rev.Field.Column, m.ownerPK).Update(ctx, m.rev.Field.Column, nil)
-	return err
+	if _, err := Query[Child](m.db).Filter(m.rev.Field.Column, m.ownerPK).Update(ctx, m.rev.Field.Column, nil); err != nil {
+		return err
+	}
+	m.clearPrefetch()
+	return nil
 }
 
 // Set replaces the set of Child objects associated with the owner, matching
@@ -447,7 +477,7 @@ func (m *RelatedManager[Child]) Set(ctx context.Context, objs []*Child) error {
 	if err != nil {
 		return err
 	}
-	return m.db.Atomic(ctx, func(txCtx context.Context) error {
+	err = m.db.Atomic(ctx, func(txCtx context.Context) error {
 		if m.rev.Field.Null {
 			qs := Query[Child](m.db).Filter(m.rev.Field.Column, m.ownerPK)
 			if len(pks) > 0 {
@@ -462,6 +492,11 @@ func (m *RelatedManager[Child]) Set(ctx context.Context, objs []*Child) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	m.clearPrefetch()
+	return nil
 }
 
 // collectSavedPKs extracts the primary keys of objs and errors if any element

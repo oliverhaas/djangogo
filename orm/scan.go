@@ -231,19 +231,31 @@ type relPlan struct {
 // model's own fields, the fields of each select_related target, the
 // annotations, and any hidden ordering columns.
 type rowPlan struct {
-	dialect    Dialect
-	model      *Model
-	rels       []relPlan
-	annots     []string
-	annotTypes []valueType
-	ncols      int
+	dialect             Dialect
+	model               *Model
+	prefetchParentField *Field
+	rels                []relPlan
+	annots              []string
+	annotTypes          []valueType
+	ncols               int
 }
 
 // scan reads the current row. It returns the model struct, addressable, and
 // the annotation values in plan order.
 func (p *rowPlan) scan(rows *sql.Rows) (reflect.Value, []any, error) {
+	elem, _, annots, err := p.scanWithParent(rows)
+	return elem, annots, err
+}
+
+// scanWithParent reads the current row together with the optional M2M prefetch
+// parent primary key column.
+func (p *rowPlan) scanWithParent(rows *sql.Rows) (reflect.Value, any, []any, error) {
 	elem := reflect.New(p.model.goType).Elem()
 	targets := make([]any, 0, p.ncols)
+	var rawParentKey any
+	if p.prefetchParentField != nil {
+		targets = append(targets, &rawParentKey)
+	}
 	for _, f := range p.model.fields {
 		targets = append(targets, fieldTarget(p.dialect, elem, f))
 	}
@@ -262,19 +274,27 @@ func (p *rowPlan) scan(rows *sql.Rows) (reflect.Value, []any, error) {
 		targets = append(targets, new(any))
 	}
 	if err := rows.Scan(targets...); err != nil {
-		return elem, nil, err
+		return elem, nil, nil, err
 	}
 	if err := p.attach(elem, holders); err != nil {
-		return elem, nil, err
+		return elem, nil, nil, err
 	}
 	for i, t := range p.annotTypes {
 		v, err := convertValue(annots[i], t)
 		if err != nil {
-			return elem, nil, err
+			return elem, nil, nil, err
 		}
 		annots[i] = v
 	}
-	return elem, annots, nil
+	var parentKey any
+	if p.prefetchParentField != nil {
+		var err error
+		parentKey, err = convertPrefetchParentKey(p.prefetchParentField, rawParentKey)
+		if err != nil {
+			return elem, nil, nil, err
+		}
+	}
+	return elem, parentKey, annots, nil
 }
 
 // attach builds the select_related objects from their scanned columns and
@@ -304,7 +324,7 @@ func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 		}
 		if pk == nil {
 			if r.rev != nil {
-				setReverseOneCache(ownerModel, owner, r.rev.Name, nil, true)
+				setReverseOneCacheModel(ownerModel, owner, r.rev.Name, nil, target, true)
 			}
 			continue
 		}
@@ -319,7 +339,7 @@ func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 			}
 		}
 		if r.rev != nil {
-			setReverseOneCache(ownerModel, owner, r.rev.Name, obj.Interface(), false)
+			setReverseOneCacheModel(ownerModel, owner, r.rev.Name, obj.Interface(), target, false)
 			// Cache the back-reference on obj's forward O2O field so
 			// obj.<field>.Fetch requires no query.
 			if ownerPK, pkErr := extractModelPKInt64(ownerModel, owner); pkErr == nil && ownerPK != 0 {
@@ -337,7 +357,7 @@ func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 		// RelCache so following forward then back requires no query.
 		if r.field.Rel != nil && r.field.Rel.Kind == RelO2O {
 			if backRev := target.reverseForField(r.field); backRev != nil && !backRev.Hidden {
-				setReverseOneCache(target, obj.Elem(), backRev.Name, owner.Addr().Interface(), false)
+				setReverseOneCacheModel(target, obj.Elem(), backRev.Name, owner.Addr().Interface(), ownerModel, false)
 			}
 		}
 		objs[i] = obj
