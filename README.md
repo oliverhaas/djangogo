@@ -114,7 +114,7 @@ list and detail pages and the admin together; run it with `go run ./examples/blo
 | `sessions`        | Per-request sessions with signed-cookie and database-backed stores.        |
 | `csrf`            | CSRF token middleware.                                                      |
 | `urls`            | Route declaration, a `ServeMux` router, and named-route reverse.           |
-| `views`           | Request/response helpers and generic `ListView`/`DetailView`.              |
+| `views`           | Request/response helpers, generic `ListView`/`DetailView` and the contenttypes `shortcut` view. |
 | `templates`       | A pongo2 engine with `{% static %}`, `{% url %}`, `{% csrf_token %}` tags. |
 | `forms`           | Form fields, widgets, and `ModelForm` derived from model metadata.         |
 | `validators`      | Django's validators and `ValidationError`, shared by models and forms.     |
@@ -198,7 +198,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `ModelChoiceField` and `ModelMultipleChoiceField` have no `to_field_name` or
   `label_from_instance`, and they load their options once per form, where
   Django loads them on each render.
-- **Admin:** no `date_hierarchy` or facets and no "View on site" links. A registered model needs an integer primary key. An
+- **Admin:** no `date_hierarchy` or facets. A registered model needs an integer primary key. An
   inline cannot edit the auto-created through model of a many-to-many field,
   there are no generic inlines, and an inline has no custom formset class.
   There are no `radio_fields`, and `FormOptions` sets widgets per field name,

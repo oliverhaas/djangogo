@@ -43,6 +43,12 @@ type InlineModelAdmin struct {
 	// ShowChangeLink adds a link to the change page of each row when its
 	// model is registered on the site, Django's show_change_link.
 	ShowChangeLink bool
+	// ViewOnSite shows a "View on site" link on each row, as
+	// ModelAdmin.ViewOnSite does.
+	ViewOnSite *bool
+	// ViewOnSiteURL returns the URL of the "View on site" link of the row
+	// obj, as ModelAdmin.ViewOnSiteURL does.
+	ViewOnSiteURL func(obj any) string
 	// VerboseName overrides the singular name of the model in the inline.
 	VerboseName string
 	// VerboseNamePlural overrides the plural name. It defaults to
@@ -867,6 +873,8 @@ func (s *AdminSite) inlineFormContext(
 	out := map[string]any{
 		"original":         "",
 		"has_original":     original,
+		"show_url":         false,
+		"absolute_url":     "",
 		"change_link":      nil,
 		"non_field_errors": templates.MarkSafe(form.NonFieldErrors().AsUL()),
 		"fieldsets":        sets,
@@ -878,6 +886,9 @@ func (s *AdminSite) inlineFormContext(
 	}
 	if original {
 		out["original"] = orm.Label(ie.model, obj)
+		u := s.viewOnSiteURL(ctx, ie, in.cfg.ViewOnSite, in.cfg.ViewOnSiteURL, obj)
+		out["show_url"] = u != ""
+		out["absolute_url"] = u
 		if rel := s.entryByModel(ie.model); rel != nil && in.cfg.ShowChangeLink {
 			class, text := "inlineviewlink", "View"
 			if ifs.hasChange {

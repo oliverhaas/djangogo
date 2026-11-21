@@ -23,14 +23,16 @@ type Holder struct {
 	Dummy int64
 }
 
-// Inner stands in for tests/admin_inlines/models.py::Inner, without
-// get_absolute_url: the Go admin has no "View on site" link.
+// Inner stands in for tests/admin_inlines/models.py::Inner.
 type Inner struct {
 	ID       int64
 	Dummy    int64
 	Holder   orm.FK[Holder]
 	Readonly string `orm:"max_length=1;verbose_name=Inner readonly label"`
 }
+
+// GetAbsoluteURL is Inner.get_absolute_url.
+func (Inner) GetAbsoluteURL() string { return "/inner/" }
 
 // Holder2 stands in for tests/admin_inlines/models.py::Holder2.
 type Holder2 struct {
@@ -899,14 +901,19 @@ func TestInlineNonRelatedName(t *testing.T) {
 
 // Ported from Django: tests/admin_inlines/tests.py::TestInline.test_localize_pk_shortcut
 func TestInlineLocalizePKShortcut(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the admin has no \"View on site\" links, Django: get_absolute_url " +
-		"and the r/<content_type>/<pk>/ shortcut")
+	djangotest.EachDB(t, inlinesModels(), func(t *testing.T, db *orm.DB) {
+		env := inlinesSuperEnv(t, db)
+		holder := create(t, db, &Holder{ID: 123456789, Dummy: 42})
+		inner := create(t, db, &Inner{ID: 987654321, Holder: fk[Holder](holder.ID), Dummy: 42})
+		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_inlines_holder_change", holder.ID))
+		djangotest.AssertContains(t, resp, fmt.Sprintf("r/%d/%d/", contentTypeID(t, db, &Inner{}), inner.ID))
+	})
 }
 
 // Ported from Django: tests/admin_inlines/tests.py::TestInline.test_custom_pk_shortcut
 func TestInlineCustomPKShortcut(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the admin has no \"View on site\" links and orm.FK needs an " +
-		"integer primary key, Django: a CharField primary key")
+	t.Skip("FIXME-PORT: Go: orm.FK and the admin need an integer primary key, " +
+		"Django: a CharField primary key")
 }
 
 // Ported from Django: tests/admin_inlines/tests.py::TestInline.test_create_inlines_on_inherited_model

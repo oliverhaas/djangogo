@@ -74,3 +74,11 @@ func ListEditableCount(ctx context.Context, site *AdminSite, app, slug string, d
 	spec := listEditableSpec(e, querySpec{}, editedObjectPKs(data, prefix, e.model.PrimaryKey().Attr))
 	return e.ops.count(ctx, spec)
 }
+
+// ViewOnSiteURL returns the URL of the "View on site" link of obj on the
+// change page of the model app.slug of site, Django's
+// ModelAdmin.get_view_on_site_url.
+func ViewOnSiteURL(ctx context.Context, site *AdminSite, app, slug string, obj any) string {
+	e := site.byKey[entryKey{app: app, slug: slug}]
+	return site.viewOnSiteURL(ctx, e, e.admin.ViewOnSite, e.admin.ViewOnSiteURL, obj)
+}

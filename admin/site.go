@@ -360,6 +360,7 @@ func (s *AdminSite) buildRoutes() []urls.Route {
 		urls.Path("password_change/done/", s.adminView(s.passwordChangeDone, true), "password_change_done"),
 		urls.Path("autocomplete/", s.adminView(s.autocompleteView, false), "autocomplete"),
 		urls.Path("jsi18n/", s.adminView(s.jsi18nView, true), "jsi18n"),
+		urls.Path("r/<path:content_type_id>/<path:object_id>/", s.adminView(s.viewOnSite, false), "view_on_site"),
 	}
 
 	var validApps []string

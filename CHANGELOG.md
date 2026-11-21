@@ -454,6 +454,14 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   admin.E121 to admin.E125.
 - Forms: `ModelFormSet.Objects` sets the objects of the initial forms in
   place of the queryset.
+- Admin: the change page and the inline rows show a "View on site" link for
+  an object with a `GetAbsoluteURL` method, Django's `view_on_site`. The link
+  goes through the new `admin:view_on_site` URL, which redirects to the URL
+  of the object. `ModelAdmin.ViewOnSite` and `InlineModelAdmin.ViewOnSite`
+  set to false hide the link, and `ViewOnSiteURL` returns a custom URL.
+- Views: `ContentTypeShortcut` is Django's contenttypes `shortcut` view. It
+  redirects to the `GetAbsoluteURL` of the object of a content type and a
+  primary key.
 
 ### Changed
 

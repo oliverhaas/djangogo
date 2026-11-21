@@ -44,8 +44,9 @@ func (a Actor) String() string { return a.Name }
 // Worker stands in for tests/admin_views/models.py::Worker.
 type Worker struct {
 	ID      int64
-	Name    string `orm:"max_length=50"`
-	Surname string `orm:"max_length=50"`
+	WorkAt  orm.FK[Restaurant] `orm:"on_delete=cascade"`
+	Name    string             `orm:"max_length=50"`
+	Surname string             `orm:"max_length=50"`
 }
 
 // String returns the worker name.
@@ -61,6 +62,9 @@ func adminViewsModels() []any {
 			&Article{},
 			&Section{},
 			&Actor{},
+			&State{},
+			&City{},
+			&Restaurant{},
 			&Worker{},
 			&RowLevelChangePermissionModel{},
 			&Album{},

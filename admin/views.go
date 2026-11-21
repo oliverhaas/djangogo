@@ -845,6 +845,9 @@ func (s *AdminSite) renderChangeForm(
 	// The object tools link the history; a failed "Save as new" has no
 	// object, and its link is empty, as Django's url tag leaves it.
 	ctx["history_url"] = ""
+	absoluteURL := s.viewOnSiteURL(r.Context(), e, e.admin.ViewOnSite, e.admin.ViewOnSiteURL, obj)
+	ctx["has_absolute_url"] = absoluteURL != ""
+	ctx["absolute_url"] = absoluteURL
 	if obj != nil {
 		pk := pkOf(reflect.ValueOf(obj).Elem(), e)
 		ctx["history_url"] = s.addPreservedFilters(e, s.historyURL(e, pk), preserved, nil, false, "")

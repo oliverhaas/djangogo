@@ -2,4 +2,5 @@
 <li>
     <a href="{{ history_url }}" class="historylink">History</a>
 </li>
+{% if has_absolute_url %}<li><a href="{{ absolute_url }}" class="viewsitelink">View on site</a></li>{% endif %}
 {% endblock %}

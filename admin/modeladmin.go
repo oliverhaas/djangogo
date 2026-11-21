@@ -391,6 +391,15 @@ type ModelAdmin struct {
 	// SaveOnTop shows the save buttons above the form as well as below it
 	// (Django's save_on_top).
 	SaveOnTop bool
+	// ViewOnSite shows a "View on site" link on the change page of an object
+	// with a GetAbsoluteURL method (Django's view_on_site, default true when
+	// nil). The link points at the view_on_site URL of the site, which
+	// redirects to the URL of the object. False hides the link.
+	ViewOnSite *bool
+	// ViewOnSiteURL returns the URL of the "View on site" link of obj in
+	// place of the view_on_site URL, Django's callable view_on_site. An empty
+	// URL hides the link.
+	ViewOnSiteURL func(obj any) string
 
 	// AddFormTemplate is the template of the add page (Django's
 	// add_form_template). Empty, the add page uses the change form's.
