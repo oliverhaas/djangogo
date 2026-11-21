@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/oliverhaas/djangogo/internal/naming"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -113,7 +114,7 @@ func (o RemoveField) DatabaseBackwards(ctx context.Context, app string, e *Schem
 
 // Describe returns Django's description.
 func (o RemoveField) Describe() string {
-	return "Remove field " + snakeCase(o.Field) + " from " + lowerName(o.Model)
+	return "Remove field " + naming.SnakeCase(o.Field) + " from " + lowerName(o.Model)
 }
 
 // Category marks the operation as a removal.
@@ -121,7 +122,7 @@ func (RemoveField) Category() Category { return CategoryRemoval }
 
 // NameFragment returns "remove_<model>_<field>".
 func (o RemoveField) NameFragment() string {
-	return "remove_" + lowerName(o.Model) + "_" + snakeCase(o.Field)
+	return "remove_" + lowerName(o.Model) + "_" + naming.SnakeCase(o.Field)
 }
 
 // AlterField changes the definition of an existing field: type, null, unique,
@@ -238,9 +239,9 @@ func defaultColumn(name string, rel orm.RelKind) string {
 		return ""
 	}
 	if rel != orm.RelNone {
-		return snakeCase(name) + "_id"
+		return naming.SnakeCase(name) + "_id"
 	}
-	return snakeCase(name)
+	return naming.SnakeCase(name)
 }
 
 // renameIn replaces every occurrence of oldName in names, preserving a leading
@@ -285,7 +286,7 @@ func (o RenameField) rename(ctx context.Context, app string, e *SchemaEditor, fr
 
 // Describe returns Django's description.
 func (o RenameField) Describe() string {
-	return "Rename field " + snakeCase(o.OldName) + " on " + lowerName(o.Model) + " to " + snakeCase(o.NewName)
+	return "Rename field " + naming.SnakeCase(o.OldName) + " on " + lowerName(o.Model) + " to " + naming.SnakeCase(o.NewName)
 }
 
 // Category marks the operation as an alteration.
@@ -293,5 +294,5 @@ func (RenameField) Category() Category { return CategoryAlteration }
 
 // NameFragment returns "rename_<old>_<model>_<new>".
 func (o RenameField) NameFragment() string {
-	return "rename_" + snakeCase(o.OldName) + "_" + lowerName(o.Model) + "_" + snakeCase(o.NewName)
+	return "rename_" + naming.SnakeCase(o.OldName) + "_" + lowerName(o.Model) + "_" + naming.SnakeCase(o.NewName)
 }

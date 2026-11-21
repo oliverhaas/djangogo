@@ -30,6 +30,9 @@ type CheckSong struct {
 	OriginalRelease orm.Date           `orm:"editable=false"`
 }
 
+// ReadonlyMethodOnModel is Song.readonly_method_on_model, which does nothing.
+func (CheckSong) ReadonlyMethodOnModel() any { return nil }
+
 // CheckAuthor stands in for tests/admin_checks/models.py::Author.
 type CheckAuthor struct {
 	ID   int64
@@ -93,6 +96,7 @@ func adminChecksModels() []any {
 // Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_exclude_duplicate_values
 // Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_readonly
 // Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_readonly_on_modeladmin
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_readonly_method_on_model
 // Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_nonexistent_field
 // Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_graceful_m2m_fail
 // Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_cannot_include_through
@@ -108,9 +112,7 @@ func TestAdminChecksFieldLayout(t *testing.T) {
 		// FIXME-PORT: test_readonly_on_method, test_readonly_lambda and
 		// test_readonly_dynamic_attribute_on_modeladmin name a callable;
 		// the Go counterpart of each is a DisplayColumns key, as in
-		// test_readonly_on_modeladmin. test_readonly_method_on_model has no
-		// Go counterpart: a read-only field shows a model field or a
-		// DisplayColumn, not a model method. test_fieldsets_fields_non_tuple,
+		// test_readonly_on_modeladmin. test_fieldsets_fields_non_tuple,
 		// test_nonfirst_fieldset, test_exclude_values and
 		// test_readonly_fields_not_list_or_tuple check option types that Go
 		// fixes at compile time.
@@ -141,6 +143,9 @@ func TestAdminChecksFieldLayout(t *testing.T) {
 						"readonly_method_on_modeladmin": {Value: func(any) any { return nil }},
 					},
 				})
+			}},
+			{"test_readonly_method_on_model", func(site *admin.AdminSite) {
+				admin.Register[CheckSong](site, admin.ModelAdmin{ReadonlyFields: []string{"readonly_method_on_model"}})
 			}},
 			{"test_nested_fields", func(site *admin.AdminSite) {
 				admin.Register[CheckBook](site, admin.ModelAdmin{Fields: []any{"price", []string{"name", "subtitle"}}})

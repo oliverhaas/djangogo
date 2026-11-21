@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/oliverhaas/djangogo/internal/naming"
 )
 
 // CreateModel creates a model's table, with its indexes and unique-together
@@ -332,7 +334,7 @@ func (o AddIndex) DatabaseBackwards(ctx context.Context, _ string, e *SchemaEdit
 func (o AddIndex) Describe() string {
 	attrs := make([]string, len(o.Index.Fields))
 	for i, f := range o.Index.Fields {
-		attrs[i] = snakeCase(strings.TrimPrefix(f, "-"))
+		attrs[i] = naming.SnakeCase(strings.TrimPrefix(f, "-"))
 	}
 	return fmt.Sprintf("Create index %s on field(s) %s of model %s",
 		o.Index.Name, strings.Join(attrs, ", "), lowerName(o.Model))

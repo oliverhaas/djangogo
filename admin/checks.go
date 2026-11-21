@@ -304,10 +304,14 @@ func checkFieldSpecItem(e *entry, obj adminObject, name, label string) []checks.
 }
 
 // checkReadonlyItem checks one entry of ReadonlyFields, Django's
-// _check_readonly_fields_item: a DisplayColumns key or a concrete or
-// many-to-many field of the model, the names a read-only field can show.
+// _check_readonly_fields_item: a DisplayColumns key, a concrete or
+// many-to-many field of the model, or a model method, the names a read-only
+// field can show.
 func checkReadonlyItem(e *entry, obj adminObject, name, label string) []checks.Message {
 	if _, ok := e.admin.DisplayColumns[name]; ok || readonlyModelField(e.model, name) != nil {
+		return nil
+	}
+	if _, ok := findModelMethod(e.model, name); ok {
 		return nil
 	}
 	return []checks.Message{checks.Error(fmt.Sprintf(

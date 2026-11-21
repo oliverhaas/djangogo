@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/oliverhaas/djangogo/internal/naming"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -295,7 +296,7 @@ var errQuit = &CommandError{
 func (q *InteractiveQuestioner) AskRename(model *ModelState, oldName, newName string, field FieldState) (bool, error) {
 	name := lowerName(model.Name)
 	return q.boolInput(fmt.Sprintf("Was %s.%s renamed to %s.%s (a %s)? [y/N]",
-		name, snakeCase(oldName), name, snakeCase(newName), fieldClassName(field)), false)
+		name, naming.SnakeCase(oldName), name, naming.SnakeCase(newName), fieldClassName(field)), false)
 }
 
 // AskRenameModel asks Django's question about a renamed model.

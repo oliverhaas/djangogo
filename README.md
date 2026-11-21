@@ -206,8 +206,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `form_class`. The scripts and
   pages are in English only. There is no custom form class: `FormOptions`
   adds fields and options to the model form, and its exclusions add to
-  `ExcludeFields` instead of being overridden by it. A read-only field shows
-  a model field or a `DisplayColumns` value, not a model method. The date
+  `ExcludeFields` instead of being overridden by it. The date
   hierarchy reads a datetime in UTC. A search field with `@` uses
   `icontains`, not full-text search. The views take no `extra_context`, and
   a template option such as `ChangeFormTemplate` names one template, not a

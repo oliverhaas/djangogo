@@ -1,13 +1,17 @@
 package admin
 
 import (
+	"errors"
 	"fmt"
 	"html"
+	"html/template"
 	"net/url"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/oliverhaas/djangogo/auth"
+	"github.com/oliverhaas/djangogo/internal/naming"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/templates"
 )
@@ -35,6 +39,75 @@ type resolvedColumn struct {
 	isActionCheckbox bool
 	// custom holds the custom DisplayColumn definition when matched in ModelAdmin.DisplayColumns.
 	custom *DisplayColumn
+	// method is the model method the column shows: of a name that is no
+	// field, or of a DisplayColumns entry without a Value.
+	method *modelMethod
+}
+
+// modelMethod is a method of a model that ListDisplay and ReadonlyFields can
+// name, Django's model method or property: exported, without arguments, and
+// with one result or a result and an error. A name refers to it by its Go
+// name or in snake_case, as a template does: ModelYear is model_year.
+type modelMethod struct {
+	// name is the snake_case name of the method.
+	name string
+	// index is the index of the method in the method set of the pointer to
+	// the model.
+	index int
+	// withErr reports whether the method returns an error as well.
+	withErr bool
+}
+
+// errorType is the type of the error result of a model method.
+var errorType = reflect.TypeFor[error]()
+
+// findModelMethod returns the method of m that name refers to. String is no
+// such method: "__str__" names it.
+func findModelMethod(m *orm.Model, name string) (modelMethod, bool) {
+	t := reflect.PointerTo(m.GoType())
+	for i := range t.NumMethod() {
+		meth := t.Method(i)
+		key := naming.SnakeCase(meth.Name)
+		if meth.Name == "String" || (name != meth.Name && name != key) {
+			continue
+		}
+		// The receiver is the first input of a method taken from a type.
+		mt := meth.Type
+		if mt.NumIn() != 1 {
+			return modelMethod{}, false
+		}
+		switch {
+		case mt.NumOut() == 1:
+			return modelMethod{name: key, index: i}, true
+		case mt.NumOut() == 2 && mt.Out(1) == errorType:
+			return modelMethod{name: key, index: i, withErr: true}, true
+		}
+		return modelMethod{}, false
+	}
+	return modelMethod{}, false
+}
+
+// call calls the method on obj, a pointer to the model.
+func (mm modelMethod) call(obj any) (any, error) {
+	res := reflect.ValueOf(obj).Method(mm.index).Call(nil)
+	if mm.withErr && !res[1].IsNil() {
+		err, _ := res[1].Interface().(error)
+		return nil, err
+	}
+	return res[0].Interface(), nil
+}
+
+// value returns the value that a DisplayColumn or model method column shows
+// for obj: the result of the Value of the DisplayColumn, of the model
+// method, or nil.
+func (col resolvedColumn) value(obj any) (any, error) {
+	switch {
+	case col.custom != nil && col.custom.Value != nil:
+		return col.custom.Value(obj), nil
+	case col.method != nil:
+		return col.method.call(obj)
+	}
+	return nil, nil
 }
 
 // resolveModelField looks up a concrete field on m by Go struct name, attribute
@@ -153,13 +226,19 @@ func resolveDisplayColumn(e *entry, name string) (resolvedColumn, bool) {
 		if c.OrderField != "" {
 			orderField = normalizeFieldPath(e.model, c.OrderField)
 		}
-		return resolvedColumn{
+		col := resolvedColumn{
 			rawName:    name,
 			cssName:    name,
 			label:      label,
 			orderField: orderField,
 			custom:     &c,
-		}, true
+		}
+		if c.Value == nil {
+			if mm, ok := findModelMethod(e.model, name); ok {
+				col.method = &mm
+			}
+		}
+		return col, true
 	}
 	if f, ok := resolveModelField(e.model, name); ok {
 		return resolvedColumn{
@@ -168,6 +247,16 @@ func resolveDisplayColumn(e *entry, name string) (resolvedColumn, bool) {
 			label:      fieldLabel(f),
 			orderField: f.Attr,
 			field:      f,
+		}, true
+	}
+	// A model method that no DisplayColumns entry describes has its pretty
+	// name and does not sort, as a method without @admin.display.
+	if mm, ok := findModelMethod(e.model, name); ok {
+		return resolvedColumn{
+			rawName: name,
+			cssName: mm.name,
+			label:   prettyName(mm.name),
+			method:  &mm,
 		}, true
 	}
 	// "__"-spanning forward FK/O2O path such as "parent__name" or "parent__parent__name".
@@ -246,52 +335,68 @@ func selectRelatedForColumns(cols []resolvedColumn) []string {
 }
 
 // renderColumnCell renders one changelist cell as safe HTML (pre-escaped) and
-// returns the extra CSS classes (such as "nowrap") for the cell.
-func renderColumnCell(col resolvedColumn, obj any, m *orm.Model, emptyVal string, avoidLink bool) (string, []string) {
+// returns the extra CSS classes (such as "nowrap") for the cell. It returns
+// the error of a model method, other than orm.ErrDoesNotExist, which shows
+// the empty value as Django shows ObjectDoesNotExist.
+func renderColumnCell(col resolvedColumn, obj any, m *orm.Model, emptyVal string, avoidLink bool) (string, []string, error) {
 	if col.isStr {
 		label := orm.Label(m, obj)
 		if strings.TrimSpace(label) == "" {
 			label = emptyVal
 		}
-		return html.EscapeString(label), nil
+		return html.EscapeString(label), nil, nil
 	}
-	if col.custom != nil {
-		colEmpty := emptyVal
-		if col.custom.EmptyValue != "" {
-			colEmpty = col.custom.EmptyValue
+	if col.custom != nil || col.method != nil {
+		colEmpty, boolean := emptyVal, false
+		if col.custom != nil {
+			if col.custom.EmptyValue != "" {
+				colEmpty = col.custom.EmptyValue
+			}
+			boolean = col.custom.Boolean
 		}
-		val := any(nil)
-		if col.custom.Value != nil {
-			val = col.custom.Value(obj)
+		val, err := col.value(obj)
+		if errors.Is(err, orm.ErrDoesNotExist) {
+			return html.EscapeString(colEmpty), nil, nil
 		}
-		return formatDisplayValueHTML(val, colEmpty, col.custom.Boolean), nil
+		if err != nil {
+			return "", nil, err
+		}
+		// Django does not wrap a cell with a date or a time.
+		var classes []string
+		switch val.(type) {
+		case time.Time, orm.Date, orm.Time:
+			classes = []string{"nowrap"}
+		}
+		return formatDisplayValueHTML(val, colEmpty, boolean), classes, nil
 	}
 	if col.field != nil {
 		elem := reflect.ValueOf(obj).Elem()
-		return formatFieldHTML(m, obj, col.field, elem.Field(col.field.Index), emptyVal, avoidLink)
+		out, classes := formatFieldHTML(m, obj, col.field, elem.Field(col.field.Index), emptyVal, avoidLink)
+		return out, classes, nil
 	}
 	if len(col.pathSteps) > 0 {
 		curObj := obj
 		for i, step := range col.pathSteps {
 			rv := reflect.ValueOf(curObj)
 			if !rv.IsValid() || (rv.Kind() == reflect.Pointer && rv.IsNil()) {
-				return html.EscapeString(emptyVal), nil
+				return html.EscapeString(emptyVal), nil, nil
 			}
 			if rv.Kind() == reflect.Pointer {
 				rv = rv.Elem()
 			}
 			fv := rv.Field(step.Index)
 			if i == len(col.pathSteps)-1 {
-				return formatFieldHTML(col.pathModels[i], curObj, step, fv, emptyVal, avoidLink)
+				out, classes := formatFieldHTML(col.pathModels[i], curObj, step, fv, emptyVal, avoidLink)
+				return out, classes, nil
 			}
 			relObj, loaded := fkObject(fv)
 			if !loaded || relObj == nil {
-				return html.EscapeString(emptyVal), nil
+				return html.EscapeString(emptyVal), nil, nil
 			}
 			curObj = relObj
 		}
 	}
-	return html.EscapeString(emptyVal), nil
+	return html.EscapeString(emptyVal), nil, nil
 }
 
 // formatFieldHTML formats a concrete model field value as HTML matching
@@ -378,13 +483,20 @@ func formatFieldHTML(m *orm.Model, obj any, f *orm.Field, fv reflect.Value, empt
 }
 
 // formatDisplayValueHTML formats an arbitrary value as safe HTML, matching
-// Django's display_for_value.
+// Django's display_for_value. A template.HTML value is safe HTML, as
+// Django's SafeString.
 func formatDisplayValueHTML(val any, emptyVal string, boolean bool) string {
 	if boolean {
 		return booleanIconHTML(val)
 	}
 	if val == nil {
 		return html.EscapeString(emptyVal)
+	}
+	if h, ok := val.(template.HTML); ok {
+		if strings.TrimSpace(string(h)) == "" {
+			return html.EscapeString(emptyVal)
+		}
+		return string(h)
 	}
 	rv := reflect.ValueOf(val)
 	if rv.Kind() == reflect.Pointer {

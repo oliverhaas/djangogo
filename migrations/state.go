@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/oliverhaas/djangogo/internal/naming"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -88,7 +89,7 @@ func (f FieldState) HasAutoThrough() bool { return f.RelKind == orm.RelM2M && f.
 
 // Attr returns the snake_case attribute name, the counterpart of Django's
 // field name: "created_at" for CreatedAt.
-func (f FieldState) Attr() string { return snakeCase(f.Name) }
+func (f FieldState) Attr() string { return naming.SnakeCase(f.Name) }
 
 // fieldStateFromField snapshots an orm field.
 func fieldStateFromField(f *orm.Field) FieldState {

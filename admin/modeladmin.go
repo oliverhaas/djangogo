@@ -18,7 +18,9 @@ const ActionCheckboxName = "_selected_action"
 
 // DisplayColumn defines a custom computed column referenced by name in
 // ModelAdmin.ListDisplay (the Go analog of a ModelAdmin method decorated with
-// @admin.display).
+// @admin.display). An entry without a Value shows the model method of its
+// name, and its other options are the @admin.display options of that
+// method.
 type DisplayColumn struct {
 	// Description is the column header text (Django's short_description).
 	// When empty, derived from the column name.
@@ -31,7 +33,8 @@ type DisplayColumn struct {
 	Boolean bool
 	// EmptyValue overrides the empty-value placeholder for this column.
 	EmptyValue string
-	// Value computes the display value for obj (a *T).
+	// Value computes the display value for obj (a *T). A template.HTML
+	// value is HTML that the page shows as it is.
 	Value func(obj any) any
 }
 
@@ -335,8 +338,12 @@ type DeletedModelCount struct {
 type ModelAdmin struct {
 	// ListDisplay names the columns shown on the changelist (model struct field
 	// names, snake_case attribute names, "__str__", "__"-spanning relation paths,
-	// or keys in DisplayColumns). An empty slice shows the object's label,
-	// Django's default ("__str__",).
+	// keys in DisplayColumns, or model methods). An empty slice shows the
+	// object's label, Django's default ("__str__",). A model method is
+	// exported, takes no arguments, and returns a value, or a value and an
+	// error; a name refers to it by its Go name or in snake_case, as a
+	// template does: ModelYear is model_year. An error fails the page, and
+	// orm.ErrDoesNotExist shows the empty value.
 	ListDisplay []string
 	// ListDisplayLinks names the columns in ListDisplay that link to each row's
 	// change page. nil defaults to the first column; a non-nil empty slice
@@ -403,7 +410,9 @@ type ModelAdmin struct {
 	PreserveFilters *bool
 	// ReadonlyFields names what the add and change forms show as values in
 	// place of inputs (Django's readonly_fields): model fields, whose stored
-	// values a save keeps, and keys of DisplayColumns.
+	// values a save keeps, keys of DisplayColumns, and model methods, named
+	// as in ListDisplay. A model method that returns an error shows the
+	// empty value.
 	ReadonlyFields []string
 	// ExcludeFields names fields omitted from the add and change forms.
 	ExcludeFields []string

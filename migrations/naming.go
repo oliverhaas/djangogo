@@ -4,7 +4,6 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"strings"
-	"unicode"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -72,25 +71,6 @@ func IndexName(table string, columns []string) string {
 		name = "D" + name[1:]
 	}
 	return name
-}
-
-// snakeCase converts a Go field name to the attribute name the ORM derives
-// from it: "CreatedAt" becomes "created_at", "HTMLBody" becomes "html_body".
-func snakeCase(s string) string {
-	runes := []rune(s)
-	var b strings.Builder
-	for i, r := range runes {
-		if !unicode.IsUpper(r) {
-			b.WriteRune(r)
-			continue
-		}
-		if i > 0 && (unicode.IsLower(runes[i-1]) || unicode.IsDigit(runes[i-1]) ||
-			(i+1 < len(runes) && unicode.IsLower(runes[i+1]))) {
-			b.WriteByte('_')
-		}
-		b.WriteRune(unicode.ToLower(r))
-	}
-	return b.String()
 }
 
 // defaultTable returns the table name the ORM derives for a model without a

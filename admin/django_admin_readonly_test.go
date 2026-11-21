@@ -29,6 +29,9 @@ type ROPost struct {
 	Public          *bool    `orm:"null;blank"`
 }
 
+// AwesomenessLevel is Post.awesomeness_level.
+func (ROPost) AwesomenessLevel() string { return "Very awesome." }
+
 // ROLink stands in for tests/admin_views/models.py::Link. Django's posted
 // defaults to a week before today; a week before the fixed default of
 // ROPost.Posted stands in for it. The related name keeps Django's inline
@@ -127,8 +130,6 @@ func roPostAdmin() admin.ModelAdmin {
 			"posted", "awesomeness_level", "coolness", "value", "multiline", "multiline_html", "readonly_content",
 		},
 		DisplayColumns: map[string]admin.DisplayColumn{
-			// A method of the model in Django.
-			"awesomeness_level": {Value: func(any) any { return "Very awesome." }},
 			"coolness": {Value: func(obj any) any {
 				if p := obj.(*ROPost); p.ID != 0 {
 					return fmt.Sprintf("%d amount of cool.", p.ID)

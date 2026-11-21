@@ -3,13 +3,12 @@ package templates
 import (
 	"net/netip"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/flosch/pongo2/v6"
 
+	"github.com/oliverhaas/djangogo/internal/naming"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -638,9 +637,9 @@ func methodsOf(t reflect.Type) []modelMethod {
 		}
 		switch {
 		case mt.NumOut() == 1:
-			out = append(out, modelMethod{key: snakeCase(meth.Name), index: i})
+			out = append(out, modelMethod{key: naming.SnakeCase(meth.Name), index: i})
 		case mt.NumOut() == 2 && mt.Out(1) == errorType:
-			out = append(out, modelMethod{key: snakeCase(meth.Name), index: i, withErr: true})
+			out = append(out, modelMethod{key: naming.SnakeCase(meth.Name), index: i, withErr: true})
 		}
 	}
 	methodCache.Store(t, out)
@@ -660,23 +659,4 @@ func (c converter) method(ptr reflect.Value, meth modelMethod) func() (any, erro
 		}
 		return inner.value(res[0].Interface(), 1), nil
 	}
-}
-
-// snakeCase converts a Go identifier to snake_case the way the orm names
-// attributes: GetAbsoluteURL becomes get_absolute_url.
-func snakeCase(s string) string {
-	runes := []rune(s)
-	var b strings.Builder
-	for i, r := range runes {
-		if !unicode.IsUpper(r) {
-			b.WriteRune(r)
-			continue
-		}
-		if i > 0 && (unicode.IsLower(runes[i-1]) || unicode.IsDigit(runes[i-1]) ||
-			(i+1 < len(runes) && unicode.IsLower(runes[i+1]))) {
-			b.WriteByte('_')
-		}
-		b.WriteRune(unicode.ToLower(r))
-	}
-	return b.String()
 }

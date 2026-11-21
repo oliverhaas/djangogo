@@ -748,8 +748,9 @@ func (cl *changeList) resultHeaders(r *http.Request) ([]map[string]any, int) {
 // buildRows renders every row's table cells as pre-escaped HTML strings
 // matching Django's items_for_result, and the hidden primary keys of the
 // forms of list_editable (Django's result_hidden_fields). Row i shows the
-// editable fields of rowForms[i] when there is one.
-func (cl *changeList) buildRows(rowForms []*forms.Form) ([]map[string]any, []int64, []string) {
+// editable fields of rowForms[i] when there is one. It returns the error of
+// a model method that a column shows.
+func (cl *changeList) buildRows(rowForms []*forms.Form) ([]map[string]any, []int64, []string, error) {
 	emptyVal := cl.entry.emptyValue(cl.site)
 	rows := make([]map[string]any, len(cl.objects))
 	pks := make([]int64, len(cl.objects))
@@ -792,7 +793,10 @@ func (cl *changeList) buildRows(rowForms []*forms.Form) ([]map[string]any, []int
 			}
 
 			isLink := !cl.noLinks && (cl.listDisplayLinks[col.rawName] || cl.listDisplayLinks[col.cssName])
-			valHTML, extraClasses := renderColumnCell(col, obj, cl.entry.model, emptyVal, isLink)
+			valHTML, extraClasses, err := renderColumnCell(col, obj, cl.entry.model, emptyVal, isLink)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			classes := make([]string, 0, 1+len(extraClasses))
 			classes = append(classes, "field-"+col.cssName)
 			classes = append(classes, extraClasses...)
@@ -843,7 +847,7 @@ func (cl *changeList) buildRows(rowForms []*forms.Form) ([]map[string]any, []int
 		}
 		rows[i] = row
 	}
-	return rows, pks, hidden
+	return rows, pks, hidden, nil
 }
 
 // buildPageLinks formats cl.pageRange into template-ready pagination entries.
@@ -998,7 +1002,11 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	}
 
 	headers, numSorted := cl.resultHeaders(r)
-	rows, pks, hiddenFields := cl.buildRows(rowForms)
+	rows, pks, hiddenFields, err := cl.buildRows(rowForms)
+	if err != nil {
+		s.handleChangeListError(w, r, err)
+		return
+	}
 
 	filterContext, err := cl.filterContext(r.Context())
 	if err != nil {

@@ -283,7 +283,8 @@ func adminFieldContext(bf *forms.BoundField, first bool) map[string]any {
 }
 
 // readonlyFieldContext returns the template data of a read-only field,
-// Django's helpers.AdminReadonlyField: a model field or a DisplayColumns key.
+// Django's helpers.AdminReadonlyField: a model field, a DisplayColumns key or
+// a model method.
 func (s *AdminSite) readonlyFieldContext(ctx context.Context, e *entry, af *adminForm, name string, first bool) map[string]any {
 	obj := af.obj
 	f := readonlyModelField(e.model, name)
@@ -312,13 +313,16 @@ func (s *AdminSite) readonlyFieldContext(ctx context.Context, e *entry, af *admi
 // WithHelpText options of the form come first, as Django reads
 // ModelForm.Meta.labels and help_texts in AdminReadonlyField and
 // InlineAdminFormSet.fields; then the verbose name and the help text of the
-// model field, or the description of a DisplayColumn.
+// model field, the description of a DisplayColumn, or the pretty name of a
+// model method.
 func readonlyLabel(e *entry, opts []forms.ModelFormOption, f *orm.Field, name string) (label, help string) {
 	label = prettyName(name)
 	if f != nil {
 		label, help = fieldVerboseName(f), f.HelpText
 	} else if col, ok := e.admin.DisplayColumns[name]; ok && col.Description != "" {
 		label = col.Description
+	} else if mm, ok := findModelMethod(e.model, name); ok {
+		label = prettyName(mm.name)
 	}
 	labels, helpTexts := forms.ModelFormLabels(opts...)
 	keys := []string{name}
@@ -356,8 +360,10 @@ func readonlyModelField(m *orm.Model, name string) *orm.Field {
 // Django's AdminReadonlyField.contents: the related objects of a many-to-many
 // field separated by commas, a foreign key as a link to the change page of
 // the related object when its model has an admin on the site, the value of
-// a DisplayColumn, and any other field as the changelist shows it. Line
-// breaks become <br>.
+// a DisplayColumn or of a model method, and any other field as the
+// changelist shows it. Line breaks become <br>. A model method that fails
+// shows the empty value, as Django shows it for the AttributeError,
+// ValueError and ObjectDoesNotExist of a method.
 func (s *AdminSite) readonlyContents(ctx context.Context, e *entry, obj any, f *orm.Field, name string) string {
 	empty := e.emptyValue(s)
 	switch {
@@ -375,10 +381,20 @@ func (s *AdminSite) readonlyContents(ctx context.Context, e *entry, obj any, f *
 		return linebreaksbr(out)
 	}
 	col, ok := e.admin.DisplayColumns[name]
-	if !ok || col.Value == nil {
-		return html.EscapeString(empty)
+	var value any
+	if ok && col.Value != nil {
+		value = col.Value(obj)
+	} else {
+		mm, found := findModelMethod(e.model, name)
+		if !found {
+			return html.EscapeString(empty)
+		}
+		v, err := mm.call(obj)
+		if err != nil {
+			return html.EscapeString(empty)
+		}
+		value = v
 	}
-	value := col.Value(obj)
 	if col.Boolean {
 		return booleanIconHTML(value)
 	}

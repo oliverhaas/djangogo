@@ -253,27 +253,6 @@ type snakeFixture struct {
 	Name       string
 }
 
-func TestToSnakeCase(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		input string
-		want  string
-	}{
-		{"CreatedAt", "created_at"},
-		{"ID", "id"},
-		{"APIKey", "api_key"},
-		{"URLSlug", "url_slug"},
-		{"HTTPServer", "http_server"},
-		{"Name", "name"},
-	}
-	for _, c := range cases {
-		got := toSnakeCase(c.input)
-		if got != c.want {
-			t.Errorf("toSnakeCase(%q) = %q, want %q", c.input, got, c.want)
-		}
-	}
-}
-
 func TestParseStructField_SnakeCase(t *testing.T) {
 	t.Parallel()
 	typ := reflect.TypeOf(snakeFixture{})

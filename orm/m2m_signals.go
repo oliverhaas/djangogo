@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"slices"
 	"sync"
+
+	"github.com/oliverhaas/djangogo/internal/naming"
 )
 
 // M2MAction identifies the lifecycle phase of an m2m_changed signal,
@@ -100,7 +102,7 @@ func OnM2MChanged[T any](fieldName string, fn func(ctx context.Context, ev M2MCh
 		m2mSignals.byOwnerType[t] = append(m2mSignals.byOwnerType[t], entry)
 		return func() { m2mSignals.removeOwnerType(t, id) }
 	}
-	key := m2mFieldKey{ownerType: t, attr: toSnakeCase(fieldName)}
+	key := m2mFieldKey{ownerType: t, attr: naming.SnakeCase(fieldName)}
 	m2mSignals.byField[key] = append(m2mSignals.byField[key], entry)
 	return func() { m2mSignals.removeField(key, id) }
 }

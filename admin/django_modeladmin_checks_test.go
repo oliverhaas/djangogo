@@ -69,6 +69,9 @@ type ValidationTestModel struct {
 	No *int64 `orm:"null;blank;verbose_name=Number"`
 }
 
+// DecadePublishedIn is ValidationTestModel.decade_published_in.
+func (m ValidationTestModel) DecadePublishedIn() string { return m.PubDate.Format("2006")[:3] + "0's" }
+
 // Meta gives state the choices of Django's ValidationTestModel.
 func (ValidationTestModel) Meta() orm.Meta {
 	return orm.Meta{Choices: map[string][]orm.Choice{
@@ -435,8 +438,7 @@ func TestListDisplayCheck(t *testing.T) {
 				admin.Register[ValidationTestModel](site, admin.ModelAdmin{
 					ListDisplay: []string{"name", "decade_published_in", "a_method"},
 					DisplayColumns: map[string]admin.DisplayColumn{
-						"decade_published_in": {Value: func(any) any { return "" }},
-						"a_method":            {Value: func(any) any { return "" }},
+						"a_method": {Value: func(any) any { return "" }},
 					},
 				})
 			})
@@ -907,15 +909,15 @@ func TestListDisplayLinksCheck(t *testing.T) {
 		})
 
 		t.Run("test_valid_case", func(t *testing.T) {
-			// DisplayColumns stand in for the method and the callable.
+			// DisplayColumns stand in for the method of the admin and the
+			// callable.
 			columns := []string{"name", "decade_published_in", "a_method", "a_callable"}
 			assertIsValid(t, register(admin.ModelAdmin{
 				ListDisplay:      columns,
 				ListDisplayLinks: columns,
 				DisplayColumns: map[string]admin.DisplayColumn{
-					"decade_published_in": {Value: func(any) any { return "" }},
-					"a_method":            {Value: func(any) any { return "" }},
-					"a_callable":          {Value: func(any) any { return "" }},
+					"a_method":   {Value: func(any) any { return "" }},
+					"a_callable": {Value: func(any) any { return "" }},
 				},
 			}))
 		})

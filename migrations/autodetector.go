@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/oliverhaas/djangogo/internal/naming"
 )
 
 // modelKey identifies a model by app and name.
@@ -34,7 +36,7 @@ type fieldKey struct{ app, model, field string }
 func compareFieldKeys(a, b fieldKey) int {
 	return cmp.Or(
 		compareModelKeys(modelKey{a.app, a.model}, modelKey{b.app, b.model}),
-		cmp.Compare(snakeCase(a.field), snakeCase(b.field)),
+		cmp.Compare(naming.SnakeCase(a.field), naming.SnakeCase(b.field)),
 		cmp.Compare(a.field, b.field),
 	)
 }

@@ -504,6 +504,16 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   (admin.E116); an `Ordering` with `"?"` and other names (admin.E032), or with
   a name that is no field of the model, also on an inline (admin.E033); two
   `Actions` with the same name (admin.E130). Run `check` after the upgrade.
+- Admin: `ListDisplay` and `ReadonlyFields` show model methods, as Django
+  shows a method or a property of the model, and `check` accepts them. A
+  model method is exported, takes no arguments, and returns a value, or a
+  value and an error. `model_year` and `ModelYear` both name the method
+  `ModelYear`, as in templates. A `DisplayColumns` entry without a `Value`
+  sets the `@admin.display` options of the method of its name: the
+  description, the order field, the boolean icon and the empty value. An
+  error of a method fails the changelist with 500 Internal Server Error,
+  except `orm.ErrDoesNotExist`, which shows the empty value. A read-only
+  field shows the empty value for any error.
 
 ### Changed
 
@@ -693,6 +703,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   link in the changelist, the breadcrumbs, the delete page and the messages.
   It now shows "-", as in Django. The breadcrumbs cut a long label after 18
   words.
+- Admin: the changelist escaped a `DisplayColumns` value of type
+  `template.HTML`, so a column built with HTML showed its tags as text. It
+  now shows the HTML, as Django shows a `SafeString`. A column whose value is
+  a date or a time no longer wraps, as in Django.
 
 ### Security
 
