@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 )
@@ -394,16 +395,23 @@ func readsJoin(n sqlNode) bool {
 		return readsJoin(n.left) || readsJoin(n.right)
 	case aggNode:
 		return n.arg != nil && readsJoin(n.arg)
+	case transformNode:
+		return readsJoin(n.inner)
 	default:
 		return false
 	}
 }
 
-// nodeKey returns the SQL text of n, which identifies the expression when
-// duplicates are removed from a GROUP BY or SELECT list. Bound values do not
-// take part in the key.
+// nodeKey returns the SQL text of n and its bound values, which identify the
+// expression when duplicates are removed from a GROUP BY, ORDER BY or SELECT
+// list. The values take part because two expressions can differ in them
+// only: on SQLite the year and the month of a datetime are the same function
+// call with another first argument.
 func nodeKey(d Dialect, n sqlNode) string {
 	w := newSQLWriter(d)
 	n.render(w)
-	return w.String()
+	if len(w.args) == 0 {
+		return w.String()
+	}
+	return fmt.Sprintf("%s %#v", w.String(), w.args)
 }

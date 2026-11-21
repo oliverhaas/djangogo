@@ -359,15 +359,15 @@ func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 	return p, nil
 }
 
-// resolveFieldPath resolves a key that must name a field and nothing else, as
-// in OrderBy, Values, and F. A trailing part that is not a field is an error,
-// worded as Django words it.
+// resolveFieldPath resolves a key that must name a field, optionally followed
+// by transforms ("pub_date__year"), as in OrderBy, Values, and F. Any other
+// trailing part is an error, worded as Django words it.
 func resolveFieldPath(m *Model, key string, extra []string) (fieldPath, error) {
 	p, err := resolvePath(m, strings.Split(key, lookupSep), extra)
 	if err != nil {
 		return p, err
 	}
-	if len(p.rest) == 0 {
+	if len(p.rest) == 0 || (!p.relation && validTransforms(p.field.Kind, p.rest)) {
 		return p, nil
 	}
 	if p.relation {

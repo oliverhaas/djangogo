@@ -167,8 +167,10 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   inheritance.
 - **Database:** one database per application. Two models with foreign keys to
   each other cannot be created on PostgreSQL.
-- **Querying:** no transforms (`__date`, `Length`), no `extra()`, no fetch
-  modes and no `select_related()` without arguments. A model keeps prefetched
+- **Querying:** of Django's transforms only the date and time ones exist
+  (`__year`, `__date`, `__hour` and the others), and they read a datetime in
+  UTC. There are no text transforms or functions such as `Lower` and `Length`,
+  no `extra()`, no fetch modes and no `select_related()` without arguments. A model keeps prefetched
   reverse and many-to-many sets only when it embeds `orm.RelCache`, and the
   queryset of an `orm.Prefetch` cannot be sliced. `Raw` leaves the fields missing
   from a result at their zero value, where Django defers and loads them.

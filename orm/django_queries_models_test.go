@@ -18,6 +18,9 @@ import (
 //   - Report.creator points at the primary key of Author; Django points it at
 //     Author.num with to_field, which the ORM does not have.
 //   - NamedCategory is a plain model; in Django it inherits DumbCategory.
+//   - DateTimePK has an integer primary key and a separate date field: a
+//     foreign key here points at an integer key, and Django's key is the
+//     datetime itself.
 
 type qNamedCategory struct {
 	ID   int64
@@ -45,11 +48,17 @@ type qAnnotation struct {
 	Tag  orm.FK[qTag]
 }
 
+type qDateTimePK struct {
+	ID   int64
+	Date time.Time
+}
+
 type qExtraInfo struct {
 	ID         int64
-	Info       string        `orm:"max_length=100"`
-	Note       orm.FK[qNote] `orm:"null"`
-	Value      int64         `orm:"null"`
+	Info       string              `orm:"max_length=100"`
+	Note       orm.FK[qNote]       `orm:"null"`
+	Value      int64               `orm:"null"`
+	Date       orm.FK[qDateTimePK] `orm:"null;on_delete=set_null"`
 	Filterable bool
 }
 
@@ -118,7 +127,7 @@ type qJoin struct {
 // qModels returns the models of the queries app.
 func qModels() []any {
 	return []any{djangotest.App("queries",
-		&qNamedCategory{}, &qTag{}, &qNote{}, &qAnnotation{}, &qExtraInfo{}, &qAuthor{}, &qItem{},
+		&qNamedCategory{}, &qTag{}, &qNote{}, &qAnnotation{}, &qDateTimePK{}, &qExtraInfo{}, &qAuthor{}, &qItem{},
 		&qReport{}, &qRanking{}, &qNumber{}, &qNullableName{}, &qArticle{}, &qLeafA{}, &qLeafB{}, &qJoin{},
 		&qFK1{}, &qFK2{}, &qFK3{}, &qBaseA{}, &qModelA{}, &qModelB{}, &qModelC{}, &qModelD{},
 		&qNode{}, &qObjectA{}, &qObjectB{}, &qObjectC{},

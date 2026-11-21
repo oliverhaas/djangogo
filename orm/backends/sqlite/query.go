@@ -130,8 +130,3 @@ func textOf(v driver.Value) string {
 		return fmt.Sprint(t)
 	}
 }
-
-// regexpRegistration is the outcome of installing the regexp function for
-// every connection the driver opens; Open reports a failure. SQLite ships the
-// REGEXP operator without an implementation.
-var regexpRegistration = moderncsqlite.RegisterDeterministicScalarFunction("regexp", 2, regexpFunc)

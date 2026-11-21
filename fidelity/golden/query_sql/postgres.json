@@ -182,6 +182,106 @@
       ]
     },
     {
+      "name": "filter_transform_year",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"created_at\" BETWEEN %s AND %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        {
+          "__datetime__": "2024-01-01T00:00:00Z"
+        },
+        {
+          "__datetime__": "2024-12-31T23:59:59.999999Z"
+        }
+      ]
+    },
+    {
+      "name": "filter_transform_month_gte",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE EXTRACT(MONTH FROM \"fid_book\".\"created_at\" AT TIME ZONE %s) >= %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "UTC",
+        6
+      ]
+    },
+    {
+      "name": "filter_transform_date",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE (\"fid_book\".\"created_at\" AT TIME ZONE %s)::date = %s",
+      "params": [
+        "UTC",
+        "2024-03-20"
+      ]
+    },
+    {
+      "name": "filter_transform_week_day",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE EXTRACT(DOW FROM \"fid_book\".\"created_at\" AT TIME ZONE %s) + 1 = %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "UTC",
+        3
+      ]
+    },
+    {
+      "name": "filter_transform_hour_lt",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE EXTRACT(HOUR FROM \"fid_book\".\"created_at\" AT TIME ZONE %s) < %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "UTC",
+        12
+      ]
+    },
+    {
+      "name": "filter_transform_time",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE (\"fid_book\".\"created_at\" AT TIME ZONE %s)::time = %s",
+      "params": [
+        "UTC",
+        "14:30:00"
+      ]
+    },
+    {
+      "name": "exclude_transform_quarter",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE NOT (EXTRACT(QUARTER FROM \"fid_book\".\"created_at\" AT TIME ZONE %s) = %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "UTC",
+        2
+      ]
+    },
+    {
+      "name": "order_by_transform",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" ORDER BY EXTRACT(HOUR FROM \"fid_book\".\"created_at\" AT TIME ZONE %s) DESC, \"fid_book\".\"id\" ASC",
+      "params": [
+        "UTC"
+      ]
+    },
+    {
+      "name": "order_by_transforms_same_column",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" ORDER BY EXTRACT(YEAR FROM \"fid_book\".\"created_at\" AT TIME ZONE %s) ASC, EXTRACT(MONTH FROM \"fid_book\".\"created_at\" AT TIME ZONE %s) DESC, \"fid_book\".\"id\" ASC",
+      "params": [
+        "UTC",
+        "UTC"
+      ]
+    },
+    {
+      "name": "values_transform_groupby",
+      "kind": "values",
+      "sql": "SELECT EXTRACT(QUARTER FROM \"fid_book\".\"created_at\" AT TIME ZONE %s) AS \"created_at__quarter\", COUNT(\"fid_book\".\"id\") AS \"n\" FROM \"fid_book\" GROUP BY 1 ORDER BY 1 ASC",
+      "params": [
+        "UTC"
+      ]
+    },
+    {
+      "name": "values_transform_date",
+      "kind": "values",
+      "sql": "SELECT \"fid_book\".\"id\" AS \"id\", (\"fid_book\".\"created_at\" AT TIME ZONE %s)::date AS \"created_at__date\" FROM \"fid_book\" ORDER BY 1 ASC",
+      "params": [
+        "UTC"
+      ]
+    },
+    {
       "name": "filter_isnull_true",
       "kind": "model_ids",
       "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"editor_id\" IS NULL ORDER BY \"fid_book\".\"id\" ASC",

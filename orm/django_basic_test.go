@@ -260,34 +260,41 @@ func TestBasicAllLookup(t *testing.T) {
 	})
 }
 
-// The date part lookups (year, month, day, week_day) of the Django test are
-// transforms, which do not exist here.
-//
 // Ported from Django: tests/basic/tests.py::ModelLookupTest.test_rich_lookup
 func TestBasicRichLookup(t *testing.T) {
 	djangotest.EachDB(t, basModels(), func(t *testing.T, db *orm.DB) {
 		a := basSetUpLookup(t, db)
 		basAssertSame(t, basGet(t, db, "id__exact", a.ID), a)
 		basAssertSame(t, basGet(t, db, "headline__startswith", "Swallow"), a)
-		basAssertSame(t, basGet(t, db, "pub_date__range", []time.Time{day(2005, 1, 1), day(2005, 12, 31)}), a)
+		basAssertSame(t, basGet(t, db, "pub_date__year", 2005), a)
+		basAssertSame(t, basGet(t, db, "pub_date__year", 2005, "pub_date__month", 7), a)
+		basAssertSame(t, basGet(t, db, "pub_date__year", 2005, "pub_date__month", 7, "pub_date__day", 28), a)
+		basAssertSame(t, basGet(t, db, "pub_date__week_day", 5), a)
 	})
 }
 
-// The date part lookups of the Django test are left out, see above.
-//
 // Ported from Django: tests/basic/tests.py::ModelLookupTest.test_equal_lookup
 func TestBasicEqualLookup(t *testing.T) {
 	djangotest.EachDB(t, basModels(), func(t *testing.T, db *orm.DB) {
 		a := basSetUpLookup(t, db)
 		basAssertSame(t, basGet(t, db, "id", a.ID), a)
 		basAssertSame(t, basGet(t, db, "headline", "Swallow programs in Python"), a)
-		djangotest.AssertEqual(t, mustCount(t, orm.Query[basArticle](db).Filter("pub_date", day(2005, 7, 28))), int64(1))
-		djangotest.AssertEqual(t, mustCount(t, orm.Query[basArticle](db).Filter("pub_date", day(2004, 7, 28))), int64(0))
+		id := func(r basArticle) int64 { return r.ID }
+		for _, tc := range []struct {
+			args []any
+			want []int64
+		}{
+			{[]any{"pub_date__year", 2005}, []int64{a.ID}},
+			{[]any{"pub_date__year", 2004}, []int64{}},
+			{[]any{"pub_date__year", 2005, "pub_date__month", 7}, []int64{a.ID}},
+			{[]any{"pub_date__week_day", 5}, []int64{a.ID}},
+			{[]any{"pub_date__week_day", 6}, []int64{}},
+		} {
+			djangotest.AssertQuerySetEqual(t, orm.Query[basArticle](db).Filter(tc.args...), tc.want, id)
+		}
 	})
 }
 
-// The date part lookups of the Django test are left out, see above.
-//
 // Ported from Django: tests/basic/tests.py::ModelLookupTest.test_does_not_exist
 func TestBasicDoesNotExist(t *testing.T) {
 	djangotest.EachDB(t, basModels(), func(t *testing.T, db *orm.DB) {
@@ -298,10 +305,15 @@ func TestBasicDoesNotExist(t *testing.T) {
 			t.Fatalf("error = %v, want ErrDoesNotExist", err)
 		}
 		assertErrorContains(t, err, "basArticle matching query does not exist.")
-		_, err = orm.Query[basArticle](db).Get(ctx, "headline__startswith", "Swallow", "pub_date", day(2005, 8, 28))
+		_, err = orm.Query[basArticle](db).Get(ctx, "pub_date__year", 2005, "pub_date__month", 8)
 		if !errors.Is(err, orm.ErrDoesNotExist) {
 			t.Errorf("error = %v, want ErrDoesNotExist", err)
 		}
+		_, err = orm.Query[basArticle](db).Get(ctx, "pub_date__week_day", 6)
+		if !errors.Is(err, orm.ErrDoesNotExist) {
+			t.Fatalf("error = %v, want ErrDoesNotExist", err)
+		}
+		assertErrorContains(t, err, "basArticle matching query does not exist.")
 	})
 }
 
@@ -320,8 +332,6 @@ func TestBasicLookupByPrimaryKey(t *testing.T) {
 	})
 }
 
-// The date part lookups of the Django test are left out, see above.
-//
 // Ported from Django: tests/basic/tests.py::ModelLookupTest.test_too_many
 func TestBasicTooMany(t *testing.T) {
 	djangotest.EachDB(t, basModels(), func(t *testing.T, db *orm.DB) {
@@ -333,8 +343,8 @@ func TestBasicTooMany(t *testing.T) {
 		const msg = "get() returned more than one basArticle -- it returned 2!"
 		for _, args := range [][]any{
 			{"headline__startswith", "Swallow"},
-			{"pub_date", day(2005, 7, 28)},
-			{"pub_date", day(2005, 7, 28), "headline__startswith", "Swallow"},
+			{"pub_date__year", 2005},
+			{"pub_date__year", 2005, "pub_date__month", 7},
 		} {
 			_, err := orm.Query[basArticle](db).Get(ctx, args...)
 			if !errors.Is(err, orm.ErrMultipleObjectsReturned) {

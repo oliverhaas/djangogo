@@ -224,9 +224,9 @@ func TestUpdateUpdateAnnotatedQueryset(t *testing.T) {
 	})
 }
 
-// Only the F("data__name") case is ported: there are no transforms or
-// database functions to build the other three annotations from. The direct
-// reference without an annotation is rejected the same way.
+// Only the F("data__name") case is ported: there is no Lower transform and
+// there are no database functions to build the other three annotations
+// from. The direct reference without an annotation is rejected the same way.
 //
 // Ported from Django: tests/update/tests.py::AdvancedTests.test_update_with_joined_field_annotation
 func TestUpdateUpdateWithJoinedFieldAnnotation(t *testing.T) {

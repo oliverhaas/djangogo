@@ -96,7 +96,7 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		return c.column(p), nil
+		return c.keyNode(p)
 	case exprValue:
 		v, err := plainValue(c.q.db.Registry(), nil, e.value)
 		if err != nil {
@@ -210,10 +210,13 @@ func (c *compiler) build(items []selectItem, ordered bool) (*selectStmt, error) 
 // Django. An expression is ordered by once: its first term wins, because a
 // later one could never matter.
 func (c *compiler) resolveOrder(items []selectItem) ([]orderItem, error) {
-	selected := make(map[string]bool, len(items))
+	selected := make(map[string]string, 2*len(items))
 	for _, it := range items {
 		if it.alias != "" {
-			selected[it.alias] = true
+			selected[it.alias] = it.alias
+			if key := selectedExprKey(c.d, it.node); selected[key] == "" {
+				selected[key] = it.alias
+			}
 		}
 	}
 	terms := c.q.effectiveOrders()
@@ -230,11 +233,18 @@ func (c *compiler) resolveOrder(items []selectItem) ([]orderItem, error) {
 	return out, nil
 }
 
+// selectedExprKey returns the key under which resolveOrder records the
+// expression of a selected item with an alias, apart from the alias itself.
+func selectedExprKey(d Dialect, n sqlNode) string { return "expr " + nodeKey(d, n) }
+
 // appendOrderTerm resolves one orderTerm, expanding a related model's default
 // Meta.Ordering when the key ends on a relation attribute rather than its "_id"
-// column. stack tracks models on the active expansion chain to break cycles
-// while allowing sibling branches to reference the same model.
-func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected, seen map[string]bool, stack map[*Model]bool) ([]orderItem, error) {
+// column. selected maps the alias of each selected item that has one, and the
+// selectedExprKey of its expression, to the alias: a term on a selected
+// expression is ordered by the alias, as Django orders by its position. stack
+// tracks models on the active expansion chain to break cycles while allowing
+// sibling branches to reference the same model.
+func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected map[string]string, seen map[string]bool, stack map[*Model]bool) ([]orderItem, error) {
 	if t.random {
 		return append(out, orderItem{random: true}), nil
 	}
@@ -244,7 +254,7 @@ func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected, seen 
 	key := "annotation " + t.key
 	if n, ok := c.annots[t.key]; ok {
 		item.node = n
-		if selected[t.key] {
+		if selected[t.key] != "" {
 			item.alias = t.key
 		}
 	} else {
@@ -272,8 +282,12 @@ func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected, seen 
 			delete(stack, target)
 			return out, nil
 		}
-		item.node = c.column(p)
+		item.node, err = c.keyNode(p)
+		if err != nil {
+			return nil, err
+		}
 		key = nodeKey(c.d, item.node)
+		item.alias = selected[selectedExprKey(c.d, item.node)]
 	}
 	if seen[key] {
 		return out, nil
@@ -345,19 +359,38 @@ func (c *compiler) withOrderColumns(items []selectItem, order []orderItem) []sel
 // query groups by every column of its own table, so that each row stays one
 // group. The columns of the remaining selected and ordering expressions are
 // added because PostgreSQL requires them.
+//
+// An expression that is selected with an alias is grouped by its position in
+// the SELECT list, as Django does. PostgreSQL matches a grouped expression by
+// its text, and a transform written twice binds its parameters twice, under
+// different placeholders.
 func (c *compiler) groupBy(items []selectItem, order []orderItem) []sqlNode {
 	if !c.q.hasAggregates() {
 		return nil
+	}
+	positions := make(map[string]int)
+	for i, it := range items {
+		if it.alias == "" {
+			continue
+		}
+		if key := nodeKey(c.d, it.node); positions[key] == 0 {
+			positions[key] = i + 1
+		}
 	}
 	var out []sqlNode
 	seen := make(map[string]bool)
 	add := func(n sqlNode) {
 		for _, col := range columnsOf(n) {
 			key := nodeKey(c.d, col)
-			if !seen[key] {
-				seen[key] = true
-				out = append(out, col)
+			if seen[key] {
+				continue
 			}
+			seen[key] = true
+			if pos := positions[key]; pos > 0 {
+				out = append(out, rawNode{sql: strconv.Itoa(pos)})
+				continue
+			}
+			out = append(out, col)
 		}
 	}
 	if c.q.values == nil || !c.q.values.groups {
@@ -385,6 +418,10 @@ func columnsOf(n sqlNode) []sqlNode {
 		return []sqlNode{v}
 	case binaryNode:
 		return append(columnsOf(v.left), columnsOf(v.right)...)
+	case transformNode:
+		// Django groups by the transform itself: grouping by its column would
+		// split a group such as one year into one group per value.
+		return []sqlNode{v}
 	default:
 		return nil
 	}

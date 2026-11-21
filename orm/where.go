@@ -315,7 +315,7 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 	c.used = c.used[:0]
 
 	if n, ok := c.annots[parts[0]]; ok {
-		lookup, err := c.lookupOf(parts[1:], nil)
+		lookup, _, err := c.lookupOf(parts[1:], nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -330,7 +330,7 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 	if err != nil {
 		return nil, nil, err
 	}
-	lookup, err := c.lookupOf(path.rest, &path)
+	lookup, transforms, err := c.lookupOf(path.rest, &path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -340,7 +340,7 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 	if currentNegated {
 		for _, h := range path.hops {
 			if h.many {
-				node, err := c.splitExclude(path, lookup, value)
+				node, err := c.splitExclude(path, transforms, lookup, value)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -349,7 +349,7 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 		}
 	}
 	col := c.column(path)
-	pred, err := c.buildPredicate(lookup, col, path.field, value, path.expectedModel())
+	pred, err := c.fieldPredicate(lookup, transforms, col, path.field, value, path.expectedModel())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -382,44 +382,100 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 	return node, used, nil
 }
 
-// lookupOf returns the lookup named by the trailing parts of a key: "exact"
-// when there is none. path is the resolved field path, or nil when the key
-// names an annotation. Anything that is not a single lookup the field
-// supports is a FieldError worded as Django's Query.try_transform words it,
-// with the same "perhaps you meant" suggestions.
-func (c *compiler) lookupOf(rest []string, path *fieldPath) (string, error) {
+// lookupOf returns the lookup named by the trailing parts of a key, "exact"
+// when there is none, and the transforms before it, as Django's
+// Query.build_lookup splits them: every part but the last must be a
+// transform of the value before it, and the last is a lookup or, failing
+// that, a transform compared with "exact". path is the resolved field path,
+// or nil when the key names an annotation, which takes no transforms.
+// Anything else is a FieldError worded as Django's Query.try_transform words
+// it, with the same "perhaps you meant" suggestions.
+func (c *compiler) lookupOf(rest []string, path *fieldPath) (string, []string, error) {
 	if len(rest) == 0 {
-		return lookupExact, nil
+		return lookupExact, nil, nil
 	}
-	name := rest[0]
-	supported := lookupNames
-	kind := "an annotation"
-	if path != nil {
-		kind = djangoFieldName(path.field)
-		if path.relation {
-			supported = relationLookupNames
-			kind = "ForeignKey"
-			switch {
-			case path.m2m || (path.reverse != nil && path.reverse.Kind == RelM2M):
-				kind = "ManyToManyField"
-			case (path.reverse != nil && path.reverse.Kind == RelO2O) ||
-				(path.reverse == nil && path.field != nil && path.field.Rel != nil && path.field.Rel.Kind == RelO2O):
-				kind = "OneToOneField"
-			}
+	if path == nil || path.relation {
+		name := rest[0]
+		supported, kind := lookupNames, "an annotation"
+		if path != nil {
+			supported, kind = relationLookupNames, relationFieldName(path)
 		}
+		if len(rest) == 1 && slices.Contains(supported, name) {
+			return name, nil, nil
+		}
+		return "", nil, c.unsupportedLookup(strings.Join(rest, lookupSep), name, kind, supported)
 	}
-	if len(rest) == 1 && slices.Contains(supported, name) {
-		return name, nil
+	kind, fieldName := path.field.Kind, djangoFieldName(path.field)
+	last := len(rest) - 1
+	for _, name := range rest[:last] {
+		if !slices.Contains(transformsOf(kind), name) {
+			unsupported := strings.Join(rest[slices.Index(rest, name):], lookupSep)
+			return "", nil, c.unsupportedLookup(unsupported, name, fieldName, lookupCandidates(kind))
+		}
+		kind = transformOutput(name)
+		fieldName = djangoFieldName(&Field{Kind: kind})
 	}
+	switch name := rest[last]; {
+	case slices.Contains(lookupNames, name):
+		return name, rest[:last], nil
+	case slices.Contains(transformsOf(kind), name):
+		return lookupExact, rest, nil
+	default:
+		return "", nil, c.unsupportedLookup(name, name, fieldName, lookupCandidates(kind))
+	}
+}
+
+// relationFieldName returns the name of the Django field class of the
+// relation a path ends on, for error messages.
+func relationFieldName(path *fieldPath) string {
+	switch {
+	case path.m2m || (path.reverse != nil && path.reverse.Kind == RelM2M):
+		return "ManyToManyField"
+	case (path.reverse != nil && path.reverse.Kind == RelO2O) ||
+		(path.reverse == nil && path.field != nil && path.field.Rel != nil && path.field.Rel.Kind == RelO2O):
+		return "OneToOneField"
+	default:
+		return "ForeignKey"
+	}
+}
+
+// unsupportedLookup returns the FieldError of a key part that is neither a
+// lookup nor a transform of the value it follows. unsupported is the text
+// the message quotes, name the part that failed, kind the Django field class
+// of the value, and candidates the names the suggestions come from.
+func (c *compiler) unsupportedLookup(unsupported, name, kind string, candidates []string) error {
 	suggestion := "."
-	if similar := closeMatches(name, supported); len(similar) > 0 {
+	if similar := closeMatches(name, candidates); len(similar) > 0 {
 		suggestion = ", perhaps you meant " + strings.Join(similar, " or ") + "?"
 	}
-	return "", &FieldError{
+	return &FieldError{
 		Model: c.q.model.Name(),
-		Message: "unsupported lookup '" + strings.Join(rest, lookupSep) + "' for " + kind +
+		Message: "unsupported lookup '" + unsupported + "' for " + kind +
 			" or join on the field not permitted" + suggestion,
 	}
+}
+
+// fieldPredicate returns the predicate of a key that ends on a field: col,
+// the field's column, wrapped in transforms and compared with value under
+// lookup.
+func (c *compiler) fieldPredicate(lookup string, transforms []string, col colNode, field *Field, value any, expectedModel *Model) (*predicate, error) {
+	if len(transforms) == 0 {
+		return c.buildPredicate(lookup, col, field, value, expectedModel)
+	}
+	var lhs sqlNode = col
+	var last transformNode
+	kind := field.Kind
+	for _, name := range transforms {
+		tn, err := applyTransform(c.d, lhs, kind, name)
+		if err != nil {
+			return nil, err
+		}
+		lhs, last, kind = tn, tn, transformOutput(name)
+	}
+	if p, err := c.yearPredicate(lookup, last, value); p != nil || err != nil {
+		return p, err
+	}
+	return c.buildPredicate(lookup, lhs, &Field{Kind: kind}, value, nil)
 }
 
 // djangoFieldName returns the name of the Django field class that corresponds

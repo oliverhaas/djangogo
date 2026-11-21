@@ -682,9 +682,6 @@ func TestExpressionsNotIntroduceSQLInjectionViaUntrustedStringInclusion(t *testi
 	})
 }
 
-// Django's date subtest uses the transforms start__date and end__date, which
-// the ORM does not have, so that subtest is skipped.
-//
 // Ported from Django: tests/expressions/tests.py::IterableLookupInnerExpressionsTests.test_range_lookup_allows_F_expressions_and_expressions_for_dates
 func TestExpressionsRangeLookupAllowsFExpressionsForDates(t *testing.T) {
 	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
@@ -715,9 +712,6 @@ func TestExpressionsRangeLookupAllowsFExpressionsForDates(t *testing.T) {
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				if tc.name == "Dates" {
-					t.Skip("needs the date transform (result_time__date); the ORM has no transforms")
-				}
 				queryset := orm.Query[expResult](db).Filter(tc.lookup, tc.within)
 				djangotest.AssertQuerySetEqual(t, queryset, []int64{r1.ID}, func(r expResult) int64 { return r.ID })
 			})
@@ -828,5 +822,48 @@ func TestExpressionsInsensitivePatternsEscape(t *testing.T) {
 		djangotest.AssertQuerySetEqual(t,
 			orm.Query[expEmployee](db).Filter("firstname__iendswith", orm.F("lastname")),
 			[]int64{claude.ID}, expEmployeeID)
+	})
+}
+
+// expFieldTransformSetUp creates the experiment of
+// FieldTransformTests.setUpTestData.
+func expFieldTransformSetUp(t *testing.T, db *orm.DB) {
+	t.Helper()
+	sday := day(2010, 6, 25)
+	stime := time.Date(2010, 6, 25, 12, 15, 30, 747000000, time.UTC)
+	create(t, db, &expExperiment{
+		Name: "Experiment 1", Assigned: sday, Completed: sday.AddDate(0, 0, 2),
+		Start: stime, End: stime.AddDate(0, 0, 2),
+	})
+}
+
+// Ported from Django: tests/expressions/tests.py::FieldTransformTests.test_month_aggregation
+func TestExpressionsMonthAggregation(t *testing.T) {
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		expFieldTransformSetUp(t, db)
+		vals, err := orm.Query[expExperiment](db).Aggregate(context.Background(),
+			"month_count", orm.Count("assigned__month"))
+		if err != nil {
+			t.Fatalf("Aggregate: %v", err)
+		}
+		djangotest.AssertEqual(t, vals, map[string]any{"month_count": int64(1)})
+	})
+}
+
+// Ported from Django: tests/expressions/tests.py::FieldTransformTests.test_transform_in_values
+func TestExpressionsTransformInValues(t *testing.T) {
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		expFieldTransformSetUp(t, db)
+		assertValues(t, orm.Query[expExperiment](db).Values("assigned__month"),
+			[]map[string]any{{"assigned__month": int64(6)}})
+	})
+}
+
+// Ported from Django: tests/expressions/tests.py::FieldTransformTests.test_multiple_transforms_in_values
+func TestExpressionsMultipleTransformsInValues(t *testing.T) {
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		expFieldTransformSetUp(t, db)
+		assertValues(t, orm.Query[expExperiment](db).Values("end__date__month"),
+			[]map[string]any{{"end__date__month": int64(6)}})
 	})
 }

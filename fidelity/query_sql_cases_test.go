@@ -150,6 +150,75 @@ func canonicalQueryCases() []queryCase {
 				return runBookIDs(t, db, books(db).Filter("created_at__range", []time.Time{dtStart, dtEnd}).OrderBy("id"), false)
 			},
 		},
+		// Date and time transforms
+		{
+			name: "filter_transform_year",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				return runBookIDs(t, db, books(db).Filter("created_at__year", 2024).OrderBy("id"), false)
+			},
+		},
+		{
+			name: "filter_transform_month_gte",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				return runBookIDs(t, db, books(db).Filter("created_at__month__gte", 6).OrderBy("id"), false)
+			},
+		},
+		{
+			name: "filter_transform_date",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				return runBookIDs(t, db, books(db).Filter("created_at__date", orm.NewDate(2024, time.March, 20)), false)
+			},
+		},
+		{
+			name: "filter_transform_week_day",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				return runBookIDs(t, db, books(db).Filter("created_at__week_day", 3).OrderBy("id"), false)
+			},
+		},
+		{
+			name: "filter_transform_hour_lt",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				return runBookIDs(t, db, books(db).Filter("created_at__hour__lt", 12).OrderBy("id"), false)
+			},
+		},
+		{
+			name: "filter_transform_time",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				return runBookIDs(t, db, books(db).Filter("created_at__time", orm.NewTime(14, 30, 0, 0)), false)
+			},
+		},
+		{
+			name: "exclude_transform_quarter",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				return runBookIDs(t, db, books(db).Exclude("created_at__quarter", 2).OrderBy("id"), false)
+			},
+		},
+		{
+			name: "order_by_transform",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				return runBookIDs(t, db, books(db).OrderBy("-created_at__hour", "id"), false)
+			},
+		},
+		{
+			name: "order_by_transforms_same_column",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				qs := books(db).OrderBy("created_at__year", "-created_at__month", "id")
+				return runBookIDs(t, db, qs, false)
+			},
+		},
+		{
+			name: "values_transform_groupby",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				vs := books(db).Values("created_at__quarter").Annotate("n", orm.Count("id")).OrderBy("created_at__quarter")
+				return runValues(t, db, vs)
+			},
+		},
+		{
+			name: "values_transform_date",
+			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {
+				return runValues(t, db, books(db).Values("id", "created_at__date").OrderBy("id"))
+			},
+		},
 		{
 			name: "filter_isnull_true",
 			run: func(t *testing.T, db *orm.DB) queryCaseOutcome {

@@ -68,6 +68,16 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `AssertNumQueries`; `AtomicDurable`; and `ErrUniqueViolation`,
   `ErrForeignKeyViolation`, `ErrNotNullViolation` and `ErrCheckViolation` for
   `errors.Is`.
+- ORM queries: Django's date and time transforms (`year`, `iso_year`, `month`,
+  `day`, `week`, `week_day`, `iso_week_day`, `quarter`, `hour`, `minute`,
+  `second`, `date` and `time`) work in `Filter`, `Exclude`, `OrderBy`, `Values`,
+  `F` and aggregates, also across relations and chained with a lookup, for
+  example `Filter("pub_date__year__gte", 2005)` or
+  `Values("created_at__date")`. A datetime is read in UTC
+  (`orm.TransformTimeZone`). The SQL is Django's on both databases: a year
+  lookup is a `BETWEEN` on the column, and `Values` with `Annotate` groups a
+  transform by its position in the SELECT list. A third-party backend gives the
+  SQL through the new `orm.TransformDialect` interface.
 - Migrations: `makemigrations` asks whether a field or a model was renamed and
   writes `RenameField` or `RenameModel`, so a rename keeps the column's data
   (`--noinput` answers no and warns). Each app has its own history under
@@ -202,7 +212,7 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   including `SimpleListFilter`. Bulk actions: `delete_selected` with Django's
   confirmation page, custom actions on `ModelAdmin.Actions` or
   `AdminSite.AddAction`, and selection across pages.
-- The fidelity harness also compares query SQL (75 cases) and migration SQL (25
+- The fidelity harness also compares query SQL (86 cases) and migration SQL (25
   operations) with Django 6.0.3 on SQLite and PostgreSQL, and
   `go generate ./fidelity/...` regenerates the golden files from Django.
 

@@ -879,3 +879,23 @@ func TestLookupIsnullTextfield(t *testing.T) {
 		djangotest.AssertQuerySetEqual(t, lkAuthors(db).Filter("bio__isnull", false), []int64{f.au1.ID}, id)
 	})
 }
+
+// Ported from Django: tests/lookup/tests.py::LookupTests.test_chain_date_time_lookups
+func TestLookupChainDateTimeLookups(t *testing.T) {
+	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {
+		f := lkSetUp(t, db)
+		for _, tc := range []struct {
+			key   string
+			value int
+			want  []*lkArticle
+		}{
+			{"pub_date__month__gt", 7, []*lkArticle{f.a5, f.a6}},
+			{"pub_date__day__gte", 27, []*lkArticle{f.a2, f.a3, f.a4, f.a7}},
+			{"pub_date__hour__lt", 8, []*lkArticle{f.a1, f.a2, f.a3, f.a4, f.a7}},
+			{"pub_date__minute__lte", 0, []*lkArticle{f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7}},
+		} {
+			qs := orm.Query[lkArticle](db).Filter(tc.key, tc.value)
+			djangotest.AssertQuerySetEqual(t, qs, lkIDs(tc.want...), lkID, djangotest.Unordered())
+		}
+	})
+}

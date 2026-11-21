@@ -262,6 +262,207 @@
       ]
     },
     {
+      "name": "filter_transform_year",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"created_at\" BETWEEN %s AND %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "2024-01-01 00:00:00",
+        "2024-12-31 23:59:59.999999"
+      ],
+      "result": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "filter_transform_month_gte",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE django_datetime_extract(%s, \"fid_book\".\"created_at\", %s, %s) >= %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "month",
+        "UTC",
+        "UTC",
+        6
+      ],
+      "result": [
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "filter_transform_date",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE django_datetime_cast_date(\"fid_book\".\"created_at\", %s, %s) = %s",
+      "params": [
+        "UTC",
+        "UTC",
+        "2024-03-20"
+      ],
+      "result": [
+        2
+      ]
+    },
+    {
+      "name": "filter_transform_week_day",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE django_datetime_extract(%s, \"fid_book\".\"created_at\", %s, %s) = %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "week_day",
+        "UTC",
+        "UTC",
+        3
+      ],
+      "result": [
+        4,
+        5
+      ]
+    },
+    {
+      "name": "filter_transform_hour_lt",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE django_datetime_extract(%s, \"fid_book\".\"created_at\", %s, %s) < %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "hour",
+        "UTC",
+        "UTC",
+        12
+      ],
+      "result": [
+        1,
+        3
+      ]
+    },
+    {
+      "name": "filter_transform_time",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE django_datetime_cast_time(\"fid_book\".\"created_at\", %s, %s) = %s",
+      "params": [
+        "UTC",
+        "UTC",
+        "14:30:00"
+      ],
+      "result": [
+        2
+      ]
+    },
+    {
+      "name": "exclude_transform_quarter",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE NOT (django_datetime_extract(%s, \"fid_book\".\"created_at\", %s, %s) = %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "quarter",
+        "UTC",
+        "UTC",
+        2
+      ],
+      "result": [
+        1,
+        2,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "order_by_transform",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" ORDER BY django_datetime_extract(%s, \"fid_book\".\"created_at\", %s, %s) DESC, \"fid_book\".\"id\" ASC",
+      "params": [
+        "hour",
+        "UTC",
+        "UTC"
+      ],
+      "result": [
+        4,
+        2,
+        5,
+        1,
+        3
+      ]
+    },
+    {
+      "name": "order_by_transforms_same_column",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" ORDER BY django_datetime_extract(%s, \"fid_book\".\"created_at\", %s, %s) ASC, django_datetime_extract(%s, \"fid_book\".\"created_at\", %s, %s) DESC, \"fid_book\".\"id\" ASC",
+      "params": [
+        "year",
+        "UTC",
+        "UTC",
+        "month",
+        "UTC",
+        "UTC"
+      ],
+      "result": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ]
+    },
+    {
+      "name": "values_transform_groupby",
+      "kind": "values",
+      "sql": "SELECT django_datetime_extract(%s, \"fid_book\".\"created_at\", %s, %s) AS \"created_at__quarter\", COUNT(\"fid_book\".\"id\") AS \"n\" FROM \"fid_book\" GROUP BY 1 ORDER BY 1 ASC",
+      "params": [
+        "quarter",
+        "UTC",
+        "UTC"
+      ],
+      "result": [
+        {
+          "created_at__quarter": 1,
+          "n": 2
+        },
+        {
+          "created_at__quarter": 2,
+          "n": 1
+        },
+        {
+          "created_at__quarter": 3,
+          "n": 1
+        },
+        {
+          "created_at__quarter": 4,
+          "n": 1
+        }
+      ]
+    },
+    {
+      "name": "values_transform_date",
+      "kind": "values",
+      "sql": "SELECT \"fid_book\".\"id\" AS \"id\", django_datetime_cast_date(\"fid_book\".\"created_at\", %s, %s) AS \"created_at__date\" FROM \"fid_book\" ORDER BY 1 ASC",
+      "params": [
+        "UTC",
+        "UTC"
+      ],
+      "result": [
+        {
+          "id": 1,
+          "created_at__date": "2024-01-15"
+        },
+        {
+          "id": 2,
+          "created_at__date": "2024-03-20"
+        },
+        {
+          "id": 3,
+          "created_at__date": "2024-06-01"
+        },
+        {
+          "id": 4,
+          "created_at__date": "2024-09-10"
+        },
+        {
+          "id": 5,
+          "created_at__date": "2024-11-05"
+        }
+      ]
+    },
+    {
       "name": "filter_isnull_true",
       "kind": "model_ids",
       "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"editor_id\" IS NULL ORDER BY \"fid_book\".\"id\" ASC",

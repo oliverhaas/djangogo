@@ -62,8 +62,9 @@ caught and removed.
 | `count_distinct` | Emits `SELECT COUNT(*) FROM (SELECT DISTINCT fid_book.author_id AS author FROM fid_book) subquery` | Emits `SELECT COUNT(*) AS __count FROM (SELECT DISTINCT fid_book.author_id FROM fid_book) subquery` |
 | `exists_all`, `exists_filtered`, `exists_none` | Emits `SELECT %s AS a FROM ... LIMIT 1` with bound param `1` | Emits `SELECT EXISTS(SELECT 1 FROM ...)` |
 | `values_list`, `values_list_flat`, `distinct_extra_order`, `annotate_expr` | Emits `AS <key>` aliases on every selected `values()` / `values_list()` column | Omits redundant aliases on plain columns (keeps aliases on annotations); on PostgreSQL `annotate_expr` also casts `$1::bigint` |
-| `values_fields`, `distinct_values`, `distinct_values_relation` | Aliases selected columns and emits positional `ORDER BY 1 ASC` | Writes explicit column names in `ORDER BY` without redundant column aliases |
+| `values_fields`, `distinct_values`, `distinct_values_relation`, `values_transform_date` | Aliases selected columns and emits positional `ORDER BY 1 ASC` | Writes explicit column names in `ORDER BY` without redundant column aliases (a transform keeps its alias) |
 | `annotate_values_groupby`, `annotate_having` | Aliases selected columns and emits positional `GROUP BY 1` and `ORDER BY 1 ASC` | Writes explicit column names in `GROUP BY` and `ORDER BY` without redundant column aliases |
+| `values_transform_groupby` | Emits positional `GROUP BY 1` and `ORDER BY 1 ASC` | Emits positional `GROUP BY 1` too, so that PostgreSQL matches the grouped transform, and orders by its alias |
 
 ### PostgreSQL only
 

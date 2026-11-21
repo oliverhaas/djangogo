@@ -325,6 +325,23 @@ func TestQueriesTicket9997(t *testing.T) {
 	})
 }
 
+// Ported from Django: tests/queries/tests.py::Queries1Tests.test_order_by_related_field_transform
+//
+// DateTimePK has an integer primary key here, so the month is taken from its
+// date field: "date__date__month" stands for Django's "date__month".
+func TestQueriesOrderByRelatedFieldTransform(t *testing.T) {
+	djangotest.EachDB(t, qModels(), func(t *testing.T, db *orm.DB) {
+		qSetUp(t, db)
+		d12 := create(t, db, &qDateTimePK{Date: time.Date(2021, 12, 10, 0, 0, 0, 0, time.UTC)})
+		extra12 := create(t, db, &qExtraInfo{Info: "extra 12", Date: fkTo[qDateTimePK](d12.ID)})
+		d11 := create(t, db, &qDateTimePK{Date: time.Date(2022, 11, 10, 0, 0, 0, 0, time.UTC)})
+		extra11 := create(t, db, &qExtraInfo{Info: "extra 11", Date: fkTo[qDateTimePK](d11.ID)})
+		djangotest.AssertQuerySetEqual(t,
+			orm.Query[qExtraInfo](db).Filter("date__isnull", false).OrderBy("date__date__month"),
+			[]int64{extra11.ID, extra12.ID}, func(e qExtraInfo) int64 { return e.ID })
+	})
+}
+
 // Ported from Django: tests/queries/tests.py::Queries1Tests.test_get_clears_ordering
 func TestQueriesGetClearsOrdering(t *testing.T) {
 	djangotest.EachDB(t, qModels(), func(t *testing.T, db *orm.DB) {

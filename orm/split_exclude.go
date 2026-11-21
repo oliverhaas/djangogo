@@ -9,7 +9,7 @@ package orm
 // related row matches. Evaluating the positive condition inside EXISTS and
 // keeping the negation on the outer whereNode excludes every parent row for
 // which any matching related row exists.
-func (c *compiler) splitExclude(path fieldPath, lookup string, value any) (*whereNode, error) {
+func (c *compiler) splitExclude(path fieldPath, transforms []string, lookup string, value any) (*whereNode, error) {
 	firstMany := -1
 	for i, h := range path.hops {
 		if h.many {
@@ -21,7 +21,7 @@ func (c *compiler) splitExclude(path fieldPath, lookup string, value any) (*wher
 	// Build the predicate against the outer compiler so that F(...) expressions
 	// on the right-hand side bind to the outer query's tables and aliases.
 	placeholder := colNode{join: c.joins.base, field: path.field}
-	pred, err := c.buildPredicate(lookup, placeholder, path.field, value, path.expectedModel())
+	pred, err := c.fieldPredicate(lookup, transforms, placeholder, path.field, value, path.expectedModel())
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (c *compiler) splitExclude(path fieldPath, lookup string, value any) (*wher
 			j.outer = true
 		}
 		targetJoin := subJoins[len(subJoins)-1]
-		pred.lhs = colNode{join: targetJoin, field: path.field}
+		pred.lhs = withColumn(pred.lhs, colNode{join: targetJoin, field: path.field})
 		corrPred := &predicate{
 			lookup: lookupExact,
 			lhs:    colNode{join: subJS.base, field: basePK},
@@ -82,7 +82,7 @@ func (c *compiler) splitExclude(path fieldPath, lookup string, value any) (*wher
 		subJS.demote(restJoins)
 		targetJoin = restJoins[len(restJoins)-1]
 	}
-	pred.lhs = colNode{join: targetJoin, field: path.field}
+	pred.lhs = withColumn(pred.lhs, colNode{join: targetJoin, field: path.field})
 	corrPred := &predicate{
 		lookup: lookupExact,
 		lhs:    colNode{join: subJS.base, field: &Field{Column: firstHop.toColumn}},

@@ -573,3 +573,44 @@ func TestDateTimeDateTimeFieldsSaveCompletely(t *testing.T) {
 		djangotest.AssertEqual(t, loaded.T, tim)
 	})
 }
+
+// Django runs the test with USE_TZ = False; the ORM always has USE_TZ =
+// True in UTC, so the datetimes are in UTC.
+//
+// Ported from Django: tests/model_fields/test_datetimefield.py::DateTimeFieldTests.test_lookup_date_without_use_tz
+func TestDateTimeLookupDateWithoutUseTZ(t *testing.T) {
+	djangotest.EachDB(t, []any{&dateTimeAllModel{}}, func(t *testing.T, db *orm.DB) {
+		d := orm.NewDate(2014, time.March, 12)
+		dt1 := time.Date(2014, time.March, 12, 21, 22, 23, 240000000, time.UTC)
+		dt2 := time.Date(2014, time.March, 11, 21, 22, 23, 240000000, time.UTC)
+		tim := orm.NewTime(21, 22, 23, 240000000)
+		m := create(t, db, &dateTimeAllModel{D: d, DT: dt1, T: tim})
+		// Other model with different datetime.
+		create(t, db, &dateTimeAllModel{D: d, DT: dt2, T: tim})
+		got, err := orm.Query[dateTimeAllModel](db).Get(context.Background(), "dt__date", d)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, got.ID, m.ID)
+	})
+}
+
+// The ORM has one time zone, UTC, so only the UTC half of the Django test is
+// ported. The datetimes keep their Vancouver offset (UTC-7 in March 2014)
+// when they are saved, and __date converts them to UTC.
+//
+// Ported from Django: tests/model_fields/test_datetimefield.py::DateTimeFieldTests.test_lookup_date_with_use_tz
+func TestDateTimeLookupDateWithUseTZ(t *testing.T) {
+	djangotest.EachDB(t, []any{&dateTimeAllModel{}}, func(t *testing.T, db *orm.DB) {
+		vancouver := time.FixedZone("PDT", -7*60*60)
+		d := orm.NewDate(2014, time.March, 12)
+		// The following is equivalent to UTC 2014-03-12 17:22:23.24.
+		dt1 := time.Date(2014, time.March, 12, 10, 22, 23, 240000000, vancouver)
+		// The following is equivalent to UTC 2014-03-13 04:22:23.24.
+		dt2 := time.Date(2014, time.March, 12, 21, 22, 23, 240000000, vancouver)
+		tim := orm.NewTime(21, 22, 23, 240000000)
+		m1 := create(t, db, &dateTimeAllModel{D: d, DT: dt1, T: tim})
+		create(t, db, &dateTimeAllModel{D: d, DT: dt2, T: tim})
+		// In UTC, the __date only matches one of them.
+		djangotest.AssertQuerySetEqual(t, orm.Query[dateTimeAllModel](db).Filter("dt__date", d),
+			[]int64{m1.ID}, func(m dateTimeAllModel) int64 { return m.ID }, djangotest.Unordered())
+	})
+}

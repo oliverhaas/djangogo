@@ -154,8 +154,8 @@ func (d Dialect) CreateTableSQL(m *orm.Model) string {
 // shared across queries. This covers both the ":memory:" form and the named
 // shared form "file:name?mode=memory&cache=shared" (dsn containing "mode=memory").
 func Open(dsn string) (*sql.DB, error) {
-	if regexpRegistration != nil {
-		return nil, fmt.Errorf("sqlite: register regexp function: %w", regexpRegistration)
+	if functionRegistration != nil {
+		return nil, fmt.Errorf("sqlite: register SQL functions: %w", functionRegistration)
 	}
 	db, err := sql.Open("sqlite", withForeignKeys(dsn))
 	if err != nil {

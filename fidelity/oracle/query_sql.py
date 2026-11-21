@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sys
 import types
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -295,7 +295,10 @@ def encode_value(value: Any) -> Any:
         return float(value)
     if isinstance(value, datetime):
         dt = value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
-        return {"__datetime__": dt.strftime("%Y-%m-%dT%H:%M:%SZ")}
+        layout = "%Y-%m-%dT%H:%M:%S.%fZ" if dt.microsecond else "%Y-%m-%dT%H:%M:%SZ"
+        return {"__datetime__": dt.strftime(layout)}
+    if isinstance(value, (date, time)):
+        return value.isoformat()
     if isinstance(value, dict):
         return {k: encode_value(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -428,6 +431,67 @@ def build_cases(Country: Any, Publisher: Any, Author: Any, Book: Any) -> list[di
             "name": "filter_range_datetime",
             "kind": "model_ids",
             "build": lambda u: books(u).filter(created_at__range=[dt_start, dt_end]).order_by("id"),
+        },
+        # --- Date and time transforms ---
+        {
+            "name": "filter_transform_year",
+            "kind": "model_ids",
+            "build": lambda u: books(u).filter(created_at__year=2024).order_by("id"),
+        },
+        {
+            "name": "filter_transform_month_gte",
+            "kind": "model_ids",
+            "build": lambda u: books(u).filter(created_at__month__gte=6).order_by("id"),
+        },
+        {
+            "name": "filter_transform_date",
+            "kind": "model_ids",
+            "build": lambda u: books(u).filter(created_at__date=date(2024, 3, 20)),
+        },
+        {
+            "name": "filter_transform_week_day",
+            "kind": "model_ids",
+            "build": lambda u: books(u).filter(created_at__week_day=3).order_by("id"),
+        },
+        {
+            "name": "filter_transform_hour_lt",
+            "kind": "model_ids",
+            "build": lambda u: books(u).filter(created_at__hour__lt=12).order_by("id"),
+        },
+        {
+            "name": "filter_transform_time",
+            "kind": "model_ids",
+            "build": lambda u: books(u).filter(created_at__time=time(14, 30)),
+        },
+        {
+            "name": "exclude_transform_quarter",
+            "kind": "model_ids",
+            "build": lambda u: books(u).exclude(created_at__quarter=2).order_by("id"),
+        },
+        {
+            "name": "order_by_transform",
+            "kind": "model_ids",
+            "build": lambda u: books(u).order_by("-created_at__hour", "id"),
+        },
+        {
+            "name": "order_by_transforms_same_column",
+            "kind": "model_ids",
+            "build": lambda u: books(u).order_by(
+                "created_at__year", "-created_at__month", "id"
+            ),
+        },
+        {
+            "name": "values_transform_groupby",
+            "kind": "values",
+            "build": lambda u: books(u)
+            .values("created_at__quarter")
+            .annotate(n=Count("id"))
+            .order_by("created_at__quarter"),
+        },
+        {
+            "name": "values_transform_date",
+            "kind": "values",
+            "build": lambda u: books(u).values("id", "created_at__date").order_by("id"),
         },
         {
             "name": "filter_isnull_true",

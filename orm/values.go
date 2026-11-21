@@ -44,7 +44,18 @@ func (c *compiler) valuesItems() ([]selectItem, []string, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		add(key, selectItem{node: c.column(p)})
+		n, err := c.keyNode(p)
+		if err != nil {
+			return nil, nil, err
+		}
+		it := selectItem{node: n}
+		if _, isColumn := n.(colNode); !isColumn {
+			// A transform is selected under its key, as Django selects
+			// every values() item, so that GROUP BY and ORDER BY can
+			// refer to it.
+			it.alias = key
+		}
+		add(key, it)
 	}
 	for _, name := range c.annotNames[spec.annotated:] {
 		if !have[name] {

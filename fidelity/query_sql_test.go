@@ -74,6 +74,8 @@ var querySQLDivergences = map[dialectCaseKey]string{
 	{dialect: "*", name: "annotate_values_groupby"}:  "Django aliases selected column and uses positional GROUP BY 1 / ORDER BY 1; Djan-Go-Go uses explicit columns",
 	{dialect: "*", name: "annotate_having"}:          "Django aliases selected column and uses positional GROUP BY 1 / ORDER BY 1; Djan-Go-Go uses explicit columns",
 	{dialect: "*", name: "annotate_expr"}:            "Django aliases selected column (and omits ::bigint cast on PostgreSQL); Djan-Go-Go omits redundant alias and casts PG literals",
+	{dialect: "*", name: "values_transform_groupby"}: "Django uses positional ORDER BY 1; Djan-Go-Go orders by the transform's alias",
+	{dialect: "*", name: "values_transform_date"}:    "Django aliases selected values() columns and uses positional ORDER BY 1; Djan-Go-Go uses explicit columns",
 
 	// PostgreSQL iexact: Django uses UPPER(col::text) = UPPER(%s); Djan-Go-Go
 	// routes iexact through LIKE ... ESCAPE '\'.

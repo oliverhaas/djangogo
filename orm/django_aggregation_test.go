@@ -34,7 +34,7 @@ type agBook struct {
 	Name      string `orm:"max_length=255"`
 	Pages     int64
 	Contact   orm.FK[agAuthor]
-	Publisher orm.FK[agPublisher]
+	Publisher orm.FK[agPublisher] `orm:"related_query_name=book"`
 	Pubdate   time.Time
 }
 
@@ -173,6 +173,15 @@ func TestAggregationRelatedAggregate(t *testing.T) {
 		vals := agAggregate(t, orm.Query[agBook](db), orm.Sum("publisher__num_awards"))
 		djangotest.AssertEqual(t, len(vals), 1)
 		djangotest.AssertEqual(t, vals["publisher__num_awards__sum"], any(int64(30)))
+	})
+}
+
+// Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregate_join_transform
+func TestAggregationAggregateJoinTransform(t *testing.T) {
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		vals := agAggregate(t, orm.Query[agPublisher](db), "min_year", orm.Min("book__pubdate__year"))
+		djangotest.AssertEqual(t, vals, map[string]any{"min_year": int64(1991)})
 	})
 }
 
