@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -149,14 +150,20 @@ func EachDB(t *testing.T, models []any, fn func(t *testing.T, db *orm.DB)) {
 }
 
 // createTables creates the table of every registered model, referenced tables
-// before the tables that reference them.
+// before the tables that reference them. One transaction holds them all, so
+// PostgreSQL commits the schema once instead of once per statement.
 func createTables(t testing.TB, db *orm.DB) {
 	t.Helper()
-	ctx := context.Background()
-	for _, m := range creationOrder(db.Registry().Models()) {
-		if err := db.CreateTable(ctx, m); err != nil {
-			t.Fatalf("djangotest: create table for %s: %v", m.Label(), err)
+	err := db.Atomic(context.Background(), func(ctx context.Context) error {
+		for _, m := range creationOrder(db.Registry().Models()) {
+			if err := db.CreateTable(ctx, m); err != nil {
+				return fmt.Errorf("create table for %s: %w", m.Label(), err)
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("djangotest: %v", err)
 	}
 }
 

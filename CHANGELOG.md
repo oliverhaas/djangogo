@@ -587,6 +587,8 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - Admin: the success message after an add, a change or a delete links the
   object, as in Django. The delete page posts to its own URL, and its cancel
   link goes back in the browser history.
+- djangotest: `NewDB` and `NewPostgresDB` create the tables in one
+  transaction, which sets up a PostgreSQL test database faster.
 
 ### Fixed
 
