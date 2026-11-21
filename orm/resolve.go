@@ -51,11 +51,16 @@ type relationPath struct {
 	// target is the model the relation leads to.
 	target *Model
 	// local is the field of the starting model whose column already holds the
-	// target's primary key, which is the case for a forward foreign key. A key
-	// that ends on the relation, or on the target's primary key, then needs no
-	// join. It is nil for a relation that has no such column.
+	// target's primary key, which is the case for a forward foreign key or O2O.
+	// A key that ends on the relation, or on the target's primary key, then
+	// needs no join. It is nil for a reverse relation.
 	local *Field
+	// reverse is set when the relation traverses a reverse FK or O2O.
+	reverse *ReverseRelation
 }
+
+// isForwardToOne reports whether k is a forward single-valued relation (FK or O2O).
+func isForwardToOne(k RelKind) bool { return k == RelFK || k == RelO2O }
 
 // lookupName resolves one part of a key against model m. It returns the field
 // the name addresses, when there is one, and the relation it traverses, when
@@ -63,27 +68,38 @@ type relationPath struct {
 // its column ("author_id"), Django's attname for a relation ("<attr>_id"), or
 // "pk" for the primary key.
 //
-// This is the extension point for new relation kinds: a reverse foreign key or
-// a many-to-many accessor is a name that returns a relationPath with a nil
-// field and a nil local.
+// Reverse relations (reverse FK and reverse O2O) are matched by their
+// QueryName when no concrete field of m carries name.
 func lookupName(m *Model, name string) (*Field, *relationPath, bool) {
-	f, ok := lookupField(m, name)
-	if !ok {
-		return nil, nil, false
+	if f, ok := lookupField(m, name); ok {
+		if f.Rel == nil || !isForwardToOne(f.Rel.Kind) || f.Rel.Target == nil || f.Rel.Target.PrimaryKey() == nil {
+			return f, nil, true
+		}
+		return f, &relationPath{
+			hops: []hop{{
+				fromColumn: f.Column,
+				target:     f.Rel.Target,
+				toColumn:   f.Rel.Target.PrimaryKey().Column,
+				nullable:   f.Null,
+			}},
+			target: f.Rel.Target,
+			local:  f,
+		}, true
 	}
-	if f.Rel == nil || f.Rel.Kind != RelFK || f.Rel.Target == nil || f.Rel.Target.PrimaryKey() == nil {
-		return f, nil, true
+	if rev, ok := m.lookupReverseQuery(name); ok && m.PrimaryKey() != nil && rev.Source.PrimaryKey() != nil {
+		return nil, &relationPath{
+			hops: []hop{{
+				fromColumn: m.PrimaryKey().Column,
+				target:     rev.Source,
+				toColumn:   rev.Field.Column,
+				nullable:   true,
+				many:       rev.Kind == RelFK,
+			}},
+			target:  rev.Source,
+			reverse: rev,
+		}, true
 	}
-	return f, &relationPath{
-		hops: []hop{{
-			fromColumn: f.Column,
-			target:     f.Rel.Target,
-			toColumn:   f.Rel.Target.PrimaryKey().Column,
-			nullable:   f.Null,
-		}},
-		target: f.Rel.Target,
-		local:  f,
-	}, true
+	return nil, nil, false
 }
 
 // lookupField finds the field of m addressed by name: "pk", an attribute
@@ -115,13 +131,19 @@ func attname(f *Field) string {
 	return f.Attr
 }
 
-// fieldChoices lists the keys that address a field of m, sorted, for the
-// "Choices are" part of a FieldError. extra names (annotations) are included.
+// fieldChoices lists the keys that address a field or reverse relation of m,
+// sorted, for the "Choices are" part of a FieldError. extra names
+// (annotations) are included.
 func fieldChoices(m *Model, extra []string) string {
 	seen := make(map[string]bool)
 	for _, f := range m.fields {
 		seen[f.Attr] = true
 		seen[attname(f)] = true
+	}
+	for _, rev := range m.reverseRels {
+		if !rev.Hidden {
+			seen[rev.QueryName] = true
+		}
 	}
 	for _, name := range extra {
 		seen[name] = true
@@ -148,9 +170,31 @@ type fieldPath struct {
 	// relation reports that the key ended on a relation rather than on a
 	// plain field.
 	relation bool
+	// reverse is set when the key ended on a reverse relation.
+	reverse *ReverseRelation
+	// keyWasPK reports that the final resolved segment was literally "pk".
+	keyWasPK bool
 	// trimmed holds the hops of a trailing relation whose join is not needed,
 	// because field already holds the key of its target.
 	trimmed []hop
+}
+
+// expectedModel returns the model type expected when a model instance is passed
+// as the filter value for this path, or nil when no model check applies.
+func (p fieldPath) expectedModel() *Model {
+	if p.reverse != nil {
+		return p.model
+	}
+	if p.keyWasPK {
+		return p.model
+	}
+	if p.field != nil && p.field.Rel != nil && p.field.Rel.Target != nil {
+		return p.field.Rel.Target
+	}
+	if p.field != nil && p.field.PrimaryKey {
+		return p.model
+	}
+	return nil
 }
 
 // resolvePath walks the parts of a key from model m, following relations for
@@ -163,6 +207,7 @@ type fieldPath struct {
 func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 	p := fieldPath{model: m}
 	var pending *relationPath
+	var pendingWasPK bool
 	for i, name := range parts {
 		scope := p.model
 		if pending != nil {
@@ -193,9 +238,11 @@ func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 		}
 		if rel != nil {
 			pending = rel
+			pendingWasPK = name == "pk"
 			continue
 		}
 		p.field = f
+		p.keyWasPK = name == "pk"
 		p.rest = parts[i+1:]
 		return p, nil
 	}
@@ -204,6 +251,7 @@ func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 	}
 	// The key ended on a relation.
 	p.relation = true
+	p.keyWasPK = pendingWasPK
 	if pending.local != nil {
 		p.field = pending.local
 		p.trimmed = pending.hops
@@ -212,6 +260,7 @@ func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 	p.hops = append(p.hops, pending.hops...)
 	p.model = pending.target
 	p.field = pending.target.PrimaryKey()
+	p.reverse = pending.reverse
 	return p, nil
 }
 
@@ -228,8 +277,10 @@ func resolveFieldPath(m *Model, key string, extra []string) (fieldPath, error) {
 	}
 	if p.relation {
 		target := p.model
-		if rel := p.field.Rel; rel != nil && rel.Target != nil {
-			target = rel.Target
+		if p.reverse == nil {
+			if rel := p.field.Rel; rel != nil && rel.Target != nil {
+				target = rel.Target
+			}
 		}
 		return p, &FieldError{
 			Model:   m.Name(),

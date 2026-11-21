@@ -217,11 +217,12 @@ func fieldTarget(d Dialect, elem reflect.Value, f *Field) any {
 	return fv.Addr().Interface()
 }
 
-// relPlan describes one relation loaded by SelectRelated: the foreign key
-// field that receives the object, the join its columns come from, and the
-// plan of the object that owns the field.
+// relPlan describes one relation loaded by SelectRelated: either a forward
+// FK/O2O field (field != nil) or a reverse O2O relation (rev != nil), the join
+// its columns come from, and the plan of the object that owns the relation.
 type relPlan struct {
 	field  *Field
+	rev    *ReverseRelation
 	join   *join
 	parent int // index of the owning plan, or -1 for the row itself
 }
@@ -277,17 +278,22 @@ func (p *rowPlan) scan(rows *sql.Rows) (reflect.Value, []any, error) {
 }
 
 // attach builds the select_related objects from their scanned columns and
-// stores each on its foreign key field. A relation whose primary key is NULL
-// matched no row: its field stays unloaded, and so does everything below it.
+// stores each on its forward relation field or reverse O2O RelCache. A
+// relation whose primary key is NULL matched no row: a forward relation stays
+// unloaded, a reverse O2O records a missing entry in RelCache (so RelatedOne
+// returns ErrDoesNotExist without querying), and everything below it is
+// skipped.
 func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 	objs := make([]reflect.Value, len(p.rels))
 	for i, r := range p.rels {
 		owner := elem
+		ownerModel := p.model
 		if r.parent >= 0 {
 			if !objs[r.parent].IsValid() {
 				continue
 			}
 			owner = objs[r.parent].Elem()
+			ownerModel = p.rels[r.parent].join.model
 		}
 		target := r.join.model
 		var pk any
@@ -297,6 +303,9 @@ func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 			}
 		}
 		if pk == nil {
+			if r.rev != nil {
+				setReverseOneCache(ownerModel, owner, r.rev.Name, nil, true)
+			}
 			continue
 		}
 		pkInt, err := toInt64(pk)
@@ -309,11 +318,28 @@ func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 				return fmt.Errorf("field %s.%s: %w", target.Name(), f.Name, err)
 			}
 		}
+		if r.rev != nil {
+			setReverseOneCache(ownerModel, owner, r.rev.Name, obj.Interface(), false)
+			// Cache the back-reference on obj's forward O2O field so
+			// obj.<field>.Fetch requires no query.
+			if ownerPK, pkErr := extractModelPKInt64(ownerModel, owner); pkErr == nil && ownerPK != 0 {
+				setForwardObject(obj.Elem(), r.rev.Field, owner.Addr(), ownerPK)
+			}
+			objs[i] = obj
+			continue
+		}
 		set := owner.Field(r.field.Index).Addr().MethodByName("SetObject")
 		if !set.IsValid() {
 			return fmt.Errorf("field %s does not expose SetObject", r.field.Name)
 		}
 		set.Call([]reflect.Value{obj, reflect.ValueOf(pkInt)})
+		// For a forward O2O, also cache the owning object on target's reverse
+		// RelCache so following forward then back requires no query.
+		if r.field.Rel != nil && r.field.Rel.Kind == RelO2O {
+			if backRev := target.reverseForField(r.field); backRev != nil && !backRev.Hidden {
+				setReverseOneCache(target, obj.Elem(), backRev.Name, owner.Addr().Interface(), false)
+			}
+		}
 		objs[i] = obj
 	}
 	return nil

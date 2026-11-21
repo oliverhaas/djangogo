@@ -34,6 +34,15 @@ func doesNotExist(m *Model) error {
 	}
 }
 
+// relatedDoesNotExist returns the error for a missing reverse one-to-one
+// relation on owner, keeping Django's "<Owner> has no <accessor>." message.
+func relatedDoesNotExist(owner *Model, accessor string) error {
+	return &lookupError{
+		msg:      "orm: " + owner.Name() + " has no " + accessor + ".",
+		sentinel: ErrDoesNotExist,
+	}
+}
+
 // maxGetResults is the number of rows Get fetches to report how many matched,
 // Django's MAX_GET_RESULTS.
 const maxGetResults = 21

@@ -452,6 +452,7 @@ func (a *Application) adminSite(appConfigs []apps.Config) (*admin.AdminSite, err
 	if err != nil {
 		return nil, fmt.Errorf("djangogo: build admin site: %w", err)
 	}
+	site.Apps = a.Apps
 	for _, ar := range registrars {
 		ar.RegisterAdmin(site)
 	}

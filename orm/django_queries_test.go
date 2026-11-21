@@ -215,14 +215,11 @@ func TestQueriesTicket19672(t *testing.T) {
 }
 
 // Ported from Django: tests/queries/tests.py::Queries1Tests.test_lookup_constraint_fielderror
-//
-// The choices are the forward fields only: the ORM has no reverse relation
-// names yet, which Django lists as well.
 func TestQueriesLookupConstraintFieldError(t *testing.T) {
 	djangotest.EachDB(t, qModels(), func(t *testing.T, db *orm.DB) {
 		_, err := orm.Query[qTag](db).Filter("unknown_field__name", "generic").All(context.Background())
 		assertFieldError(t, err, "annot resolve keyword 'unknown_field' into field. Choices are: "+
-			"category, category_id, id, name, parent, parent_id")
+			"category, category_id, id, name, parent, parent_id, qannotation, qnote, qtag")
 	})
 }
 

@@ -148,16 +148,13 @@ func TestOrderingDefaultOrderingOverride(t *testing.T) {
 	})
 }
 
-// The choices lack Django's reverse relations "article" and "author", which
-// belong to another work package.
-//
 // Ported from Django: tests/ordering/tests.py::OrderingTests.test_default_ordering_override_unknown_field
 func TestOrderingDefaultOrderingOverrideUnknownField(t *testing.T) {
 	djangotest.EachDB(t, ordModels(), func(t *testing.T, db *orm.DB) {
 		ordSetUp(t, db)
 		_, err := orm.Query[ordArticle](db).OrderBy("author__unknown_field").All(context.Background())
 		assertFieldError(t, err,
-			"resolve keyword 'unknown_field' into field. Choices are: editor, editor_id, id, name")
+			"resolve keyword 'unknown_field' into field. Choices are: editor, editor_id, id, name, ordarticle, ordauthor")
 	})
 }
 

@@ -396,8 +396,12 @@ func onDeleteSource(od orm.OnDelete) string {
 
 // relKindSource returns the name of the orm constant of a relation kind.
 func relKindSource(k orm.RelKind) string {
-	if k == orm.RelFK {
+	switch k {
+	case orm.RelFK:
 		return "orm.RelFK"
+	case orm.RelO2O:
+		return "orm.RelO2O"
+	default:
+		return "orm.RelNone"
 	}
-	return "orm.RelNone"
 }

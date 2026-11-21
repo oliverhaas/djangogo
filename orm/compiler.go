@@ -22,6 +22,9 @@ type compiler struct {
 	annotNames []string
 	// used collects the joins touched while one filter condition is resolved.
 	used []*join
+	// reuse tracks multi-valued joins reusable within the current Filter call;
+	// nil outside Filter/Exclude (OrderBy, Values, Annotate, SelectRelated).
+	reuse map[*join]bool
 	// where and having are the resolved filter conditions.
 	where, having *whereNode
 	// empty reports that the filters can match no row. The statement builders
@@ -60,13 +63,13 @@ func (q *query) compile() (*compiler, error) {
 // column returns the column a resolved path ends on, joining the tables on
 // the way.
 func (c *compiler) column(p fieldPath) colNode {
-	joins := c.joins.setup(p.hops)
+	joins := c.joins.setup(p.hops, c.reuse)
 	c.used = append(c.used, joins...)
 	j := c.joins.base
 	if len(joins) > 0 {
 		j = joins[len(joins)-1]
 	}
-	c.used = append(c.used, c.joins.reserve(j, p.trimmed)...)
+	c.used = append(c.used, c.joins.reserve(j, p.trimmed, c.reuse)...)
 	return colNode{join: j, field: p.field}
 }
 
@@ -280,7 +283,16 @@ func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected, seen 
 // should be inherited for ordering key, or nil when key addresses a plain
 // field, a relation's "_id" attname/column, or a target without Meta.Ordering.
 func relatedOrderingTarget(key string, p fieldPath) *Model {
-	if !p.relation || p.field == nil || p.field.Rel == nil || p.field.Rel.Target == nil {
+	if !p.relation {
+		return nil
+	}
+	if p.reverse != nil {
+		if len(p.model.ordering) == 0 {
+			return nil
+		}
+		return p.model
+	}
+	if p.field == nil || p.field.Rel == nil || p.field.Rel.Target == nil {
 		return nil
 	}
 	if len(p.field.Rel.Target.ordering) == 0 {
@@ -441,6 +453,10 @@ func (s *selectStmt) renderOrder(w *sqlWriter) {
 // always puts a table after the one it is joined to.
 func (c *compiler) renderFrom(w *sqlWriter) {
 	w.ident(c.joins.base.model.Table())
+	if c.joins.base.alias != c.joins.base.model.Table() {
+		w.write(" ")
+		w.ident(c.joins.base.alias)
+	}
 	for _, j := range c.joins.joins {
 		if !j.read {
 			continue
