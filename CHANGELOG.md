@@ -138,6 +138,53 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   a sample app with a model, admin, views, namespaced URLs, templates, static
   files and a djangotest test, and migration packages that `main.go` already
   imports. `go run . makemigrations && go run . migrate` works without edits.
+- Field kinds: models can use Django's other field kinds. Small, big and
+  positive integers, float, decimal (`orm.Decimal`), date (`orm.Date`), time
+  (`orm.Time`), duration (`time.Duration`), UUID (`orm.UUID`), JSON, binary,
+  slug, email, URL and generic IP address get Django's column types and CHECK
+  constraints on both databases. A pointer field (`*int64`, `*orm.Date`) reads
+  and writes NULL as nil. Every kind takes `choices`, and `orm.GetDisplay`
+  returns the label of the stored value.
+- `orm.Meta` gives a model Django's `Meta` options: `ordering`,
+  `unique_together`, `indexes`, verbose names, `db_table`, and the choices,
+  validators and error messages of its fields. `makemigrations` writes
+  `AddIndex` and `AlterUniqueTogether` from them, and each foreign key gets an
+  index, as in Django.
+- Model validation: `orm.FullClean`, `CleanFields` and `ValidateUnique` check
+  null and blank, choices, the validators of each kind, custom validators, the
+  model's `Clean()` method, foreign key targets, `unique` and `unique_together`,
+  with Django's messages. The new `validators` package holds Django's
+  validators; `forms.ValidationError` and `forms.Validator` are aliases to it.
+- Relations: a foreign key adds the reverse accessor `<model>_set` (or its
+  `related_name`) to its target. Read it with `orm.Related` and change it with
+  `orm.RelatedSet` (Create, Add, Remove, Clear, Set). Filters follow reverse
+  relations with `__` and reuse joins as Django does. `O2O[T]` declares a
+  one-to-one field with the reverse accessor `orm.RelatedOne`, and
+  `SelectRelated` follows it both ways. `M2M[T]` declares a many-to-many field
+  with an automatic or an explicit `through` table: `orm.Many` returns its
+  manager (Add, Remove, Clear, Set, Create, GetOrCreate, filters), filters
+  follow it with `__`, `orm.OnM2MChanged` receives the `m2m_changed` signal,
+  and migrations create, alter and drop the join tables.
+- Deletes run Django's collector: `on_delete=cascade` and `set_null` also apply
+  where the database does not enforce them, and `restrict` and the new
+  `protect` and `do_nothing` options work as in Django: a blocked delete fails
+  with `ErrRestricted` or `ErrProtected` and Django's message.
+- Forms: `GenericIPAddressField` and `JSONField`. A ModelForm maps every field
+  kind to Django's form field (integer ranges, decimal digits and places, dates,
+  times, durations, UUIDs, JSON, choices as a `TypedChoiceField`) and saves the
+  cleaned values as the model's Go types.
+- Admin: Django's URL layout (`/admin/<app>/<model>/<pk>/change/`), route
+  names and templates; an index and app pages grouped by app; logout and
+  password change views; per-model permissions, with a read-only form for
+  users with only the view permission. The changelist paginates
+  (`ListPerPage`, Show all), sorts by several columns, searches `SearchFields`
+  (with `^`, `=` and `@`, and across relations) and filters with `ListFilter`,
+  including `SimpleListFilter`. Bulk actions: `delete_selected` with Django's
+  confirmation page, custom actions on `ModelAdmin.Actions` or
+  `AdminSite.AddAction`, and selection across pages.
+- The fidelity harness also compares query SQL (75 cases) and migration SQL (25
+  operations) with Django 6.0.3 on SQLite and PostgreSQL, and
+  `go generate ./fidelity/...` regenerates the golden files from Django.
 
 ### Changed
 
@@ -170,6 +217,32 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `update()`. Use `Save` to set them.
 - **BREAKING**: `startapp <name>` creates `<name>/` instead of `<name>app/`, and
   `scaffold.Project` takes `scaffold.Options`.
+- **BREAKING**: the admin moved to Django's URLs: `/admin/<model>/` is now
+  `/admin/<app>/<model>/`, and so on for add, change and delete. The route
+  names `admin-index`, `admin-login`, `admin-changelist`, `admin-add`,
+  `admin-change` and `admin-delete` are now `admin:index`, `admin:login` and
+  `admin:<app>_<model>_changelist`, `_add`, `_change` and `_delete`. Update
+  links and `{% url %}` tags. The embedded templates moved to Django's paths
+  (`admin/change_list.html`, `admin/change_form.html`, `registration/...`), so
+  an override must use the new name.
+- **BREAKING**: a staff user who is not a superuser now needs the model's
+  permissions (`<app>.view_<model>`, `add_`, `change_`, `delete_`) to see or
+  change it in the admin, as in Django. Grant them to keep the old access. A
+  missing object redirects to the admin index with a warning instead of a 404.
+- **BREAKING**: a ModelForm runs the model's validation, as Django's does:
+  `Clean()`, `Meta.Validators`, `Meta.ErrorMessages` and the unique and
+  `unique_together` checks now show as form errors. A nullable text field
+  cleans empty input to NULL instead of `""`.
+- **BREAKING**: SQLite now enforces foreign keys: the backend turns on the
+  `foreign_keys` pragma, so an insert or update with a missing target fails as
+  on PostgreSQL. Add `_pragma=foreign_keys(0)` to the DSN to turn it off.
+- **BREAKING**: `migrations.Autodetector.PreserveModelOptions` is removed.
+  `makemigrations` reads indexes and `unique_together` from `orm.Meta`.
+- Templates print a `time.Duration` like Python's `timedelta` (`1:30:00`), a
+  date with `DATE_FORMAT` and a time with `TIME_FORMAT`; the `date`, `time` and
+  `timesince` filters accept `orm.Date` and `orm.Time`.
+- `{% csrf_token %}` renders nothing when the request has no token, and escapes
+  the token as Django does.
 - A command error prints as `CommandError: ...` without a stack trace. Exit
   code 1 is a command error and 2 a usage error. The hints of `migrate` and
   `makemigrations` name the program that runs. `startproject` and `startapp`
@@ -203,6 +276,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   wildcards are now escaped.
 - A template that made pongo2 panic now returns an error.
 - A savepoint that was rolled back was not released. It is now released.
+- On PostgreSQL, a larger `max_length` rewrote the whole table: `AlterField`
+  now adds `USING` only when the base type changes. `RemoveField` no longer
+  drops dependent objects with `CASCADE`, and `RemoveIndex` uses
+  `DROP INDEX IF EXISTS`, as Django does.
 
 ### Security
 

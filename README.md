@@ -13,8 +13,8 @@ runtime Python and supports SQLite and PostgreSQL.
 
 ## Status
 
-Proof-of-concept. The seven milestones below are implemented. The public APIs
-are unstable and may change between commits.
+Proof-of-concept. The milestones below are implemented. The public APIs are
+unstable and can change between commits.
 
 - **M1 Spine.** Settings, the app registry, and a `manage`-style command
   dispatcher with a runserver.
@@ -33,6 +33,13 @@ are unstable and may change between commits.
   site with add/change/delete views.
 - **M7 fidelity + scaffolding.** A Django-as-oracle template fidelity harness,
   project/app scaffolding, and this documentation plus a runnable example.
+- **M8 Django fidelity.** `createsuperuser`, snake_case template field access, a
+  Django-style `ModelForm`, and the `auto_now`, `default=` and `choices=` tags.
+- **M9 spec completion.** Django's URL dispatch, auth tables and password
+  hashers, sessions, CSRF, messages, generic views and commands; Django's field
+  kinds, `orm.Meta`, model validation, reverse, one-to-one and many-to-many
+  relations; the admin's URL layout, permissions, changelist and actions; and
+  SQL fidelity tests for queries and migrations.
 
 ## Quickstart
 
@@ -110,7 +117,8 @@ list and detail pages and the admin together; run it with `go run ./examples/blo
 | `views`           | Request/response helpers and generic `ListView`/`DetailView`.              |
 | `templates`       | A pongo2 engine with `{% static %}`, `{% url %}`, `{% csrf_token %}` tags. |
 | `forms`           | Form fields, widgets, and `ModelForm` derived from model metadata.         |
-| `admin`           | The staff-gated admin site with add/change/delete views.                   |
+| `validators`      | Django's validators and `ValidationError`, shared by models and forms.     |
+| `admin`           | The admin site: changelist, actions, add/change/delete and permissions.    |
 | `scaffold`        | Project and app scaffolding used by `startproject`/`startapp`.             |
 | `contenttypes`    | Content types of the installed models.                                     |
 | `messages`        | One-time messages for the next page, stored in the session.                |
@@ -145,24 +153,22 @@ Djan-Go-Go covers a large part of Django's developer experience, but not all of
 it. The known gaps are below. The template engine's divergences from Django are
 listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
 
-- **Model fields:** there are no float, decimal, date, duration, file or JSON
-  field kinds, and no one-to-one or many-to-many fields: model these relations
-  with explicit link models. A foreign key can only target an integer primary
-  key. A nullable integer field reads NULL as 0 in a struct (`Values` returns
-  nil), and `Create` stores 0 for an unset one. A declared `default=` replaces an
-  explicit Go zero value, where Django keeps the explicit value. A Go field name
-  that ends in digits snake-cases without an underscore (`Parent1` becomes
-  `parent1`).
-- **Model options:** there is no `Meta` API yet, so no model-level indexes,
-  `unique_together`, default ordering, custom managers, model validators or
-  `full_clean`. The migration operations for indexes and unique-together sets
-  exist, but `makemigrations` does not read them from the models.
-- **Database:** one database per application. SQLite does not enforce foreign
-  keys, because `modernc.org/sqlite` does not enable the `foreign_keys` pragma;
-  PostgreSQL enforces them. Two models with foreign keys to each other cannot be
-  created on PostgreSQL.
-- **Querying:** no transforms (`__date`, `Length`), no `extra()`, no fetch modes
-  and no `select_related()` without arguments. `Raw` leaves the fields missing
+- **Model fields:** no file, image or generated fields and no composite
+  primary keys. A foreign key, one-to-one or many-to-many field can only target
+  an integer primary key, and there is no `to_field`. Use a pointer field
+  (`*int64`) for a nullable column: a plain field reads NULL as its zero value.
+  A declared `default=` replaces an explicit Go zero value, where Django keeps
+  the explicit value. A Go field name that ends in digits snake-cases without an
+  underscore (`Parent1` becomes `parent1`).
+- **Model options:** `orm.Meta` has `ordering`, `unique_together`, `indexes`,
+  verbose names, `db_table` and per-field choices, validators and error
+  messages. There is no `Meta.constraints`, no `unique_for_date`, no
+  `limit_choices_to`, no custom managers and no abstract, proxy or multi-table
+  inheritance.
+- **Database:** one database per application. Two models with foreign keys to
+  each other cannot be created on PostgreSQL.
+- **Querying:** no `prefetch_related`, no transforms (`__date`, `Length`), no
+  `extra()`, no fetch modes and no `select_related()` without arguments. `Raw` leaves the fields missing
   from a result at their zero value, where Django defers and loads them.
   Transactions have no `savepoint=False` or `set_rollback`, so on PostgreSQL a
   failed statement inside `Atomic` aborts the transaction until the block ends.
@@ -184,11 +190,15 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `SplitDateTimeField`, no localization and no custom renderers. A template
   cannot loop over a form with `{% for field in form %}`: use `form.fields`.
   `ModelChoiceField` has no `to_field_name` or `label_from_instance`, and it loads
-  its options once per form, where Django loads them on each render.
-- **Admin:** no search (`SearchFields` is stored but not used), list filters,
-  inlines or changelist pagination. A foreign key renders as a `<select>` of the
-  whole related table, with no raw-id or autocomplete widget. `ReadonlyFields`
-  are left out of the change form instead of shown as read-only values.
+  its options once per form, where Django loads them on each render. A
+  ModelForm leaves out many-to-many fields.
+- **Admin:** no inlines, `fieldsets`, `list_editable`, `date_hierarchy` or
+  facets, no history (`LogEntry`) and no admin for users and groups. A foreign
+  key renders as a `<select>` of the whole related table, with no raw-id or
+  autocomplete widget, and a many-to-many field is not in the change form.
+  `ReadonlyFields` are left out of the change form instead of shown as
+  read-only values. A search field with `@` uses `icontains`, not full-text
+  search.
 - **Auth:** no custom user model. The login, logout and password change views
   are mounted by hand: there is no counterpart of `django.contrib.auth.urls`. No
   `LoginRequiredMiddleware`. A user row that Django wrote with a NULL
