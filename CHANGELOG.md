@@ -282,6 +282,20 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `FormSet.CleanWith`, and Django's error messages and HTML. `ConfigureForm`
   takes the place of `form_kwargs`, and `forms.AllValid` validates several
   formsets.
+- Forms: `forms.NewModelFormSet` and `forms.NewInlineFormSet` edit the rows of
+  a model on one page, as Django's `modelformset_factory` and
+  `inlineformset_factory` do. Each form carries the primary key of its row in
+  a hidden field, validation checks unique fields and `unique_together`
+  across the forms with Django's "Please correct the duplicate data" errors,
+  and `Save` adds, changes and deletes rows and reports them in `NewObjects`,
+  `ChangedObjects` and `DeletedObjects`. `QuerySet`, `EditOnly`, `SaveAsNew`
+  and the `SaveNew`, `SaveExisting` and `DeleteExisting` hooks take the place
+  of Django's arguments and method overrides. An inline formset finds the
+  foreign key to the parent, or takes its name, and keeps it in a hidden
+  field.
+- ORM: `QuerySet.Ordering` returns the keys a queryset is ordered by, and
+  `QuerySet.TotallyOrdered` reports whether they decide the position of every
+  row, Django's `ordered` and `totally_ordered`.
 
 ### Changed
 
@@ -408,6 +422,16 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - On PostgreSQL, a form showed a date and time in the server's local time
   zone, so saving the form unchanged could move the value. A `DateTimeField`
   now shows its value in UTC, the time zone in which it reads the input.
+- `ModelForm.WithInstance(nil)` left the form without an instance. It now
+  edits a new instance, as Django's `instance=None` does.
+- A model form failed with "cannot assign" when a form field cleaned to a
+  value other than a string for a text model field, such as a list. The
+  field now stores the string form of the value, as Django's `CharField`
+  does. `forms.PopulateStruct` also keeps a related instance on the relation,
+  so a parent that is saved after the form was cleaned saves with its key.
+- A `ModelChoiceField` over a model whose primary key is a one-to-one field
+  used the printed relation as the value of its options. It now uses the
+  primary key of the related row.
 
 ### Security
 

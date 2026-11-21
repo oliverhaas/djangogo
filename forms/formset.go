@@ -138,6 +138,7 @@ type FormSet struct {
 	formsBuilt    bool
 	errors        []*ErrorDict
 	nonFormErrors *ErrorList
+	err           error
 
 	// hooks lets a model formset build its forms from rows.
 	hooks *formSetHooks
@@ -151,15 +152,14 @@ type formSetHooks struct {
 	form func(fs *FormSet, i int) *Form
 	// bind binds form i to the data of the formset.
 	bind func(fs *FormSet, i int, f *Form) *Form
-	// initialCount returns the number of initial forms of an unbound
-	// formset.
+	// initialCount returns the number of initial forms in place of
+	// FormSet.InitialFormCount.
 	initialCount func(fs *FormSet) int
 	// initial returns the initial data of form i from Initial.
 	initial func(fs *FormSet, i int) map[string]any
-	// addFields adds fields to form i after those of the formset.
+	// addFields adds the fields of the formset to form i in place of
+	// FormSet.addFields; it calls FormSet.baseAddFields for ORDER and DELETE.
 	addFields func(fs *FormSet, f *Form, i int)
-	// configured runs on form i after the formset settings apply.
-	configured func(fs *FormSet, f *Form, i int)
 	// clean validates the forms together before the CleanWith functions.
 	clean func(fs *FormSet) error
 }
@@ -228,11 +228,15 @@ func (fs *FormSet) IsBound() bool { return fs.bound }
 func (fs *FormSet) Data() url.Values { return fs.data }
 
 // Err returns the first failure that is not a validation error: a MaxNum
-// above AbsoluteMax, or a failure of a form, such as a database error while
-// loading choices. A formset with such a failure is never valid.
+// above AbsoluteMax, a failure of a model formset such as a database error
+// while loading its rows, or a failure of a form, such as a database error
+// while loading choices. A formset with such a failure is never valid.
 func (fs *FormSet) Err() error {
 	if fs.maxAbsolute() < fs.MaxNum {
 		return errors.New("forms: 'absolute_max' must be greater or equal to 'max_num'")
+	}
+	if fs.err != nil {
+		return fs.err
 	}
 	for _, f := range fs.forms {
 		if err := f.Err(); err != nil {
@@ -240,6 +244,13 @@ func (fs *FormSet) Err() error {
 		}
 	}
 	return nil
+}
+
+// fail records a failure that is not a validation error; the first one wins.
+func (fs *FormSet) fail(err error) {
+	if fs.err == nil && err != nil {
+		fs.err = err
+	}
 }
 
 // maxAbsolute returns AbsoluteMax with its default.
@@ -324,13 +335,19 @@ func (fs *FormSet) TotalFormCount() int {
 
 // InitialFormCount returns the number of forms that show existing data: the
 // submitted count for a bound formset, the number of Initial maps for an
-// unbound one.
+// unbound one. A model formset counts its rows instead.
 func (fs *FormSet) InitialFormCount() int {
-	if fs.bound {
-		return fs.managementCount(InitialFormCount)
-	}
 	if fs.hooks != nil && fs.hooks.initialCount != nil {
 		return fs.hooks.initialCount(fs)
+	}
+	return fs.baseInitialFormCount()
+}
+
+// baseInitialFormCount is InitialFormCount of a plain formset, Django's
+// BaseFormSet.initial_form_count.
+func (fs *FormSet) baseInitialFormCount() int {
+	if fs.bound {
+		return fs.managementCount(InitialFormCount)
 	}
 	return len(fs.Initial)
 }
@@ -376,9 +393,6 @@ func (fs *FormSet) constructForm(i int) *Form {
 	if i >= fs.InitialFormCount() && i >= fs.MinNum {
 		f.EmptyPermitted = true
 	}
-	if fs.hooks != nil && fs.hooks.configured != nil {
-		fs.hooks.configured(fs, f, i)
-	}
 	if fs.ConfigureForm != nil {
 		fs.ConfigureForm(f, i)
 	}
@@ -415,9 +429,19 @@ func mergeInitial(base, over map[string]any) map[string]any {
 	return out
 }
 
-// addFields adds ORDER and DELETE to form i, -1 for the empty form, Django's
-// add_fields.
+// addFields adds the fields of the formset to form i, -1 for the empty form,
+// Django's add_fields.
 func (fs *FormSet) addFields(f *Form, i int) {
+	if fs.hooks != nil && fs.hooks.addFields != nil {
+		fs.hooks.addFields(fs, f, i)
+		return
+	}
+	fs.baseAddFields(f, i)
+}
+
+// baseAddFields adds ORDER and DELETE to form i, the add_fields of Django's
+// BaseFormSet.
+func (fs *FormSet) baseAddFields(f *Form, i int) {
 	initial := fs.InitialFormCount()
 	if fs.CanOrder {
 		opts := []FieldOption{Label("Order"), Required(false), UseWidget(fs.OrderingWidget)}
@@ -429,9 +453,6 @@ func (fs *FormSet) addFields(f *Form, i int) {
 	}
 	if fs.CanDelete && (fs.CanDeleteExtra || (i >= 0 && i < initial)) {
 		f.AddField(DeletionFieldName, NewBooleanField(Label("Delete"), Required(false), UseWidget(fs.DeletionWidget)))
-	}
-	if fs.hooks != nil && fs.hooks.addFields != nil {
-		fs.hooks.addFields(fs, f, i)
 	}
 }
 
@@ -460,9 +481,6 @@ func (fs *FormSet) ExtraForms() []*Form {
 // template for client-side code that adds forms.
 func (fs *FormSet) EmptyForm() *Form {
 	f := fs.makeForm(-1)
-	if fs.hooks != nil && fs.hooks.configured != nil {
-		fs.hooks.configured(fs, f, -1)
-	}
 	if fs.ConfigureForm != nil {
 		fs.ConfigureForm(f, -1)
 	}

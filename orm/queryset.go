@@ -118,6 +118,71 @@ func (qs *QuerySet[T]) OrderBy(fields ...string) *QuerySet[T] {
 	return &QuerySet[T]{q: qs.q.orderBy(fields)}
 }
 
+// Ordering returns the keys the rows are ordered by, in the form OrderBy takes
+// them: the keys of OrderBy, or the Meta.Ordering of the model when OrderBy
+// was not called. It is empty for an unordered queryset, Django's
+// qs.ordered being false.
+func (qs *QuerySet[T]) Ordering() []string {
+	terms := qs.q.effectiveOrders()
+	out := make([]string, len(terms))
+	for i, t := range terms {
+		switch {
+		case t.random:
+			out[i] = "?"
+		case t.desc:
+			out[i] = "-" + t.key
+		default:
+			out[i] = t.key
+		}
+	}
+	return out
+}
+
+// TotallyOrdered reports whether the ordering decides the position of every
+// row, Django's totally_ordered: it names the primary key, a unique field that
+// is not null, or every field of a unique_together set without a nullable
+// field. An ordering by a related model or by an annotation does not count.
+func (qs *QuerySet[T]) TotallyOrdered() bool {
+	m := qs.q.model
+	if m == nil {
+		return false
+	}
+	named := map[*Field]bool{}
+	for _, t := range qs.q.effectiveOrders() {
+		if t.random {
+			continue
+		}
+		if t.key == "pk" {
+			return true
+		}
+		f, ok := m.FieldByAttr(t.key)
+		if !ok {
+			f, ok = m.FieldByColumn(t.key)
+		}
+		// An ordering by a relation itself orders by the related model.
+		if !ok || (f.Rel != nil && t.key == f.Attr) {
+			continue
+		}
+		if (f.PrimaryKey || f.Unique) && !f.Null {
+			return true
+		}
+		named[f] = true
+	}
+	for _, set := range m.uniqueTogether {
+		all := len(set) > 0
+		for _, name := range set {
+			if f, ok := m.byName[name]; !ok || !named[f] || f.Null {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
 // Reverse returns a clone with the ordering reversed. A queryset without an
 // ordering is ordered by descending primary key.
 func (qs *QuerySet[T]) Reverse() *QuerySet[T] {

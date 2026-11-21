@@ -383,3 +383,71 @@ func TestOrderingByNullableRelationKeepsRows(t *testing.T) {
 		djangotest.AssertEqual(t, len(mustAll(t, orm.Query[ordArticle](db).OrderBy("author__name", "headline"))), 4)
 	})
 }
+
+// ordBarcodedArticle is Django's ordering.BarcodedArticle. Its UniqueConstraint
+// declarations have no counterpart in orm.Meta; the unique_together set does.
+type ordBarcodedArticle struct {
+	ID         int64
+	Rank       *int                       `orm:"unique;null"`
+	UniqueRank int                        `orm:"unique"`
+	Headline   string                     `orm:"max_length=100"`
+	Slug       string                     `orm:"max_length=100;default=slug"`
+	PubDate    *orm.Date                  `orm:"type=date;null"`
+	Barcode    string                     `orm:"max_length=30;default=bar"`
+	Parent     orm.FK[ordBarcodedArticle] `orm:"null;on_delete=set_null"`
+}
+
+// Meta declares the unique_together set of BarcodedArticle.
+func (ordBarcodedArticle) Meta() orm.Meta {
+	return orm.Meta{UniqueTogether: [][]string{{"Headline", "Slug"}}}
+}
+
+// ordTotallyOrderedModels returns the models of Django's TotallyOrderedTests.
+func ordTotallyOrderedModels() []any {
+	return []any{djangotest.App("ordering", &ordAuthor{}, &ordBarcodedArticle{})}
+}
+
+// Ported from Django: tests/ordering/tests.py::TotallyOrderedTests.test_basic_ordering
+func TestTotallyOrderedBasicOrdering(t *testing.T) {
+	djangotest.EachDB(t, ordTotallyOrderedModels(), func(t *testing.T, db *orm.DB) {
+		djangotest.AssertEqual(t, orm.Query[ordAuthor](db).TotallyOrdered(), true)
+		djangotest.AssertEqual(t, orm.Query[ordAuthor](db).OrderBy("name").TotallyOrdered(), false)
+		djangotest.AssertEqual(t, orm.Query[ordBarcodedArticle](db).OrderBy("rank").TotallyOrdered(), false)
+		djangotest.AssertEqual(t, orm.Query[ordBarcodedArticle](db).OrderBy("rank", "pk").TotallyOrdered(), true)
+	})
+}
+
+// Django's first case relies on a UniqueConstraint over nullable fields,
+// which the ORM cannot declare; it is false here as well.
+//
+// Ported from Django: tests/ordering/tests.py::TotallyOrderedTests.test_composite_constraints
+func TestTotallyOrderedCompositeConstraints(t *testing.T) {
+	djangotest.EachDB(t, ordTotallyOrderedModels(), func(t *testing.T, db *orm.DB) {
+		djangotest.AssertEqual(t, orm.Query[ordBarcodedArticle](db).OrderBy("pub_date", "rank").TotallyOrdered(), false)
+		djangotest.AssertEqual(t, orm.Query[ordBarcodedArticle](db).OrderBy("headline", "slug").TotallyOrdered(), true)
+	})
+}
+
+// Ported from Django: tests/ordering/tests.py::TotallyOrderedTests.test_reverse_ordering
+func TestTotallyOrderedReverseOrdering(t *testing.T) {
+	djangotest.EachDB(t, ordTotallyOrderedModels(), func(t *testing.T, db *orm.DB) {
+		djangotest.AssertEqual(t, orm.Query[ordAuthor](db).OrderBy("-pk").TotallyOrdered(), true)
+	})
+}
+
+// Ported from Django: tests/ordering/tests.py::TotallyOrderedTests.test_f_expressions
+func TestTotallyOrderedFExpressions(t *testing.T) {
+	t.Skip("FIXME-PORT: Go: OrderBy takes keys, not F() expressions; " +
+		"Django: tests/ordering/tests.py::TotallyOrderedTests.test_f_expressions")
+}
+
+// Ordering returns the keys of OrderBy, or Meta.Ordering without them. No
+// Django test exists; Django reads qs.query.order_by and Meta.ordering.
+func TestQuerySetOrdering(t *testing.T) {
+	djangotest.EachDB(t, ordTotallyOrderedModels(), func(t *testing.T, db *orm.DB) {
+		djangotest.AssertEqual(t, orm.Query[ordAuthor](db).Ordering(), []string{"-pk"})
+		djangotest.AssertEqual(t, orm.Query[ordAuthor](db).OrderBy("name", "-id").Ordering(), []string{"name", "-id"})
+		djangotest.AssertEqual(t, orm.Query[ordAuthor](db).OrderBy().Ordering(), []string{})
+		djangotest.AssertEqual(t, orm.Query[ordBarcodedArticle](db).Ordering(), []string{})
+	})
+}

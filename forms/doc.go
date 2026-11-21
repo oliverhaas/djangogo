@@ -112,6 +112,27 @@
 // formset is used as in Django: {{ formset.management_form }}, {% for form in
 // formset.forms %} and {{ formset.empty_form }}.
 //
+// # Model formsets
+//
+// A ModelFormSet edits the rows of a model, as Django's modelformset_factory
+// does, and an InlineFormSet edits the rows that point at one parent row, as
+// inlineformset_factory does:
+//
+//	fs := forms.NewInlineFormSet[Author, Book](db, "", forms.WithFields("title"))
+//	bound := fs.WithInstance(author).Bind(r.PostForm)
+//	bound.SetContext(r.Context())
+//	if bound.IsValid() {
+//		books, err := bound.Save(r.Context())
+//	}
+//
+// The ModelFormOption values build each form as NewModelForm does. QuerySet
+// selects the rows of a model formset; each form carries the primary key of
+// its row in a hidden field. Validation also checks the unique fields across
+// the forms. Save adds, changes and deletes rows, and SaveCommit with commit
+// false returns the instances without saving them. The SaveNew, SaveExisting
+// and DeleteExisting hooks take the place of the methods that a Django
+// formset overrides.
+//
 // # Not covered
 //
 // File uploads (FileField, ImageField, ClearableFileInput), option groups in

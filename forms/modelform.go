@@ -208,7 +208,8 @@ func FromStruct(m *orm.Model, obj any, opts ...ModelFormOption) *Form {
 // of the model, Django's construct_instance. Entries are matched by attribute
 // name; a model field without an entry keeps its value. A nil value sets the
 // field to its zero value, and a relation takes a primary key (int64 or
-// string) or an instance of the related model.
+// string) or an instance of the related model; a pointer to an instance is
+// kept on the relation.
 func PopulateStruct(m *orm.Model, cleaned map[string]any, dest any) error {
 	rv := reflect.ValueOf(dest)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
@@ -228,6 +229,17 @@ func PopulateStruct(m *orm.Model, cleaned map[string]any, dest any) error {
 			pk, err := relatedPK(mf, val)
 			if err != nil {
 				return err
+			}
+			// An instance stays on the relation, as Django's
+			// construct_instance assigns it; saving takes its primary key
+			// then, also when it was saved after the form was cleaned.
+			if obj := reflect.ValueOf(val); obj.Kind() == reflect.Pointer && !obj.IsNil() &&
+				obj.Elem().Type() == mf.Rel.Target.GoType() {
+				if setObject := fv.Addr().MethodByName("SetObject"); setObject.IsValid() &&
+					setObject.Type().In(0) == obj.Type() {
+					setObject.Call([]reflect.Value{obj, reflect.ValueOf(pk)})
+					continue
+				}
 			}
 			setPK := fv.Addr().MethodByName("SetPK")
 			if !setPK.IsValid() {
@@ -294,6 +306,7 @@ type ModelForm[T any] struct {
 	own                   bool // the caller supplied the instance
 	includedFields        map[string]bool
 	nonFieldErrorMessages map[string]string
+	pkWidget              Widget // the WithWidget of the primary key, for a model formset
 }
 
 // NewModelForm returns an unbound form for a new instance of T. A foreign key
@@ -312,6 +325,9 @@ func NewModelForm[T any](db *orm.DB, opts ...ModelFormOption) *ModelForm[T] {
 	mf.model = model
 	mf.instance = mf.newInstance()
 	mf.Form, mf.includedFields = buildModelForm(db, model, cfg)
+	if pk := model.PrimaryKey(); pk != nil {
+		mf.pkWidget = cfg.widgets[pk.Attr]
+	}
 	if msgs, ok := cfg.errorMessages[NonFieldErrors]; ok && len(msgs) > 0 {
 		mf.nonFieldErrorMessages = maps.Clone(msgs)
 	}
@@ -343,13 +359,19 @@ func (mf *ModelForm[T]) install() {
 
 // WithInstance returns a copy of the form that edits obj: the form shows the
 // values of obj, validation writes the cleaned data into it, and Save updates
-// its row when it has a primary key.
+// its row when it has a primary key. A nil obj is a new instance, as
+// Django's instance=None.
 func (mf *ModelForm[T]) WithInstance(obj *T) *ModelForm[T] {
 	c := *mf
 	c.Form = mf.clone()
 	c.bound, c.data = mf.bound, mf.data
+	if obj == nil {
+		c.instance, c.own = mf.newInstance(), false
+		c.install()
+		return &c
+	}
 	c.instance, c.own = obj, true
-	if mf.model != nil && obj != nil {
+	if mf.model != nil {
 		c.Initial = InitialFromStruct(mf.model, obj, c.names...)
 		for k, v := range mf.Initial {
 			c.Initial[k] = v
@@ -537,6 +559,13 @@ func (mf *ModelForm[T]) postClean(f *Form) {
 	}
 
 	exclude := mf.validationExclusions(f)
+	// The foreign key of an inline formset holds a parent that may not be
+	// saved yet, so model validation leaves it out.
+	for name, field := range f.fields {
+		if _, ok := field.(*InlineForeignKeyField); ok {
+			exclude = append(exclude, name)
+		}
+	}
 	if err := mf.model.FullClean(f.context(), mf.db, mf.instance,
 		orm.WithExclude(exclude...),
 		orm.WithValidateUnique(false),

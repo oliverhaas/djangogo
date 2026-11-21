@@ -399,6 +399,12 @@ func setScalar(mf *orm.Field, fv reflect.Value, val any) error {
 		}
 		return nil
 	}
+	// A text field takes the string form of any other value, as the
+	// to_python of Django's CharField does with str(value).
+	if fv.Kind() == reflect.String {
+		fv.SetString(pyString(val))
+		return nil
+	}
 	return fmt.Errorf("forms: field %s: cannot assign %T to %s", mf.Attr, val, fv.Type())
 }
 

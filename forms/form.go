@@ -290,6 +290,19 @@ func (f *Form) NonFieldErrors() ErrorList {
 	return *newErrorList("nonfield", "")
 }
 
+// replaceNonFieldErrors replaces the errors of the form as a whole with err,
+// as a model formset does for a form that repeats unique values. The list
+// has Django's plain "errorlist" class.
+func (f *Form) replaceNonFieldErrors(err *ValidationError) {
+	f.Errors()
+	if l, ok := f.errors.lists[NonFieldErrors]; ok {
+		*l = *newErrorList("", "")
+		l.data = []*ValidationError{err}
+		return
+	}
+	f.errors.add(NonFieldErrors, "", "", []*ValidationError{err})
+}
+
 // CleanedData returns the validated values by field name. It is nil until the
 // form has been validated; a field with an error has no entry.
 func (f *Form) CleanedData() map[string]any { return f.cleaned }

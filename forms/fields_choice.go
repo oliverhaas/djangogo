@@ -426,7 +426,13 @@ func instancePK(m *orm.Model, value any) (string, bool) {
 	if pk == nil || rv.Type() != m.GoType() {
 		return "", false
 	}
-	return pyString(rv.Field(pk.Index).Interface()), true
+	v := rv.Field(pk.Index).Interface()
+	// A primary key that is a relation, such as a one-to-one field, is the
+	// primary key of its row.
+	if rel, ok := v.(interface{ PK() int64 }); ok && pk.Rel != nil {
+		return strconv.FormatInt(rel.PK(), 10), true
+	}
+	return pyString(v), true
 }
 
 // WithContext implements ContextField: it returns a copy with the rows loaded.
