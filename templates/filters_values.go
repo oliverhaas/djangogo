@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/flosch/pongo2/v6"
+
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // asInt converts a template value like Python's int(): an integer, a float
@@ -108,6 +110,15 @@ var decimalRe = regexp.MustCompile(`^[+-]?(\d+\.?\d*|\.\d+)$`)
 // decimalText returns a number in plain decimal digits: an integer, a float
 // in its shortest exact form (Python's repr) or a numeric string.
 func decimalText(v *pongo2.Value) (string, bool) {
+	switch d := v.Interface().(type) {
+	case orm.Decimal:
+		return d.FixedString(), true
+	case *orm.Decimal:
+		if d != nil {
+			return d.FixedString(), true
+		}
+		return "", false
+	}
 	switch {
 	case v.IsInteger():
 		return strconv.Itoa(v.Integer()), true

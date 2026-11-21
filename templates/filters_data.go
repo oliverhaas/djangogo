@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/flosch/pongo2/v6"
+
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // pyJSON writes v as Python's json.dumps does by default: ", " and ": " as
@@ -32,6 +34,30 @@ func pyJSON(b *strings.Builder, v any) error {
 		return nil
 	case time.Time:
 		pyJSONString(b, x.Format("2006-01-02T15:04:05.999999Z07:00"))
+		return nil
+	case templateDate:
+		pyJSONString(b, x.Date.String())
+		return nil
+	case orm.Date:
+		pyJSONString(b, x.String())
+		return nil
+	case templateTimeOfDay:
+		pyJSONString(b, x.Time.String())
+		return nil
+	case orm.Time:
+		pyJSONString(b, x.String())
+		return nil
+	case orm.Decimal:
+		pyJSONString(b, x.String())
+		return nil
+	case orm.UUID:
+		pyJSONString(b, x.String())
+		return nil
+	case templateDuration:
+		pyJSONString(b, x.String())
+		return nil
+	case time.Duration:
+		pyJSONString(b, formatDurationPython(x))
 		return nil
 	case *pongo2.Value:
 		return pyJSON(b, x.Interface())

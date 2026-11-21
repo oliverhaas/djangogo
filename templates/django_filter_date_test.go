@@ -3,6 +3,8 @@ package templates_test
 import (
 	"testing"
 	"time"
+
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // TestDate ports Django's DateTests.
@@ -12,15 +14,25 @@ import (
 // Ported from Django: tests/template_tests/filter_tests/test_date.py::DateTests.test_date03
 // Ported from Django: tests/template_tests/filter_tests/test_date.py::DateTests.test_date04
 // Ported from Django: tests/template_tests/filter_tests/test_date.py::DateTests.test_date05
+// Ported from Django: tests/template_tests/filter_tests/test_date.py::DateTests.test_date06
 // Ported from Django: tests/template_tests/filter_tests/test_date.py::DateTests.test_date07
+// Ported from Django: tests/template_tests/filter_tests/test_date.py::DateTests.test_date08
+// Ported from Django: tests/template_tests/filter_tests/test_date.py::DateTests.test_date09
 func TestDate(t *testing.T) {
 	runRenderCases(t, []renderCase{
 		{name: "test_date01", src: `{{ d|date:"m" }}`, ctx: map[string]any{"d": time.Date(2008, 1, 1, 0, 0, 0, 0, time.UTC)}, want: "01"},
+		{name: "test_date01_orm_date", src: `{{ d|date:"m" }}`, ctx: map[string]any{"d": orm.NewDate(2008, 1, 1)}, want: "01"},
 		{name: "test_date02", src: "{{ d|date }}", ctx: map[string]any{"d": time.Date(2008, 1, 1, 0, 0, 0, 0, time.UTC)}, want: "Jan. 1, 2008"},
+		{name: "test_date02_orm_date", src: "{{ d|date }}", ctx: map[string]any{"d": orm.NewDate(2008, 1, 1)}, want: "Jan. 1, 2008"},
 		{name: "test_date03", src: `{{ d|date:"m" }}`, ctx: map[string]any{"d": "fail_string"}, want: ""},
 		{name: "test_date04", src: `{{ d|date:"o" }}`, ctx: map[string]any{"d": time.Date(2008, 12, 29, 0, 0, 0, 0, time.UTC)}, want: "2009"},
+		{name: "test_date04_orm_date", src: `{{ d|date:"o" }}`, ctx: map[string]any{"d": orm.NewDate(2008, 12, 29)}, want: "2009"},
 		{name: "test_date05", src: `{{ d|date:"o" }}`, ctx: map[string]any{"d": time.Date(2010, 1, 3, 0, 0, 0, 0, time.UTC)}, want: "2009"},
+		{name: "test_date06", src: `{{ d|date:"e" }}`, ctx: map[string]any{"d": time.Date(2009, 3, 12, 0, 0, 0, 0, time.FixedZone("+0030", 30*60))}, want: "+0030"},
 		{name: "test_date07", src: `{{ d|date:"e" }}`, ctx: map[string]any{"d": time.Date(2009, 3, 12, 0, 0, 0, 0, time.UTC)}, want: "", skip: "a time.Time always has a zone; Django's naive datetime has none, see fidelity/divergences.md"},
+		{name: "test_date07_orm_date", src: `{{ d|date:"e" }}`, ctx: map[string]any{"d": orm.NewDate(2009, 3, 12)}, want: ""},
+		{name: "test_date08", src: `{{ t|date:"H:i" }}`, ctx: map[string]any{"t": orm.NewTime(0, 1, 0, 0)}, want: "00:01"},
+		{name: "test_date09", src: `{{ t|date:"H:i" }}`, ctx: map[string]any{"t": orm.NewTime(0, 0, 0, 0)}, want: "00:00"},
 	})
 }
 

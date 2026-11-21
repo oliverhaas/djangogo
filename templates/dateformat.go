@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/flosch/pongo2/v6"
+
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // The formats Django uses for the English locale, by setting name.
@@ -37,7 +39,81 @@ type templateTime struct {
 // String formats the time with Django's DATETIME_FORMAT.
 func (t templateTime) String() string { return formatDate(t.Time, namedDateFormats["DATETIME_FORMAT"]) }
 
-// asTime returns the time a template value holds.
+// templateDate is the render-side view of orm.Date. Printed bare it uses
+// Django's DATE_FORMAT ("Dec. 25, 2024") instead of ISO "2024-12-25", while
+// keeping Year, Month, and Day reachable.
+type templateDate struct {
+	orm.Date
+}
+
+// String formats the date with Django's DATE_FORMAT, or "" for the zero Date.
+func (d templateDate) String() string {
+	if d.IsZero() {
+		return ""
+	}
+	return formatDateOpts(d.Time(), namedDateFormats["DATE_FORMAT"], true, false, false)
+}
+
+// templateTimeOfDay is the render-side view of orm.Time. Printed bare it uses
+// Django's TIME_FORMAT ("3:30 p.m.", "midnight", "noon") while keeping Hour,
+// Minute, Second, and Nanosecond reachable.
+type templateTimeOfDay struct {
+	orm.Time
+}
+
+// String formats the time of day with Django's TIME_FORMAT.
+func (t templateTimeOfDay) String() string {
+	return formatDateOpts(timeOfDayAsTime(t.Time), namedDateFormats["TIME_FORMAT"], false, true, false)
+}
+
+// templateDuration is the render-side view of time.Duration. Printed bare it
+// matches Python's str(datetime.timedelta) ("1:30:00", "2 days, 3:04:05",
+// "-1 day, 23:58:30", "0:00:05.123456").
+type templateDuration struct {
+	time.Duration
+}
+
+// String formats d as Python's datetime.timedelta.__str__.
+func (d templateDuration) String() string { return formatDurationPython(d.Duration) }
+
+// formatDurationPython formats d as Python's str(datetime.timedelta), using
+// floor division into (days, seconds, microseconds) with 0 <= seconds < 86400
+// and 0 <= microseconds < 1_000_000.
+func formatDurationPython(d time.Duration) string {
+	const usPerDay = 86400 * 1_000_000
+	totalUS := int64(d / time.Microsecond)
+	days := totalUS / usPerDay
+	rem := totalUS % usPerDay
+	if rem < 0 {
+		days--
+		rem += usPerDay
+	}
+	secs := rem / 1_000_000
+	micros := rem % 1_000_000
+	hh := secs / 3600
+	mm := (secs % 3600) / 60
+	ss := secs % 60
+	out := fmt.Sprintf("%d:%02d:%02d", hh, mm, ss)
+	if days != 0 {
+		plural := "s"
+		if days == 1 || days == -1 {
+			plural = ""
+		}
+		out = fmt.Sprintf("%d day%s, %s", days, plural, out)
+	}
+	if micros != 0 {
+		out += fmt.Sprintf(".%06d", micros)
+	}
+	return out
+}
+
+// timeOfDayAsTime maps an orm.Time onto a neutral date in UTC for formatting.
+func timeOfDayAsTime(t orm.Time) time.Time {
+	return time.Date(2000, 1, 1, t.Hour, t.Minute, t.Second, t.Nanosecond, time.UTC)
+}
+
+// asTime returns the time a template value holds, accepting full timestamps
+// and non-zero orm.Date values (at midnight UTC).
 func asTime(v *pongo2.Value) (time.Time, bool) {
 	switch t := v.Interface().(type) {
 	case time.Time:
@@ -48,8 +124,56 @@ func asTime(v *pongo2.Value) (time.Time, bool) {
 		if t != nil {
 			return *t, true
 		}
+	case orm.Date:
+		if !t.IsZero() {
+			return t.Time(), true
+		}
+	case templateDate:
+		if !t.IsZero() {
+			return t.Time(), true
+		}
+	case *orm.Date:
+		if t != nil && !t.IsZero() {
+			return t.Time(), true
+		}
 	}
 	return time.Time{}, false
+}
+
+// asDateOrTime extracts a temporal value and flags describing which components
+// (date, time, zone) it carries.
+func asDateOrTime(v *pongo2.Value) (tm time.Time, hasDate, hasTime, hasZone, ok bool) {
+	switch t := v.Interface().(type) {
+	case time.Time:
+		return t, true, true, true, true
+	case templateTime:
+		return t.Time, true, true, true, true
+	case *time.Time:
+		if t != nil {
+			return *t, true, true, true, true
+		}
+	case orm.Date:
+		if !t.IsZero() {
+			return t.Time(), true, false, false, true
+		}
+	case templateDate:
+		if !t.IsZero() {
+			return t.Time(), true, false, false, true
+		}
+	case *orm.Date:
+		if t != nil && !t.IsZero() {
+			return t.Time(), true, false, false, true
+		}
+	case orm.Time:
+		return timeOfDayAsTime(t), false, true, false, true
+	case templateTimeOfDay:
+		return timeOfDayAsTime(t.Time), false, true, false, true
+	case *orm.Time:
+		if t != nil {
+			return timeOfDayAsTime(*t), false, true, false, true
+		}
+	}
+	return time.Time{}, false, false, false, false
 }
 
 // formatDate formats t with a Django date format string: a format name such
@@ -61,6 +185,33 @@ func asTime(v *pongo2.Value) (time.Time, bool) {
 // the offset in c behave as they do for an aware datetime in Django. The time
 // is formatted in its own location.
 func formatDate(t time.Time, format string) string {
+	return formatDateOpts(t, format, true, true, true)
+}
+
+// isDateOnlySpecifier reports whether ch requires calendar date components
+// that a bare orm.Time lacks.
+func isDateOnlySpecifier(ch rune) bool {
+	switch ch {
+	case 'c', 'd', 'D', 'E', 'F', 'j', 'l', 'L', 'm', 'M', 'n', 'N', 'o', 'r', 'S', 't', 'U', 'w', 'W', 'y', 'Y', 'z':
+		return true
+	default:
+		return false
+	}
+}
+
+// isZoneSpecifier reports whether ch formats timezone information.
+func isZoneSpecifier(ch rune) bool {
+	switch ch {
+	case 'e', 'I', 'O', 'T', 'Z':
+		return true
+	default:
+		return false
+	}
+}
+
+// formatDateOpts formats t with a Django format string, honoring which
+// components (date, time, zone) the source value carries.
+func formatDateOpts(t time.Time, format string, hasDate, hasTime, hasZone bool) string {
 	if named, ok := namedDateFormats[format]; ok {
 		format = named
 	}
@@ -74,6 +225,16 @@ func formatDate(t time.Time, format string) string {
 		}
 		if ch == '\\' {
 			escaped = true
+			continue
+		}
+		if !hasDate && isDateOnlySpecifier(ch) {
+			return ""
+		}
+		if !hasZone && isZoneSpecifier(ch) {
+			continue
+		}
+		if !hasTime && ch == 'c' {
+			b.WriteString(t.Format("2006-01-02"))
 			continue
 		}
 		writeDateChar(&b, t, ch)
@@ -247,21 +408,32 @@ func writeDateChar(b *strings.Builder, t time.Time, ch rune) {
 	}
 }
 
-// dateFilter returns Django's date or time filter: the value formatted with
-// the argument, or with the named default format when there is none. A value
-// that is not a time gives an empty string, as in Django.
-func dateFilter(defaultFormat string) pongo2.FilterFunction {
-	return func(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-		t, ok := asTime(in)
-		if !ok {
-			return pongo2.AsValue(""), nil
-		}
-		format := defaultFormat
-		if !param.IsNil() && param.String() != "" {
-			format = param.String()
-		}
-		return pongo2.AsValue(formatDate(t, format)), nil
+// filterDate implements Django's date filter for time.Time, orm.Date, and
+// orm.Time values. Non-temporal values return an empty string.
+func filterDate(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	t, hasDate, hasTime, hasZone, ok := asDateOrTime(in)
+	if !ok {
+		return pongo2.AsValue(""), nil
 	}
+	format := "DATE_FORMAT"
+	if !param.IsNil() && param.String() != "" {
+		format = param.String()
+	}
+	return pongo2.AsValue(formatDateOpts(t, format, hasDate, hasTime, hasZone)), nil
+}
+
+// filterTime implements Django's time filter for time.Time and orm.Time
+// values. Calendar-only orm.Date and non-temporal values return "".
+func filterTime(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	t, hasDate, hasTime, hasZone, ok := asDateOrTime(in)
+	if !ok || !hasTime {
+		return pongo2.AsValue(""), nil
+	}
+	format := "TIME_FORMAT"
+	if !param.IsNil() && param.String() != "" {
+		format = param.String()
+	}
+	return pongo2.AsValue(formatDateOpts(t, format, hasDate, hasTime, hasZone)), nil
 }
 
 // nbsp is the no-break space (U+00A0) Django puts between a number and its

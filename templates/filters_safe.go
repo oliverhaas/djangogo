@@ -7,10 +7,13 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/flosch/pongo2/v6"
+
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // The filters of this file replace pongo2 filters that drop the safe mark of
@@ -104,7 +107,16 @@ func filterOut(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	switch v := in.Interface().(type) {
 	case modelView:
 		return pongo2.AsValue(v.label()), nil
+	case orm.Date:
+		return pongo2.AsValue(templateDate{v}.String()), nil
+	case orm.Time:
+		return pongo2.AsValue(templateTimeOfDay{v}.String()), nil
+	case time.Duration:
+		return pongo2.AsValue(formatDurationPython(v)), nil
 	case fmt.Stringer:
+		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Pointer && rv.IsNil() {
+			return pongo2.AsValue(""), nil
+		}
 		return pongo2.AsValue(v.String()), nil
 	}
 	return in, nil

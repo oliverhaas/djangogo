@@ -1,7 +1,7 @@
 package templates
 
 import (
-	"fmt"
+	"net/netip"
 	"reflect"
 	"strings"
 	"sync"
@@ -153,7 +153,9 @@ func (c converter) wrap(m map[string]any) any {
 // from v. Containers are copied only when something inside them changed.
 func (c converter) convert(v any, depth int) (any, bool) {
 	switch x := v.(type) {
-	case nil, string, bool, int, int64, float64, modelView, templateTime:
+	case nil, string, bool, int, int64, float64, modelView,
+		templateTime, templateDate, templateTimeOfDay, templateDuration,
+		orm.Decimal, orm.UUID:
 		return v, false
 	case time.Time:
 		return templateTime{x}, true
@@ -162,6 +164,47 @@ func (c converter) convert(v any, depth int) (any, bool) {
 			return nil, true
 		}
 		return templateTime{*x}, true
+	case orm.Date:
+		return templateDate{x}, true
+	case *orm.Date:
+		if x == nil {
+			return nil, true
+		}
+		return templateDate{*x}, true
+	case orm.Time:
+		return templateTimeOfDay{x}, true
+	case *orm.Time:
+		if x == nil {
+			return nil, true
+		}
+		return templateTimeOfDay{*x}, true
+	case time.Duration:
+		return templateDuration{x}, true
+	case *time.Duration:
+		if x == nil {
+			return nil, true
+		}
+		return templateDuration{*x}, true
+	case *orm.Decimal:
+		if x == nil {
+			return nil, true
+		}
+		return *x, true
+	case *orm.UUID:
+		if x == nil {
+			return nil, true
+		}
+		return *x, true
+	case netip.Addr:
+		if !x.IsValid() {
+			return "", true
+		}
+		return x, false
+	case *netip.Addr:
+		if x == nil || !x.IsValid() {
+			return nil, true
+		}
+		return *x, true
 	case ModelMap:
 		if c.public {
 			return v, false
@@ -178,7 +221,10 @@ func (c converter) convert(v any, depth int) (any, bool) {
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
 	case reflect.Pointer:
-		if rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
+		if rv.IsNil() {
+			return nil, true
+		}
+		if rv.Elem().Kind() != reflect.Struct {
 			return v, false
 		}
 		if m, ok := c.modelOf(v); ok {
@@ -312,8 +358,12 @@ func (c converter) instance(m *orm.Model, rv reflect.Value, depth int) map[strin
 		if f.PrimaryKey {
 			pk, hasPK = val, true
 		}
-		if len(f.Choices) > 0 {
-			out["get_"+f.Attr+"_display"] = choiceLabel(f.Choices, val)
+		if f.HasChoices {
+			disp := orm.GetDisplay(m, ptr.Interface(), f.Attr)
+			if !c.public {
+				disp = c.value(disp, maxModelDepth+1)
+			}
+			out["get_"+f.Attr+"_display"] = disp
 		}
 	}
 	if hasPK {
@@ -357,18 +407,6 @@ func (c converter) relation(out map[string]any, f *orm.Field, fv reflect.Value, 
 		return
 	}
 	out[f.Attr] = c.wrap(c.instance(f.Rel.Target, obj, depth+1))
-}
-
-// choiceLabel returns the label of the choice val selects, or val itself when
-// it is not among the choices, as Django's get_FOO_display does.
-func choiceLabel(choices []orm.Choice, val any) any {
-	s := fmt.Sprint(val)
-	for _, ch := range choices {
-		if ch.Value == s {
-			return ch.Label
-		}
-	}
-	return val
 }
 
 // modelMethod is one method a template can call on a model instance.
