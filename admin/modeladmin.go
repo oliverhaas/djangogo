@@ -237,6 +237,14 @@ type ModelAdmin struct {
 	ReadonlyFields []string
 	// ExcludeFields names fields omitted from the add and change forms.
 	ExcludeFields []string
+	// FilterHorizontal names many-to-many fields whose list is a
+	// FilteredSelectMultiple with the two lists side by side (Django's
+	// filter_horizontal).
+	FilterHorizontal []string
+	// FilterVertical names many-to-many fields whose list is a
+	// FilteredSelectMultiple with the two lists stacked (Django's
+	// filter_vertical).
+	FilterVertical []string
 
 	// Actions registers custom bulk actions on this ModelAdmin (appended after
 	// site-wide actions such as delete_selected; an action with the same Name

@@ -80,6 +80,9 @@ type Form struct {
 	ctx      context.Context
 	resolved bool
 	err      error
+	// loadInitial fills initial values that need a database, such as the
+	// related keys of a many-to-many field of a model form. resolve calls it.
+	loadInitial func(ctx context.Context, f *Form) error
 }
 
 // New returns an unbound form with the given fields, in order.
@@ -217,6 +220,11 @@ func (f *Form) resolve() {
 		return
 	}
 	f.resolved = true
+	if f.loadInitial != nil {
+		if err := f.loadInitial(f.context(), f); err != nil {
+			f.fail(err)
+		}
+	}
 	for _, name := range f.names {
 		cf, ok := f.fields[name].(ContextField)
 		if !ok {

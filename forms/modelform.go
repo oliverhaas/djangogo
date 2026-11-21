@@ -1,12 +1,14 @@
 package forms
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -47,7 +49,7 @@ func FromModel(m *orm.Model, opts ...ModelFormOption) *Form {
 func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[string]bool) {
 	cfg.normalize(m)
 	var all []string
-	for _, mf := range m.Fields() {
+	for _, mf := range formModelFields(m) {
 		if editable(mf) {
 			all = append(all, mf.Attr)
 		}
@@ -57,9 +59,9 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[
 	var unknown []string
 	for _, name := range cfg.includedNames(all) {
 		field := cfg.formFields[name]
-		mf, isModelField := m.FieldByAttr(name)
+		mf, isModelField := modelField(m, name)
 		switch {
-		case isModelField && !editable(mf) && mf.Kind != orm.KindAuto:
+		case isModelField && !editable(mf) && !isAutoPK(mf):
 			form.fail(fmt.Errorf("forms: '%s' cannot be specified for %s model form as it is a non-editable field",
 				name, m.Name()))
 			continue
@@ -69,7 +71,7 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[
 				unknown = append(unknown, name)
 			}
 			continue
-		case mf.Kind == orm.KindAuto:
+		case isAutoPK(mf):
 			continue
 		default:
 			field = formFieldFor(db, mf, cfg.factories[name])
@@ -99,7 +101,38 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[
 
 // editable reports whether a model field appears in a model form.
 func editable(mf *orm.Field) bool {
+	if isM2M(mf) {
+		return mf.Editable
+	}
 	return mf.Editable && mf.Kind != orm.KindAuto && !mf.AutoNow && !mf.AutoNowAdd
+}
+
+// isM2M reports whether mf is a forward many-to-many field.
+func isM2M(mf *orm.Field) bool { return mf.Rel != nil && mf.Rel.Kind == orm.RelM2M }
+
+// isAutoPK reports whether mf is an auto primary key. A many-to-many field has
+// the zero Kind as well, but it is not one.
+func isAutoPK(mf *orm.Field) bool { return mf.Kind == orm.KindAuto && !isM2M(mf) }
+
+// formModelFields returns the fields of m that a model form can have: the
+// concrete fields and the many-to-many fields, in declaration order, as
+// Django's fields_for_model sorts them.
+func formModelFields(m *orm.Model) []*orm.Field {
+	fields := slices.Concat(m.Fields(), m.ManyToMany())
+	slices.SortStableFunc(fields, func(a, b *orm.Field) int { return cmp.Compare(a.Index, b.Index) })
+	return fields
+}
+
+// modelField returns the concrete or many-to-many field of m with the given
+// attribute name.
+func modelField(m *orm.Model, name string) (*orm.Field, bool) {
+	if mf, ok := m.FieldByAttr(name); ok {
+		return mf, true
+	}
+	if mf, ok := m.ManyToManyField(name); ok && mf.Attr == name {
+		return mf, true
+	}
+	return nil, false
 }
 
 // fieldLabel returns the label of a model field: its verbose name, or its
@@ -318,9 +351,49 @@ func (mf *ModelForm[T]) WithInstance(obj *T) *ModelForm[T] {
 		for k, v := range mf.Initial {
 			c.Initial[k] = v
 		}
+		c.loadInitial = c.manyInitial(obj)
+		c.resolved = false
 	}
 	c.install()
 	return &c
+}
+
+// manyInitial returns the loader of the initial values of the many-to-many
+// fields of the form, Django's model_to_dict for them: the primary keys of
+// the rows related to obj, and none for an unsaved obj. An initial value the
+// caller set wins.
+func (mf *ModelForm[T]) manyInitial(obj *T) func(ctx context.Context, f *Form) error {
+	model, db, included := mf.model, mf.db, mf.includedFields
+	return func(ctx context.Context, f *Form) error {
+		for _, field := range model.ManyToMany() {
+			if !included[field.Attr] {
+				continue
+			}
+			if _, set := f.Initial[field.Attr]; set {
+				continue
+			}
+			if f.Initial == nil {
+				f.Initial = map[string]any{}
+			}
+			if !hasPK(model, obj) {
+				f.Initial[field.Attr] = []any{}
+				continue
+			}
+			pks, err := orm.ManyValues(ctx, db, obj, field)
+			if err != nil {
+				return fmt.Errorf("forms: initial value of %s: %w", field.Attr, err)
+			}
+			f.Initial[field.Attr] = pks
+		}
+		return nil
+	}
+}
+
+// hasPK reports whether obj, an instance of m, has a primary key value.
+func hasPK(m *orm.Model, obj any) bool {
+	pk := m.PrimaryKey()
+	rv, ok := structValue(obj)
+	return ok && pk != nil && !rv.Field(pk.Index).IsZero()
 }
 
 // Bind returns a copy of the form bound to data. Without WithInstance the
@@ -349,8 +422,7 @@ func (mf *ModelForm[T]) adding() bool {
 	if !mf.own {
 		return true
 	}
-	pk := mf.model.PrimaryKey()
-	return pk == nil || reflect.ValueOf(mf.instance).Elem().Field(pk.Index).IsZero()
+	return !hasPK(mf.model, mf.instance)
 }
 
 // constructData returns the cleaned data that goes into the instance, Django's
@@ -494,8 +566,9 @@ func (mf *ModelForm[T]) postClean(f *Form) {
 // instance to the database: an INSERT when the form creates a row (it has no
 // WithInstance, or the instance has no primary key), an UPDATE of its row
 // otherwise. An UPDATE that finds no row inserts it, as Django's Model.save
-// does. It returns the saved instance. For a form that is not valid it returns
-// an error wrapping ErrInvalid and writes nothing.
+// does. Then it writes the many-to-many fields with SaveM2M. It returns the
+// saved instance. For a form that is not valid it returns an error wrapping
+// ErrInvalid and writes nothing.
 func (mf *ModelForm[T]) Save(ctx context.Context) (*T, error) {
 	if mf.model == nil {
 		return nil, mf.Err()
@@ -515,6 +588,18 @@ func (mf *ModelForm[T]) Save(ctx context.Context) (*T, error) {
 		return nil, invalidSaveError(fmt.Sprintf("forms: The %s could not be %s because the data didn't validate.",
 			mf.model.Name(), verb))
 	}
+	if err := mf.saveInstance(ctx, adding); err != nil {
+		return nil, err
+	}
+	if err := mf.SaveM2M(ctx); err != nil {
+		return nil, err
+	}
+	return mf.instance, nil
+}
+
+// saveInstance writes the instance: an INSERT when adding, an UPDATE of its
+// row otherwise, and an INSERT when the UPDATE finds no row.
+func (mf *ModelForm[T]) saveInstance(ctx context.Context, adding bool) error {
 	if adding {
 		return mf.create(ctx)
 	}
@@ -529,24 +614,63 @@ func (mf *ModelForm[T]) Save(ctx context.Context) (*T, error) {
 		assignments = append(assignments, field.Column, rv.Field(field.Index).Interface())
 	}
 	if len(assignments) == 0 {
-		return mf.instance, nil
+		return nil
 	}
 	n, err := orm.Query[T](mf.db).Filter(pk.Column, rv.Field(pk.Index).Interface()).Update(ctx, assignments...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if n == 0 {
 		return mf.create(ctx)
 	}
-	return mf.instance, nil
+	return nil
 }
 
 // create inserts the instance. From then on the form edits the saved row, as
 // a Django instance is no longer adding after its save.
-func (mf *ModelForm[T]) create(ctx context.Context) (*T, error) {
+func (mf *ModelForm[T]) create(ctx context.Context) error {
 	if err := orm.Query[T](mf.db).Create(ctx, mf.instance); err != nil {
-		return nil, err
+		return err
 	}
 	mf.own = true
-	return mf.instance, nil
+	return nil
+}
+
+// SaveM2M writes the many-to-many fields of a valid form for its saved
+// instance, Django's save_m2m: the related rows of each field become those of
+// its cleaned value, a list of primary keys or of related objects. Save calls
+// it after it writes the instance. A caller that saves Instance() itself, the
+// counterpart of Django's save(commit=False), calls it afterwards. A
+// many-to-many field that WithFields or WithExclude leaves out is not written.
+func (mf *ModelForm[T]) SaveM2M(ctx context.Context) error {
+	if mf.model == nil {
+		return mf.Err()
+	}
+	if mf.ctx == nil {
+		mf.SetContext(ctx)
+	}
+	if !mf.IsValid() {
+		if err := mf.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("forms: SaveM2M: %w", ErrInvalid)
+	}
+	cleaned := mf.CleanedData()
+	for _, field := range mf.model.ManyToMany() {
+		if !mf.includedFields[field.Attr] {
+			continue
+		}
+		value, ok := cleaned[field.Attr]
+		if !ok {
+			continue
+		}
+		items, isList := listItems(value)
+		if !isList && value != nil {
+			return fmt.Errorf("forms: field %s: cannot use %T as a list of related rows", field.Attr, value)
+		}
+		if err := orm.SetManyPKs(ctx, mf.db, mf.instance, field, items); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -108,7 +109,7 @@ func (s *AdminSite) makeOldChangeRedirect(e *entry) http.HandlerFunc {
 func (s *AdminSite) loadFKLabels(ctx context.Context, fields []*orm.Field) map[int]map[string]string {
 	fkLabels := make(map[int]map[string]string)
 	for j, f := range fields {
-		if f.Rel == nil || f.Rel.Target == nil {
+		if f.Rel == nil || f.Rel.Target == nil || f.Rel.Kind == orm.RelM2M {
 			continue
 		}
 		opts, err := orm.LabeledRowsOrdered(ctx, s.db, f.Rel.Target, nil, nil)
@@ -125,41 +126,152 @@ func (s *AdminSite) loadFKLabels(ctx context.Context, fields []*orm.Field) map[i
 }
 
 // formFor builds the editable form for an entry: the model form minus the
-// admin's ExcludeFields and ReadonlyFields (the auto primary key is already
-// dropped by forms.FromModel). Each foreign-key <select> is then filled with the
+// admin's ExcludeFields and ReadonlyFields and the many-to-many fields with an
+// explicit through model (the auto primary key is already dropped by
+// forms.FromModel), with the widgets and help texts of Django's
+// formfield_for_manytomany. Each relation's list is then filled with the
 // related model's rows.
-func (s *AdminSite) formFor(ctx context.Context, e *entry) *forms.Form {
-	form := forms.FromModel(e.model, forms.WithExclude(s.excluded(e)...))
-	s.populateChoices(ctx, form, e)
+func (s *AdminSite) formFor(r *http.Request, e *entry) *forms.Form {
+	opts := append([]forms.ModelFormOption{forms.WithExclude(s.excluded(e)...)}, manyToManyOptions(e)...)
+	form := forms.FromModel(e.model, opts...)
+	s.populateChoices(r, form, e)
 	return form
 }
 
+// multipleSelectHint is the help text Django's admin adds to a <select
+// multiple> of a many-to-many field.
+const multipleSelectHint = "Hold down “Control”, or “Command” on a Mac, to select more than one."
+
+// manyToManyOptions returns the form options of Django's
+// formfield_for_manytomany for the many-to-many fields of e: a
+// FilteredSelectMultiple for a field named in FilterHorizontal or
+// FilterVertical, and the multiple selection hint after the help text.
+func manyToManyOptions(e *entry) []forms.ModelFormOption {
+	var opts []forms.ModelFormOption
+	for _, mf := range e.model.ManyToMany() {
+		if mf.Rel == nil || !mf.Rel.AutoCreated {
+			continue
+		}
+		vertical := namesField(e.admin.FilterVertical, mf)
+		if vertical || namesField(e.admin.FilterHorizontal, mf) {
+			opts = append(opts, forms.WithWidget(mf.Attr, FilteredSelectMultiple{
+				VerboseName: fieldVerboseName(mf),
+				IsStacked:   vertical,
+			}))
+		}
+		help := multipleSelectHint
+		if mf.HelpText != "" {
+			help = mf.HelpText + " " + multipleSelectHint
+		}
+		opts = append(opts, forms.WithHelpText(mf.Attr, help))
+	}
+	return opts
+}
+
+// namesField reports whether names holds the Go name or the attribute name of
+// f.
+func namesField(names []string, f *orm.Field) bool {
+	return slices.Contains(names, f.Name) || slices.Contains(names, f.Attr)
+}
+
 // excluded returns the field names the admin omits from a model's form: the
-// configured ExcludeFields plus the ReadonlyFields.
+// configured ExcludeFields, the ReadonlyFields and the many-to-many fields
+// with an explicit through model, which Django's formfield_for_manytomany
+// leaves out.
 func (s *AdminSite) excluded(e *entry) []string {
 	out := make([]string, 0, len(e.admin.ExcludeFields)+len(e.admin.ReadonlyFields))
 	out = append(out, e.admin.ExcludeFields...)
 	out = append(out, e.admin.ReadonlyFields...)
+	for _, mf := range e.model.ManyToMany() {
+		if mf.Rel != nil && !mf.Rel.AutoCreated {
+			out = append(out, mf.Attr)
+		}
+	}
 	return out
 }
 
-// populateChoices fills every foreign-key field's <select> with the related
-// model's (pk, label) rows.
-func (s *AdminSite) populateChoices(ctx context.Context, form *forms.Form, e *entry) {
+// formFieldNames returns the set of the names of the fields of form.
+func formFieldNames(form *forms.Form) map[string]bool {
 	present := make(map[string]bool, len(form.Fields()))
 	for _, fld := range form.Fields() {
 		present[fld.Name] = true
 	}
-	for _, mf := range e.model.Relations() {
+	return present
+}
+
+// populateChoices fills the list of every foreign-key and many-to-many field
+// of the form with the related model's (pk, label) rows, in the ordering of
+// the related model's admin (Django's get_field_queryset), else the related
+// model's Meta.Ordering.
+func (s *AdminSite) populateChoices(r *http.Request, form *forms.Form, e *entry) {
+	present := formFieldNames(form)
+	for _, mf := range slices.Concat(e.model.Relations(), e.model.ManyToMany()) {
 		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Attr] {
 			continue
 		}
-		opts, err := orm.LabeledRows(ctx, s.db, mf.Rel.Target)
+		opts, err := orm.LabeledRowsOrdered(r.Context(), s.db, mf.Rel.Target, s.relatedOrdering(r, mf.Rel.Target), nil)
 		if err != nil {
 			continue
 		}
 		form.SetChoices(mf.Attr, opts)
 	}
+}
+
+// relatedOrdering returns the ordering of the admin of the related model
+// target: its GetOrdering or Ordering, with the names translated to the
+// model's attribute paths. It is nil when target has no admin or the admin no
+// ordering.
+func (s *AdminSite) relatedOrdering(r *http.Request, target *orm.Model) []string {
+	relEntry := s.entryByModel(target)
+	if relEntry == nil {
+		return nil
+	}
+	ordering := relEntry.admin.Ordering
+	if relEntry.admin.GetOrdering != nil {
+		ordering = relEntry.admin.GetOrdering(r)
+	}
+	if len(ordering) == 0 {
+		return nil
+	}
+	norm := make([]string, len(ordering))
+	for i, o := range ordering {
+		norm[i] = normalizeFieldPath(target, o)
+	}
+	return norm
+}
+
+// manyInitial sets the initial value of every many-to-many field of form to
+// the primary keys of the rows obj is related to.
+func (s *AdminSite) manyInitial(ctx context.Context, form *forms.Form, e *entry, obj any) error {
+	present := formFieldNames(form)
+	for _, mf := range e.model.ManyToMany() {
+		if !present[mf.Attr] {
+			continue
+		}
+		pks, err := orm.ManyValues(ctx, s.db, obj, mf)
+		if err != nil {
+			return err
+		}
+		form.Initial[mf.Attr] = pks
+	}
+	return nil
+}
+
+// saveManyToMany writes the cleaned many-to-many fields of form for obj,
+// Django's ModelForm._save_m2m.
+func (s *AdminSite) saveManyToMany(ctx context.Context, e *entry, form *forms.Form, obj any) error {
+	cleaned := form.Cleaned()
+	for _, mf := range e.model.ManyToMany() {
+		value, ok := cleaned[mf.Attr]
+		if !ok {
+			continue
+		}
+		pks, _ := value.([]any)
+		if err := orm.SetManyPKs(ctx, s.db, obj, mf, pks); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // add handles the add form: requires add permission, validates POST data,
@@ -178,14 +290,20 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		form := s.formFor(r.Context(), e).Bind(r.PostForm)
+		form := s.formFor(r, e).Bind(r.PostForm)
 		if form.IsValid() {
 			obj := e.ops.newPtr()
 			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
 				http.Error(w, "failed to populate object", http.StatusInternalServerError)
 				return
 			}
-			if err := e.ops.create(r.Context(), obj); err != nil {
+			err := s.db.Atomic(r.Context(), func(ctx context.Context) error {
+				if err := e.ops.create(ctx, obj); err != nil {
+					return err
+				}
+				return s.saveManyToMany(ctx, e, form, obj)
+			})
+			if err != nil {
 				http.Error(w, "failed to create row", http.StatusInternalServerError)
 				return
 			}
@@ -213,7 +331,7 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 		return
 	}
 
-	s.renderChangeForm(w, r, e, title, nil, s.formFor(r.Context(), e), true, true)
+	s.renderChangeForm(w, r, e, title, nil, s.formFor(r, e), true, true)
 }
 
 // change handles the change/view form: checks view or change permission on the
@@ -248,13 +366,19 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		form := s.formFor(r.Context(), e).Bind(r.PostForm)
+		form := s.formFor(r, e).Bind(r.PostForm)
 		if form.IsValid() {
 			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
 				http.Error(w, "failed to populate object", http.StatusInternalServerError)
 				return
 			}
-			if err := e.ops.update(r.Context(), pk, obj); err != nil {
+			err := s.db.Atomic(r.Context(), func(ctx context.Context) error {
+				if err := e.ops.update(ctx, pk, obj); err != nil {
+					return err
+				}
+				return s.saveManyToMany(ctx, e, form, obj)
+			})
+			if err != nil {
 				http.Error(w, "failed to update row", http.StatusInternalServerError)
 				return
 			}
@@ -283,8 +407,12 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 		return
 	}
 
-	form := forms.FromStruct(e.model, obj, forms.WithExclude(s.excluded(e)...))
-	s.populateChoices(r.Context(), form, e)
+	form := s.formFor(r, e)
+	form.Initial = forms.InitialFromStruct(e.model, obj)
+	if err := s.manyInitial(r.Context(), form, e, obj); err != nil {
+		http.Error(w, "failed to load row", http.StatusInternalServerError)
+		return
+	}
 	s.renderChangeForm(w, r, e, "Change "+singular, obj, form, false, true)
 }
 
@@ -451,7 +579,9 @@ func (s *AdminSite) renderChangeForm(
 
 // readonlyFieldsFor returns display entries for fields rendered read-only on
 // the change form: every non-excluded non-PK field when allReadonly is true
-// (view-only user), or only e.admin.ReadonlyFields otherwise.
+// (view-only user), or only e.admin.ReadonlyFields otherwise. A many-to-many
+// field shows the labels of its related rows separated by commas, as Django's
+// AdminReadonlyField.contents.
 func (s *AdminSite) readonlyFieldsFor(ctx context.Context, e *entry, obj any, allReadonly bool) []map[string]any {
 	var fields []*orm.Field
 	pkField := e.model.PrimaryKey()
@@ -462,10 +592,21 @@ func (s *AdminSite) readonlyFieldsFor(ctx context.Context, e *entry, obj any, al
 		if pkField != nil && f.Name == pkField.Name && f.Kind == orm.KindAuto {
 			continue
 		}
-		if slices.Contains(e.admin.ExcludeFields, f.Name) || slices.Contains(e.admin.ExcludeFields, f.Attr) {
+		if namesField(e.admin.ExcludeFields, f) {
 			continue
 		}
-		if !allReadonly && !slices.Contains(e.admin.ReadonlyFields, f.Name) && !slices.Contains(e.admin.ReadonlyFields, f.Attr) {
+		if !allReadonly && !namesField(e.admin.ReadonlyFields, f) {
+			continue
+		}
+		fields = append(fields, f)
+	}
+	for _, f := range e.model.ManyToMany() {
+		// A view-only form shows the fields of the change form, which has no
+		// many-to-many field with an explicit through model.
+		if namesField(e.admin.ExcludeFields, f) || f.Rel == nil || (allReadonly && !f.Rel.AutoCreated) {
+			continue
+		}
+		if !allReadonly && !namesField(e.admin.ReadonlyFields, f) {
 			continue
 		}
 		fields = append(fields, f)
@@ -473,14 +614,18 @@ func (s *AdminSite) readonlyFieldsFor(ctx context.Context, e *entry, obj any, al
 	if len(fields) == 0 {
 		return nil
 	}
+	slices.SortStableFunc(fields, func(a, b *orm.Field) int { return cmp.Compare(a.Index, b.Index) })
 	fkLabels := s.loadFKLabels(ctx, fields)
 	elem := reflect.ValueOf(obj).Elem()
 	out := make([]map[string]any, len(fields))
 	for i, f := range fields {
 		val := ""
-		if f.Rel != nil {
+		switch {
+		case f.Rel != nil && f.Rel.Kind == orm.RelM2M:
+			val = s.manyLabels(ctx, obj, f)
+		case f.Rel != nil:
 			val = fkCellLabel(elem.Field(f.Index), fkLabels[i])
-		} else {
+		default:
 			val = formatCell(elem.Field(f.Index))
 		}
 		if val == "" {
@@ -493,6 +638,25 @@ func (s *AdminSite) readonlyFieldsFor(ctx context.Context, e *entry, obj any, al
 		}
 	}
 	return out
+}
+
+// manyLabels returns the labels of the rows obj is related to through the
+// many-to-many field f, separated by ", ", or "" when there are none or they
+// cannot be read.
+func (s *AdminSite) manyLabels(ctx context.Context, obj any, f *orm.Field) string {
+	pks, err := orm.ManyValues(ctx, s.db, obj, f)
+	if err != nil || len(pks) == 0 {
+		return ""
+	}
+	rows, err := orm.LabeledRowsOrdered(ctx, s.db, f.Rel.Target, nil, pks)
+	if err != nil {
+		return ""
+	}
+	labels := make([]string, len(rows))
+	for i, row := range rows {
+		labels[i] = row[1]
+	}
+	return strings.Join(labels, ", ")
 }
 
 // countFormErrors returns the total number of error entries on a bound form.

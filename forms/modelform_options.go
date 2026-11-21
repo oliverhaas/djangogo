@@ -23,7 +23,7 @@ type ModelFormOption func(*modelFormConfig)
 
 // fieldFactory builds the form field of a model field from the options that
 // its model field implies.
-type fieldFactory func(db *orm.DB, opts []FieldOption) Field
+type fieldFactory func(db *orm.DB, mf *orm.Field, opts []FieldOption) Field
 
 // modelFormConfig accumulates the options of a model form.
 type modelFormConfig struct {
@@ -118,15 +118,19 @@ func WithFormField(field string, f Field) ModelFormOption {
 	}
 }
 
-// WithQuerySet restricts the options of a foreign key field to the rows of qs,
-// the counterpart of setting the queryset of a ModelChoiceField. The cleaned
-// value of the field becomes the selected *R. It needs a database, so it
-// applies to NewModelForm and not to FromModel.
+// WithQuerySet restricts the options of a foreign key or many-to-many field
+// to the rows of qs, the counterpart of setting the queryset of a
+// ModelChoiceField or ModelMultipleChoiceField. The cleaned value of the field
+// becomes the selected *R, or the []*R of a many-to-many field. It needs a
+// database, so it applies to NewModelForm and not to FromModel.
 func WithQuerySet[R any](field string, qs *orm.QuerySet[R]) ModelFormOption {
 	return func(c *modelFormConfig) {
-		c.factories[field] = func(db *orm.DB, opts []FieldOption) Field {
+		c.factories[field] = func(db *orm.DB, mf *orm.Field, opts []FieldOption) Field {
 			if db == nil {
 				return nil
+			}
+			if isM2M(mf) {
+				return NewModelMultipleChoiceField(db, qs, opts...)
 			}
 			return NewModelChoiceField(db, qs, opts...)
 		}
@@ -158,6 +162,9 @@ func attrName(m *orm.Model, name string) string {
 		return name
 	}
 	if mf, ok := m.FieldByName(name); ok {
+		return mf.Attr
+	}
+	if mf, ok := m.ManyToManyField(name); ok {
 		return mf.Attr
 	}
 	return name

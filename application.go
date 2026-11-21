@@ -359,6 +359,7 @@ func (a *Application) router() (http.Handler, error) {
 		}
 		if site != nil {
 			routes = append(routes, site.Routes()...)
+			a.Checks.Register(func(*checks.Context) []checks.Message { return site.Check() }, checks.TagAdmin)
 		}
 	}
 

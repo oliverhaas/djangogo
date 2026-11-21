@@ -396,8 +396,7 @@ func TestModelFormArticleForm(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		f := forms.NewModelForm[Article](db, articleOptions()...)
 		djangotest.AssertEqual(t, f.FieldNames(),
-			[]string{"headline", "slug", "pub_date", "writer", "article", "status"})
-		t.Skip("FIXME-PORT: Go: the ORM has no ManyToManyField, Django: the form has a categories field between article and status")
+			[]string{"headline", "slug", "pub_date", "writer", "article", "categories", "status"})
 	})
 }
 

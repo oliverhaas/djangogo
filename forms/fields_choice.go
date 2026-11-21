@@ -346,13 +346,20 @@ func newModelChoiceField(o *fieldOptions) *ModelChoiceField {
 // given to Form.SetContext.
 func NewModelChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ...FieldOption) *ModelChoiceField {
 	f := newModelChoiceField(collectOptions(opts))
-	if qs == nil {
-		qs = orm.Query[T](db)
-	}
 	model, _ := db.Registry().ModelOf(new(T))
 	f.charPK = isStringPK(model)
 	f.pkOf = func(value any) (string, bool) { return instancePK(model, value) }
-	f.load = func(ctx context.Context) ([]modelRow, error) {
+	f.load = queryRows(db, qs, model)
+	return f
+}
+
+// queryRows returns the loader of the rows of qs, or of every row of T when
+// qs is nil, whose cleaned values are the objects (*T).
+func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model) func(context.Context) ([]modelRow, error) {
+	if qs == nil {
+		qs = orm.Query[T](db)
+	}
+	return func(ctx context.Context) ([]modelRow, error) {
 		objs, err := qs.All(ctx)
 		if err != nil {
 			return nil, err
@@ -365,7 +372,6 @@ func NewModelChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ...FieldOp
 		}
 		return rows, nil
 	}
-	return f
 }
 
 // newRelatedChoiceField returns the field of a foreign key to target. With a
@@ -379,7 +385,7 @@ func newRelatedChoiceField(db *orm.DB, target *orm.Model, o *fieldOptions) *Mode
 		return f
 	}
 	f.load = func(ctx context.Context) ([]modelRow, error) {
-		pairs, err := orm.LabeledRows(ctx, db, target)
+		pairs, err := orm.LabeledRowsOrdered(ctx, db, target, nil, nil)
 		if err != nil {
 			return nil, err
 		}

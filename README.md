@@ -193,13 +193,16 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
 - **Forms:** no formsets, file fields, option groups, `MultiValueField` or
   `SplitDateTimeField`, no localization and no custom renderers. A template
   cannot loop over a form with `{% for field in form %}`: use `form.fields`.
-  `ModelChoiceField` has no `to_field_name` or `label_from_instance`, and it loads
-  its options once per form, where Django loads them on each render. A
-  ModelForm leaves out many-to-many fields.
+  `ModelChoiceField` and `ModelMultipleChoiceField` have no `to_field_name` or
+  `label_from_instance`, and they load their options once per form, where
+  Django loads them on each render.
 - **Admin:** no inlines, `fieldsets`, `list_editable`, `date_hierarchy` or
   facets, no history (`LogEntry`) and no admin for users and groups. A foreign
   key renders as a `<select>` of the whole related table, with no raw-id or
-  autocomplete widget, and a many-to-many field is not in the change form.
+  autocomplete widget. The admin ships no JavaScript: a field in
+  `FilterHorizontal` or `FilterVertical` stays a plain `<select multiple>`.
+  The system checks cover `FilterHorizontal`, `FilterVertical` and
+  `ListDisplay` only.
   `ReadonlyFields` are left out of the change form instead of shown as
   read-only values. A search field with `@` uses `icontains`, not full-text
   search.

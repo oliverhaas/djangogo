@@ -184,6 +184,15 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   kind to Django's form field (integer ranges, decimal digits and places, dates,
   times, durations, UUIDs, JSON, choices as a `TypedChoiceField`) and saves the
   cleaned values as the model's Go types.
+- Forms: `ModelMultipleChoiceField`. A ModelForm edits many-to-many fields: it
+  lists the related rows, `WithQuerySet` limits them, and `Save` writes the
+  selection. A caller that saves the instance itself calls `SaveM2M`.
+- Admin: the add and change forms edit many-to-many fields and save them in
+  the same transaction as the row. `FilterHorizontal` and `FilterVertical`
+  render them with the markup of Django's `FilteredSelectMultiple`, and
+  `ReadonlyFields` shows the selected rows. The `check` command reports
+  Django's admin errors for `FilterHorizontal`, `FilterVertical` and
+  `ListDisplay` (`admin.E013`, `E019`, `E020`, `E108` and `E109`).
 - Admin: Django's URL layout (`/admin/<app>/<model>/<pk>/change/`), route
   names and templates; an index and app pages grouped by app; logout and
   password change views; per-model permissions, with a read-only form for
@@ -244,6 +253,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `Clean()`, `Meta.Validators`, `Meta.ErrorMessages` and the unique and
   `unique_together` checks now show as form errors. A nullable text field
   cleans empty input to NULL instead of `""`.
+- **BREAKING**: a ModelForm of a model with a many-to-many field now includes
+  that field, as Django's does. The form requires a value unless the model
+  field has `blank`. Leave the field out with `WithExclude` or `WithFields`.
+- The options of a foreign key or many-to-many field follow the related
+  model's `Meta.Ordering` in a ModelForm, and the ordering of the related
+  model's admin in the admin, as in Django. Before, they were in primary key
+  order.
 - **BREAKING**: SQLite now enforces foreign keys: the backend turns on the
   `foreign_keys` pragma, so an insert or update with a missing target fails as
   on PostgreSQL. Add `_pragma=foreign_keys(0)` to the DSN to turn it off.

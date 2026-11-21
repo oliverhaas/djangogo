@@ -37,22 +37,26 @@ type Writer struct {
 	Archived bool   `orm:"editable=false"`
 }
 
+// Meta orders the writers by name, as Django's Writer.Meta.ordering.
+func (Writer) Meta() orm.Meta { return orm.Meta{Ordering: []string{"name"}} }
+
 // String returns the name, the __str__ of Django's Writer.
 func (w Writer) String() string { return w.Name }
 
-// Article is the Article model of Django's tests/model_forms/models.py, without
-// the many-to-many field categories. PubDate and Created are datetimes, there
-// is no DateField, and Status holds the choice values as strings, as the ORM
-// accepts choices on string fields only.
+// Article is the Article model of Django's tests/model_forms/models.py.
+// PubDate and Created are datetimes, there is no DateField, and Status holds
+// the choice values as strings, as the ORM accepts choices on string fields
+// only.
 type Article struct {
-	ID       int64
-	Headline string `orm:"max_length=50"`
-	Slug     string `orm:"max_length=50"`
-	PubDate  time.Time
-	Created  time.Time `orm:"editable=false"`
-	Writer   orm.FK[Writer]
-	Article  string `orm:"type=text"`
-	Status   string `orm:"max_length=1;blank"`
+	ID         int64
+	Headline   string `orm:"max_length=50"`
+	Slug       string `orm:"max_length=50"`
+	PubDate    time.Time
+	Created    time.Time `orm:"editable=false"`
+	Writer     orm.FK[Writer]
+	Article    string            `orm:"type=text"`
+	Categories orm.M2M[Category] `orm:"blank"`
+	Status     string            `orm:"max_length=1;blank"`
 }
 
 // Choices returns the choices of Article.ARTICLE_STATUS.

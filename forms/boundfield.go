@@ -201,7 +201,8 @@ func (bf *BoundField) AsTextarea(attrs Attrs) string { return bf.AsWidget(Textar
 // AsHidden renders the field as <input type="hidden">, one input per value
 // for a field with several values.
 func (bf *BoundField) AsHidden(attrs Attrs) string {
-	if _, multiple := bf.field.(*MultipleChoiceField); multiple {
+	switch bf.field.(type) {
+	case *MultipleChoiceField, *TypedMultipleChoiceField, *ModelMultipleChoiceField:
 		return bf.AsWidget(MultipleHiddenInput{}, attrs)
 	}
 	return bf.AsWidget(HiddenInput{}, attrs)

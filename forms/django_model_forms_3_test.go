@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,11 +13,8 @@ import (
 	"github.com/oliverhaas/djangogo/orm"
 )
 
-// basicData is the data of ModelFormBasicTests.create_basic_data: the
-// primary keys of three categories and two writers. The ORM has no
-// Meta.ordering, so the writers are created in the order of Writer.Meta.ordering
-// (by name): the list of options of a form then shows Bob Woodward first, as in
-// Django.
+// basicData is the data of ModelFormBasicTests.create_basic_data: three
+// categories and two writers.
 type basicData struct {
 	c1, c2, c3        *Category
 	wWoodward, wRoyko *Writer
@@ -73,6 +71,23 @@ func writerSelect(d basicData, selected int64) string {
 	return `<select name="writer" required>` + blank + option(d.wWoodward) + option(d.wRoyko) + `</select>`
 }
 
+// categoriesSelect is the select of the categories field: the options of the
+// three categories of createBasicData, with those of selected chosen.
+func categoriesSelect(d basicData, selected ...*Category) string {
+	labels := map[*Category]string{d.c1: "Entertainment", d.c2: "It&#x27;s a test", d.c3: "Third test"}
+	var b strings.Builder
+	b.WriteString(`<select multiple name="categories">`)
+	for _, c := range []*Category{d.c1, d.c2, d.c3} {
+		attr := ""
+		if slices.Contains(selected, c) {
+			attr = " selected"
+		}
+		fmt.Fprintf(&b, `<option value="%d"%s>%s</option>`, c.ID, attr, labels[c])
+	}
+	b.WriteString(`</select>`)
+	return b.String()
+}
+
 // statusSelect is the select of the status field of Article.
 const statusSelect = `<select name="status"><option value="" selected>---------</option>` +
 	`<option value="1">Draft</option><option value="2">Pending</option><option value="3">Live</option></select>`
@@ -116,22 +131,23 @@ func TestModelFormBasicAutoID(t *testing.T) {
 }
 
 // Ported from Django: tests/model_forms/tests.py::ModelFormBasicTests.test_initial_values
-//
-// The Go model has no many-to-many field categories: its list item is left
-// out of the expected HTML and the test ends with a skip.
 func TestModelFormBasicInitialValues(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		ctx := context.Background()
 		d := createBasicData(t, db)
 		// Initial values can be provided for model forms
 		f := articleForm(db, true)
-		f.Initial = map[string]any{"headline": "Your headline here"}
+		f.Initial = map[string]any{
+			"headline":   "Your headline here",
+			"categories": []string{fmt.Sprint(d.c1.ID), fmt.Sprint(d.c2.ID)},
+		}
 		assertHTMLEqual(t, f.AsUL(),
 			`<li>Headline: <input type="text" name="headline" value="Your headline here" maxlength="50" required></li>`+
 				`<li>Slug: <input type="text" name="slug" maxlength="50" required></li>`+
 				`<li>Pub date: <input type="text" name="pub_date" required></li>`+
 				`<li>Writer: `+writerSelect(d, 0)+`</li>`+
 				`<li>Article: <textarea rows="10" cols="40" name="article" required></textarea></li>`+
+				`<li>Categories: `+categoriesSelect(d, d.c1, d.c2)+`</li>`+
 				`<li>Status: `+statusSelect+`</li>`)
 
 		// When the ModelForm is passed an instance, that instance's current
@@ -156,6 +172,7 @@ func TestModelFormBasicInitialValues(t *testing.T) {
 				`<li>Pub date: <input type="text" name="pub_date" value="1988-01-04" required></li>`+
 				`<li>Writer: `+writerSelect(d, d.wRoyko.ID)+`</li>`+
 				`<li>Article: <textarea rows="10" cols="40" name="article" required>Hello.</textarea></li>`+
+				`<li>Categories: `+categoriesSelect(d)+`</li>`+
 				`<li>Status: `+statusSelect+`</li>`)
 
 		f3 := articleForm(db, false).WithInstance(art).Bind(vals(
@@ -173,7 +190,37 @@ func TestModelFormBasicInitialValues(t *testing.T) {
 			t.Fatal(err)
 		}
 		djangotest.AssertEqual(t, fresh.Headline, "Test headline")
-		t.Skip("FIXME-PORT: Go: the ORM has no ManyToManyField, Django: the form has a categories select that shows the initial categories [c1, c2]")
+	})
+}
+
+// Ported from Django: tests/model_forms/tests.py::ModelFormBasicTests.test_m2m_initial_callable
+//
+// A callable can be provided as the initial value for an m2m field. Go has no
+// formfield_callback: the test sets the initial value on the derived field.
+func TestModelFormBasicM2MInitialCallable(t *testing.T) {
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		d := createBasicData(t, db)
+		// Set up a callable initial value
+		form := forms.NewModelForm[Article](db, forms.WithFields("headline", "categories"))
+		field, ok := form.FieldDef("categories")
+		if !ok {
+			t.Fatal("the form has no categories field")
+		}
+		field.Base().Initial = func() any {
+			cats, err := orm.Query[Category](db).OrderBy("name").Limit(2).All(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return cats
+		}
+		assertHTMLEqual(t, form.AsUL(), fmt.Sprintf(`<li><label for="id_headline">Headline:</label>
+<input id="id_headline" type="text" name="headline" maxlength="50" required></li>
+<li><label for="id_categories">Categories:</label>
+<select multiple name="categories" id="id_categories">
+<option value="%d" selected>Entertainment</option>
+<option value="%d" selected>It&#x27;s a test</option>
+<option value="%d">Third test</option>
+</select></li>`, d.c1.ID, d.c2.ID, d.c3.ID))
 	})
 }
 
@@ -265,9 +312,6 @@ func TestModelFormBasicSaveWithDataErrors(t *testing.T) {
 }
 
 // Ported from Django: tests/model_forms/tests.py::ModelFormBasicTests.test_multi_fields
-//
-// The Go model has no many-to-many field categories, so its div and list item
-// are left out and the test ends with a skip.
 func TestModelFormBasicMultiFields(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		ctx := context.Background()
@@ -281,13 +325,28 @@ func TestModelFormBasicMultiFields(t *testing.T) {
 				`<div>Pub date: <input type="text" name="pub_date" required></div>`+
 				`<div>Writer: `+writerSelect(d, 0)+`</div>`+
 				`<div>Article: <textarea name="article" cols="40" rows="10" required></textarea></div>`+
+				`<div>Categories: `+categoriesSelect(d)+`</div>`+
 				`<div>Status: `+statusSelect+`</div>`)
 
+		// Add some categories and test the many-to-many form output.
 		newArt := &Article{Headline: "New headline", Slug: "new-headline", PubDate: date(1988, 1, 4), Created: date(2024, 1, 1), Article: "Hello."}
 		newArt.Writer.SetPK(d.wRoyko.ID)
 		if err := orm.Query[Article](db).Create(ctx, newArt); err != nil {
 			t.Fatal(err)
 		}
+		cats := orm.Many[Category](db, newArt, "categories")
+		entertainment, err := orm.Query[Category](db).Get(ctx, "name", "Entertainment")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cats.Add(ctx, &entertainment); err != nil {
+			t.Fatal(err)
+		}
+		related, err := cats.All(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		djangotest.AssertEqual(t, related, []Category{*d.c1})
 		f = articleForm(db, true).WithInstance(newArt)
 		assertHTMLEqual(t, f.AsUL(),
 			`<li>Headline: <input type="text" name="headline" value="New headline" maxlength="50" required></li>`+
@@ -295,8 +354,8 @@ func TestModelFormBasicMultiFields(t *testing.T) {
 				`<li>Pub date: <input type="text" name="pub_date" value="1988-01-04" required></li>`+
 				`<li>Writer: `+writerSelect(d, d.wRoyko.ID)+`</li>`+
 				`<li>Article: <textarea rows="10" cols="40" name="article" required>Hello.</textarea></li>`+
+				`<li>Categories: `+categoriesSelect(d, d.c1)+`</li>`+
 				`<li>Status: `+statusSelect+`</li>`)
-		t.Skip("FIXME-PORT: Go: the ORM has no ManyToManyField, Django: the form has a categories multiple select, with the category of the article selected")
 	})
 }
 
@@ -348,6 +407,93 @@ func TestModelFormBasicSubsetFields(t *testing.T) {
 	})
 }
 
+// Ported from Django: tests/model_forms/tests.py::ModelFormBasicTests.test_m2m_editing
+//
+// The ORM has no commit=False: the caller creates the instance of the
+// validated form itself and then calls SaveM2M, Django's save_m2m().
+func TestModelFormBasicM2MEditing(t *testing.T) {
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		d := createBasicData(t, db)
+		formData := vals("headline", "New headline", "slug", "new-headline", "pub_date", "1988-01-04",
+			"writer", fmt.Sprint(d.wRoyko.ID), "article", "Hello.",
+			"categories", fmt.Sprint(d.c1.ID), "categories", fmt.Sprint(d.c2.ID))
+		get := func(id int64) *Article {
+			t.Helper()
+			art, err := orm.Query[Article](db).Get(ctx, "id", id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return &art
+		}
+		categoriesOf := func(art *Article) []Category {
+			t.Helper()
+			cats, err := orm.Many[Category](db, art, "categories").QuerySet().OrderBy("name").All(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return cats
+		}
+		save := func(f *forms.ModelForm[Article]) *Article {
+			t.Helper()
+			art, err := f.Save(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return art
+		}
+
+		// Create a new article, with categories, via the form.
+		newArt := get(save(articleForm(db, false).Bind(formData)).ID)
+		artID1 := newArt.ID
+		djangotest.AssertEqual(t, categoriesOf(newArt), []Category{*d.c1, *d.c2})
+
+		// Now, submit form data with no categories. This deletes the existing
+		// categories.
+		formData.Del("categories")
+		newArt = save(articleForm(db, false).WithInstance(newArt).Bind(formData))
+		djangotest.AssertEqual(t, newArt.ID, artID1)
+		newArt = get(artID1)
+		djangotest.AssertEqual(t, len(categoriesOf(newArt)), 0)
+
+		// Create a new article, with no categories, via the form.
+		newArt = save(articleForm(db, false).Bind(formData))
+		artID2 := newArt.ID
+		if artID2 == 0 || artID2 == artID1 {
+			t.Errorf("artID2 = %d, want a new primary key", artID2)
+		}
+		newArt = get(artID2)
+		djangotest.AssertEqual(t, len(categoriesOf(newArt)), 0)
+
+		// Create a new article, with categories, via the form, but use
+		// commit=False. The m2m data won't be saved until save_m2m() is
+		// invoked on the form.
+		formData["categories"] = []string{fmt.Sprint(d.c1.ID), fmt.Sprint(d.c2.ID)}
+		f := articleForm(db, false).Bind(formData)
+		djangotest.AssertEqual(t, f.IsValid(), true)
+		newArt = f.Instance()
+
+		// Manually save the instance
+		if err := orm.Query[Article](db).Create(ctx, newArt); err != nil {
+			t.Fatal(err)
+		}
+		artID3 := newArt.ID
+		if artID3 == 0 || artID3 == artID1 || artID3 == artID2 {
+			t.Errorf("artID3 = %d, want a new primary key", artID3)
+		}
+
+		// The instance doesn't have m2m data yet
+		newArt = get(artID3)
+		djangotest.AssertEqual(t, len(categoriesOf(newArt)), 0)
+
+		// Save the m2m data on the form
+		if err := f.SaveM2M(ctx); err != nil {
+			t.Fatal(err)
+		}
+		djangotest.AssertEqual(t, categoriesOf(newArt), []Category{*d.c1, *d.c2})
+	})
+}
+
 // Ported from Django: tests/model_forms/tests.py::ModelFormBasicTests.test_custom_form_fields
 //
 // Here, we define a custom ModelForm. Because it happens to have the same
@@ -382,8 +528,7 @@ func TestModelFormBasicCustomFormFields(t *testing.T) {
 //
 // The choices for a ForeignKey ChoiceField are determined at runtime, based
 // on the data in the database when the form is displayed, not the data in the
-// database when the form is instantiated. The categories select of Django is
-// left out.
+// database when the form is instantiated.
 func TestModelFormBasicRuntimeChoicefieldPopulated(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		ctx := context.Background()
@@ -400,6 +545,7 @@ func TestModelFormBasicRuntimeChoicefieldPopulated(t *testing.T) {
 				`<li>Pub date: <input type="text" name="pub_date" required></li>`+
 				`<li>Writer: `+writerSelect(d, 0)+`</li>`+
 				`<li>Article: <textarea rows="10" cols="40" name="article" required></textarea></li>`+
+				`<li>Categories: `+categoriesSelect(d)+`</li>`+
 				`<li>Status: `+statusSelect+`</li>`)
 
 		wBernstein := &Writer{Name: "Carl Bernstein"}
@@ -419,9 +565,11 @@ func TestModelFormBasicRuntimeChoicefieldPopulated(t *testing.T) {
 		}
 		if bob >= carl || carl >= mike {
 			// Django orders the options by Writer.Meta.ordering (name).
-			t.Skip("FIXME-PORT: Go: the ORM has no Meta.ordering, so the options of the writer select come in primary key order, Django: ordered by name (Bob, Carl, Mike)")
+			t.Errorf("the writer options are not ordered by name: %s", got)
 		}
-		t.Skip("FIXME-PORT: Go: the ORM has no ManyToManyField, Django: the categories select shows the fourth category too")
+		if !strings.Contains(got, ">Fourth</option>") {
+			t.Errorf("the categories select lacks the fourth category: %s", got)
+		}
 	})
 }
 

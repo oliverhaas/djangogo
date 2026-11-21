@@ -681,21 +681,7 @@ func (s *AdminSite) newRelatedFilterSpec(
 
 	// Determine ordering from the related model's ModelAdmin (if registered),
 	// falling back to related Model.Ordering(), then PK.
-	var ordering []string
-	if relEntry := s.entryByModel(target); relEntry != nil {
-		if relEntry.admin.GetOrdering != nil {
-			ordering = relEntry.admin.GetOrdering(r)
-		} else {
-			ordering = relEntry.admin.Ordering
-		}
-		if len(ordering) > 0 {
-			norm := make([]string, len(ordering))
-			for i, o := range ordering {
-				norm[i] = normalizeFieldPath(target, o)
-			}
-			ordering = norm
-		}
-	}
+	ordering := s.relatedOrdering(r, target)
 
 	var limitPKs []any
 	if onlyUsed {
