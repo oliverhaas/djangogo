@@ -201,14 +201,14 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
 - **Admin:** no `date_hierarchy` or facets. A registered model needs an integer primary key. An
   inline cannot edit the auto-created through model of a many-to-many field,
   there are no generic inlines, and an inline has no custom formset class.
-  There are no `radio_fields`, and `FormOptions` sets widgets per field name,
-  not per model field class as `formfield_overrides` does. The scripts and
+  `FormOptions` sets widgets per field name, not per model field class as
+  `formfield_overrides` does. The scripts and
   pages are in English only. There is no custom form class: `FormOptions`
   adds fields and options to the model form, and its exclusions add to
   `ExcludeFields` instead of being overridden by it. A read-only field shows
   a model field or a `DisplayColumns` value, not a model method. The system
   checks cover `AutocompleteFields`, `RawIDFields`, `Fields`, `Fieldsets`,
-  `ExcludeFields`, `FilterHorizontal`, `FilterVertical`,
+  `ExcludeFields`, `FilterHorizontal`, `FilterVertical`, `RadioFields`,
   `PrepopulatedFields`, `ReadonlyFields`, `Inlines`, `ListDisplay` and
   `ListEditable` only. A search field with `@` uses
   `icontains`, not full-text search. The views take no `extra_context`, and

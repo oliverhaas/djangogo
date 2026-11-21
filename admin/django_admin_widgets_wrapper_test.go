@@ -29,8 +29,8 @@ func (presentSelect) ValueOmittedFromData(url.Values, string) bool { return fals
 // left out and the related model has an admin. The Go wrapper takes the links
 // it offers from the admin, so the cases that leave can_add_related out pass
 // RelatedActions{Add: true} for a related model with an admin. Django's
-// AdminRadioSelect is a RadioSelect; the Go admin has no radio_fields yet, so
-// the tests use forms.RadioSelect.
+// AdminRadioSelect renders as a RadioSelect, which the Go admin uses for
+// RadioFields, so the tests use forms.RadioSelect.
 //
 // Ported from Django: tests/admin_widgets/tests.py::RelatedFieldWidgetWrapperTests.test_select_multiple_widget_cant_change_delete_related
 // Ported from Django: tests/admin_widgets/tests.py::RelatedFieldWidgetWrapperTests.test_on_delete_cascade_rel_cant_delete_related

@@ -34,14 +34,21 @@ type Song struct {
 	Featuring orm.M2M[Band] `orm:"related_name=featured"`
 }
 
-// Concert stands in for tests/modeladmin/models.py::Concert, without the
-// choices of day and transport, which no ported test reaches.
+// Concert stands in for tests/modeladmin/models.py::Concert.
 type Concert struct {
 	ID          int64
 	MainBand    orm.FK[Band] `orm:"on_delete=cascade;related_name=main_concerts"`
 	OpeningBand orm.FK[Band] `orm:"on_delete=cascade;related_name=opening_concerts;blank"`
 	Day         string       `orm:"max_length=3"`
 	Transport   string       `orm:"max_length=100;blank"`
+}
+
+// Meta gives day and transport the choices of Django's Concert.
+func (Concert) Meta() orm.Meta {
+	return orm.Meta{Choices: map[string][]orm.Choice{
+		"Day":       {{Value: "1", Label: "Fri"}, {Value: "2", Label: "Sat"}},
+		"Transport": {{Value: "1", Label: "Plane"}, {Value: "2", Label: "Train"}, {Value: "3", Label: "Bus"}},
+	}}
 }
 
 // ValidationTestModel stands in for
@@ -52,9 +59,17 @@ type ValidationTestModel struct {
 	Name       string             `orm:"max_length=100"`
 	Slug       string             `orm:"type=slug"`
 	Users      orm.M2M[auth.User] `orm:"related_name=validationtestmodels"`
+	State      string             `orm:"max_length=2"`
 	PubDate    time.Time
 	Band       orm.FK[Band]       `orm:"on_delete=cascade"`
 	BestFriend orm.O2O[auth.User] `orm:"on_delete=cascade;related_name=best_friend"`
+}
+
+// Meta gives state the choices of Django's ValidationTestModel.
+func (ValidationTestModel) Meta() orm.Meta {
+	return orm.Meta{Choices: map[string][]orm.Choice{
+		"State": {{Value: "CO", Label: "Colorado"}, {Value: "WA", Label: "Washington"}},
+	}}
 }
 
 // ValidationTestInlineModel stands in for
@@ -252,6 +267,47 @@ func TestFilterVerticalCheck(t *testing.T) {
 // Ported from Django: tests/modeladmin/test_checks.py::FilterHorizontalCheckTests.test_valid_case
 func TestFilterHorizontalCheck(t *testing.T) {
 	filterCheckTests(t, "filter_horizontal")
+}
+
+// No Go counterpart: tests/modeladmin/test_checks.py::RadioFieldsCheckTests.test_not_dictionary
+// (admin.E021): RadioFields is a map[string]RadioStyle.
+
+// Ported from Django: tests/modeladmin/test_checks.py::RadioFieldsCheckTests.test_missing_field
+// Ported from Django: tests/modeladmin/test_checks.py::RadioFieldsCheckTests.test_invalid_field_type
+// Ported from Django: tests/modeladmin/test_checks.py::RadioFieldsCheckTests.test_invalid_value
+// Ported from Django: tests/modeladmin/test_checks.py::RadioFieldsCheckTests.test_valid_case
+func TestRadioFieldsCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		register := func(radio map[string]admin.RadioStyle) *admin.AdminSite {
+			return checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{RadioFields: radio})
+			})
+		}
+		t.Run("test_missing_field", func(t *testing.T) {
+			assertIsInvalid(t, register(map[string]admin.RadioStyle{"non_existent_field": admin.Vertical}),
+				"modeladmin.ValidationTestModel",
+				"The value of 'radio_fields' refers to 'non_existent_field', "+
+					"which is not a field of 'modeladmin.ValidationTestModel'.",
+				"admin.E022")
+		})
+		t.Run("test_invalid_field_type", func(t *testing.T) {
+			assertIsInvalid(t, register(map[string]admin.RadioStyle{"name": admin.Vertical}),
+				"modeladmin.ValidationTestModel",
+				"The value of 'radio_fields' refers to 'name', which is not an instance "+
+					"of ForeignKey, and does not have a 'choices' definition.",
+				"admin.E023")
+		})
+		// Django sets the value None; the zero RadioStyle stands in for it.
+		t.Run("test_invalid_value", func(t *testing.T) {
+			assertIsInvalid(t, register(map[string]admin.RadioStyle{"state": 0}),
+				"modeladmin.ValidationTestModel",
+				`The value of 'radio_fields["state"]' must be either admin.HORIZONTAL or admin.VERTICAL.`,
+				"admin.E024")
+		})
+		t.Run("test_valid_case", func(t *testing.T) {
+			assertIsValid(t, register(map[string]admin.RadioStyle{"state": admin.Vertical}))
+		})
+	})
 }
 
 // No Go counterpart: tests/modeladmin/test_checks.py::PrepopulatedFieldsCheckTests.test_not_list_or_tuple

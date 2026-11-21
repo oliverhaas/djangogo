@@ -140,15 +140,11 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj, instance any, can
 		readonly = fields
 	}
 	built := map[string]bool{}
-	callback := func(mf *orm.Field, f forms.Field) forms.Field {
-		built[mf.Attr] = true
-		return formfieldForDBField(mf, f)
-	}
 	adminOpts := e.formOptions(r, obj)
 	opts := slices.Concat([]forms.ModelFormOption{
 		forms.WithFields(fields...),
 		forms.WithExclude(exclude...),
-		forms.WithFormFieldCallback(callback),
+		forms.WithFormFieldCallback(e.formfieldCallback(r, built)),
 	}, s.relationWidgets(r, e), adminOpts)
 	form := forms.FromInstance(s.db, e.model, instance, opts...)
 	syncAutocompleteRequired(form)

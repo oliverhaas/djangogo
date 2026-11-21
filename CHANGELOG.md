@@ -462,6 +462,11 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - Views: `ContentTypeShortcut` is Django's contenttypes `shortcut` view. It
   redirects to the `GetAbsoluteURL` of the object of a content type and a
   primary key.
+- Admin: `ModelAdmin.RadioFields` and `InlineModelAdmin.RadioFields` show a
+  foreign key or a field with choices as radio buttons in place of a select,
+  Django's `radio_fields`. `Horizontal` and `Vertical` set the layout. Only a
+  field that can be blank gets the empty choice, labeled "None". The checks
+  report admin.E022 to admin.E024.
 
 ### Changed
 

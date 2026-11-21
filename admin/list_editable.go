@@ -31,14 +31,10 @@ var errListEditableAdd = errors.New("admin: list_editable does not allow adding"
 // whose row the user may not change loses the editable fields.
 func (s *AdminSite) changelistFormSet(r *http.Request, e *entry, editable []string, rows []any, spec *querySpec, data url.Values) (changelistSet, error) {
 	built := map[string]bool{}
-	callback := func(mf *orm.Field, f forms.Field) forms.Field {
-		built[mf.Attr] = true
-		return formfieldForDBField(mf, f)
-	}
 	fields := formNames(e.model, editable)
 	opts := slices.Concat([]forms.ModelFormOption{
 		forms.WithFields(fields...),
-		forms.WithFormFieldCallback(callback),
+		forms.WithFormFieldCallback(e.formfieldCallback(r, built)),
 	}, s.relationWidgets(r, e))
 	set := e.ops.changelistSet(opts, rows, spec)
 	fs := set.base()

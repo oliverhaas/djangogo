@@ -81,6 +81,9 @@ type InlineModelAdmin struct {
 	// PrepopulatedFields maps a field to the fields that fill it in the
 	// forms that add a row, as ModelAdmin.PrepopulatedFields does.
 	PrepopulatedFields map[string][]string
+	// RadioFields shows foreign keys and fields with choices as radio
+	// buttons, as ModelAdmin.RadioFields does.
+	RadioFields map[string]RadioStyle
 	// DisplayColumns defines computed values that ReadonlyFields can name.
 	DisplayColumns map[string]DisplayColumn
 	// Ordering orders the rows of the inline.
@@ -219,6 +222,7 @@ func (c InlineModelAdmin) modelAdmin() ModelAdmin {
 		FilterHorizontal:             c.FilterHorizontal,
 		FilterVertical:               c.FilterVertical,
 		PrepopulatedFields:           c.PrepopulatedFields,
+		RadioFields:                  c.RadioFields,
 		DisplayColumns:               c.DisplayColumns,
 		Ordering:                     c.Ordering,
 		EmptyValueDisplay:            c.EmptyValueDisplay,
@@ -535,14 +539,10 @@ func (s *AdminSite) buildInlineFormSet(r *http.Request, ifs *inlineFormSet, pare
 	fields := formNames(ie.model, flattenFieldsets(ifs.sets))
 	ifs.exclude = slices.Concat(s.excluded(r, ie, obj), ifs.readonly)
 	built := map[string]bool{}
-	callback := func(mf *orm.Field, f forms.Field) forms.Field {
-		built[mf.Attr] = true
-		return formfieldForDBField(mf, f)
-	}
 	opts := slices.Concat([]forms.ModelFormOption{
 		forms.WithFields(fields...),
 		forms.WithExclude(ifs.exclude...),
-		forms.WithFormFieldCallback(callback),
+		forms.WithFormFieldCallback(ie.formfieldCallback(r, built)),
 	}, s.relationWidgets(r, ie), in.cfg.FormOptions)
 	ordering := make([]string, len(in.cfg.Ordering))
 	for i, o := range in.cfg.Ordering {

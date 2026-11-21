@@ -26,13 +26,13 @@ func (o adminObject) Label() string { return o.kind + " of " + o.model.Label() }
 // ModelAdmin over every registered model and returns the problems, in the
 // order Django checks them: AutocompleteFields (admin.E037, admin.E038,
 // admin.E039, admin.E040), RawIDFields (admin.E002, admin.E003), Fields
-// (admin.E004, admin.E005, admin.E006,
-// admin.E013), Fieldsets (admin.E008, admin.E011, admin.E012, admin.E013),
-// ExcludeFields (admin.E015), FilterVertical and FilterHorizontal
-// (admin.E013, admin.E019, admin.E020), PrepopulatedFields (admin.E027,
-// admin.E028, admin.E030), ReadonlyFields (admin.E035), the inlines (see
-// checkInlines), ListDisplay (admin.E108, admin.E109), then ListEditable
-// (admin.E121, admin.E122, admin.E123, admin.E124, admin.E125).
+// (admin.E004, admin.E005, admin.E006, admin.E013), Fieldsets (admin.E008,
+// admin.E011, admin.E012, admin.E013), ExcludeFields (admin.E015),
+// FilterVertical and FilterHorizontal (admin.E013, admin.E019, admin.E020),
+// RadioFields (admin.E022, admin.E023, admin.E024), PrepopulatedFields
+// (admin.E027, admin.E028, admin.E030), ReadonlyFields (admin.E035), the
+// inlines (see checkInlines), ListDisplay (admin.E108, admin.E109), then
+// ListEditable (admin.E121, admin.E122, admin.E123, admin.E124, admin.E125).
 func (s *AdminSite) Check() []checks.Message {
 	var out []checks.Message
 	for _, e := range s.entries {
@@ -71,6 +71,7 @@ func (s *AdminSite) checkBase(e *entry, obj adminObject) []checks.Message {
 	for i, name := range e.admin.FilterHorizontal {
 		out = append(out, checkFilterItem(e, obj, name, fmt.Sprintf("filter_horizontal[%d]", i))...)
 	}
+	out = append(out, checkRadioFields(e, obj)...)
 	out = append(out, checkPrepopulated(e, obj)...)
 	for i, name := range e.admin.ReadonlyFields {
 		out = append(out, checkReadonlyItem(e, obj, name, fmt.Sprintf("readonly_fields[%d]", i))...)
@@ -107,6 +108,33 @@ func (s *AdminSite) checkAutocompleteItem(e *entry, obj adminObject, name, label
 			f.Rel.Target.Label()), checks.Obj(obj), checks.ID("admin.E040"))}
 	}
 	return nil
+}
+
+// checkRadioFields checks RadioFields, Django's _check_radio_fields, in the
+// order of the sorted keys: each key is a foreign key or a field with
+// choices, and each value is Horizontal or Vertical.
+func checkRadioFields(e *entry, obj adminObject) []checks.Message {
+	var out []checks.Message
+	for _, name := range slices.Sorted(maps.Keys(e.admin.RadioFields)) {
+		f, exists := relationOrField(e.model, name)
+		switch {
+		case !exists:
+			out = append(out, checks.Error(fmt.Sprintf(
+				"The value of 'radio_fields' refers to '%s', which is not a field of '%s'.",
+				name, e.model.Label()), checks.Obj(obj), checks.ID("admin.E022")))
+		case f == nil || !f.HasChoices && (f.Rel == nil || f.Rel.Kind == orm.RelM2M):
+			out = append(out, checks.Error(fmt.Sprintf(
+				"The value of 'radio_fields' refers to '%s', which is not an instance of ForeignKey, "+
+					"and does not have a 'choices' definition.", name),
+				checks.Obj(obj), checks.ID("admin.E023")))
+		}
+		if style := e.admin.RadioFields[name]; style != Horizontal && style != Vertical {
+			out = append(out, checks.Error(fmt.Sprintf(
+				"The value of 'radio_fields[\"%s\"]' must be either admin.HORIZONTAL or admin.VERTICAL.", name),
+				checks.Obj(obj), checks.ID("admin.E024")))
+		}
+	}
+	return out
 }
 
 // checkPrepopulated checks PrepopulatedFields, Django's

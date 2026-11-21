@@ -223,6 +223,17 @@ type Fieldset struct {
 	Description string
 }
 
+// RadioStyle lays out the radio buttons of a field of ModelAdmin.RadioFields.
+type RadioStyle int
+
+// The layouts of RadioFields, Django's admin.HORIZONTAL and admin.VERTICAL.
+const (
+	// Horizontal puts the radio buttons side by side.
+	Horizontal RadioStyle = 1
+	// Vertical stacks the radio buttons.
+	Vertical RadioStyle = 2
+)
+
 // DeletedObjects holds what the delete page and the delete_selected
 // confirmation page show (returned by ModelAdmin.GetDeletedObjects), Django's
 // get_deleted_objects result.
@@ -356,6 +367,12 @@ type ModelAdmin struct {
 	// into a slug. The field must not be a date and time, a foreign key or
 	// a many-to-many field.
 	PrepopulatedFields map[string][]string
+	// RadioFields names foreign keys and fields with choices shown as radio
+	// buttons in place of a select (Django's radio_fields), laid out
+	// Horizontal or Vertical. Only a field that can be blank gets the empty
+	// choice, labeled "None". AutocompleteFields and RawIDFields win over
+	// it.
+	RadioFields map[string]RadioStyle
 	// RawIDFields names foreign keys and many-to-many fields edited as a text
 	// input for the primary keys with a link to the related changelist
 	// (Django's raw_id_fields). The form loads only the related rows it

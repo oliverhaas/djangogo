@@ -3,6 +3,8 @@ package admin_test
 import (
 	"fmt"
 	"net/http"
+	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -266,5 +268,116 @@ func TestModelAdminCustomForm(t *testing.T) {
 			assertFormInputs(t, resp, "name", "bio", "sign_date", "delete")
 			djangotest.AssertContains(t, resp, `<input type="text" name="sign_date" class="vDateField"`)
 		})
+	})
+}
+
+// concertAddPage returns the add page of Concert under ma, with the band
+// "The Doors" of ModelAdminTests.setUpTestData.
+func concertAddPage(t *testing.T, db *orm.DB, ma admin.ModelAdmin) (*djangotest.Response, *Band) {
+	t.Helper()
+	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[Band](site, admin.ModelAdmin{})
+		admin.Register[Concert](site, ma)
+	})
+	env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+	band := mustCreate(t, db, &Band{Name: "The Doors", SignDate: orm.Date{Year: 1965, Month: 1, Day: 1}})
+	resp := env.client.Get(mustReverse(t, env.router, "admin:modeladmin_concert_add"))
+	djangotest.AssertStatus(t, resp, http.StatusOK)
+	return resp, band
+}
+
+// formWidget returns the widget of the field name of the form of resp,
+// unwrapped from the RelatedFieldWidgetWrapper of a relation, as Django's
+// tests read widget.widget.
+func formWidget(t *testing.T, resp *djangotest.Response, name string) forms.Widget {
+	t.Helper()
+	form, ok := forms.FormOf(ctxVal(t, resp, "form"))
+	if !ok {
+		t.Fatal("the context form is not a form")
+	}
+	f, ok := form.FieldDef(name)
+	if !ok {
+		t.Fatalf("form has no field %q", name)
+	}
+	w := f.Base().Widget
+	if u, ok := w.(interface{ Unwrap() forms.Widget }); ok {
+		w = u.Unwrap()
+	}
+	return w
+}
+
+// pageChoices returns the choices that the page of resp offers for the
+// field name, a select or radio buttons, as "value:label", Django's
+// list(widget.choices).
+func pageChoices(t *testing.T, resp *djangotest.Response, name string) []string {
+	t.Helper()
+	page := string(resp.Body)
+	q := regexp.QuoteMeta(name)
+	pattern := regexp.MustCompile(`<input type="radio" name="` + q + `" value="([^"]*)"[^>]*> ([^<]*)</label>`)
+	if m := regexp.MustCompile(`(?s)<select name="` + q + `"[^>]*>(.*?)</select>`).FindStringSubmatch(page); m != nil {
+		page, pattern = m[1], regexp.MustCompile(`<option value="([^"]*)"[^>]*>([^<]*)</option>`)
+	}
+	matches := pattern.FindAllStringSubmatch(page, -1)
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, m[1]+":"+m[2])
+	}
+	return out
+}
+
+// Ported from Django: tests/modeladmin/tests.py::ModelAdminTests.test_default_foreign_key_widget
+func TestModelAdminDefaultForeignKeyWidget(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		resp, band := concertAddPage(t, db, admin.ModelAdmin{})
+		doors := fmt.Sprintf("%d:The Doors", band.ID)
+		for _, tc := range []struct {
+			name string
+			want []string
+		}{
+			{"main_band", []string{":---------", doors}},
+			{"opening_band", []string{":---------", doors}},
+			{"day", []string{":---------", "1:Fri", "2:Sat"}},
+			{"transport", []string{":---------", "1:Plane", "2:Train", "3:Bus"}},
+		} {
+			if w := formWidget(t, resp, tc.name); reflect.TypeOf(w) != reflect.TypeFor[forms.Select]() {
+				t.Errorf("%s widget = %T, want forms.Select", tc.name, w)
+			}
+			djangotest.AssertEqual(t, pageChoices(t, resp, tc.name), tc.want)
+		}
+	})
+}
+
+// Django's wrapper adds data-context to the attrs of the widget it wraps;
+// the Go wrapper adds it as the widget renders, so the attrs of the radio
+// buttons of a foreign key hold the class alone. The rest of the Django test
+// gives the admin a form class, which the Go admin does not have.
+//
+// Ported from Django: tests/modeladmin/tests.py::ModelAdminTests.test_foreign_key_as_radio_field
+func TestModelAdminForeignKeyAsRadioField(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		resp, band := concertAddPage(t, db, admin.ModelAdmin{RadioFields: map[string]admin.RadioStyle{
+			"main_band":    admin.Horizontal,
+			"opening_band": admin.Vertical,
+			"day":          admin.Vertical,
+			"transport":    admin.Horizontal,
+		}})
+		doors := fmt.Sprintf("%d:The Doors", band.ID)
+		for _, tc := range []struct {
+			name, class string
+			want        []string
+		}{
+			{"main_band", "radiolist inline", []string{doors}},
+			{"opening_band", "radiolist", []string{":None", doors}},
+			{"day", "radiolist", []string{"1:Fri", "2:Sat"}},
+			{"transport", "radiolist inline", []string{":None", "1:Plane", "2:Train", "3:Bus"}},
+		} {
+			w, ok := formWidget(t, resp, tc.name).(forms.RadioSelect)
+			if !ok {
+				t.Errorf("%s widget = %T, want forms.RadioSelect", tc.name, formWidget(t, resp, tc.name))
+				continue
+			}
+			djangotest.AssertEqual(t, w.Attrs, forms.Attrs{"class": tc.class})
+			djangotest.AssertEqual(t, pageChoices(t, resp, tc.name), tc.want)
+		}
 	})
 }

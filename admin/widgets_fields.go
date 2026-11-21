@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"html"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -10,13 +11,36 @@ import (
 	"github.com/oliverhaas/djangogo/orm"
 )
 
+// formfieldCallback returns the form field callback of the forms of e for r:
+// formfieldForDBField with the RadioFields style of each field that is not
+// an autocomplete or raw-id field. It adds the attribute name of each field
+// it builds to built.
+func (e *entry) formfieldCallback(r *http.Request, built map[string]bool) func(mf *orm.Field, f forms.Field) forms.Field {
+	autocomplete := e.autocompleteFields(r)
+	return func(mf *orm.Field, f forms.Field) forms.Field {
+		built[mf.Attr] = true
+		style, ok := e.admin.RadioFields[mf.Attr]
+		if !ok {
+			style = e.admin.RadioFields[mf.Name]
+		}
+		if namesField(autocomplete, mf) || namesField(e.admin.RawIDFields, mf) {
+			style = 0
+		}
+		return formfieldForDBField(mf, f, style)
+	}
+}
+
 // formfieldForDBField is the form field callback of the add and change forms,
-// the defaults of Django's ModelAdmin.formfield_for_dbfield
-// (FORMFIELD_FOR_DBFIELD_DEFAULTS): the admin's widget for each model field
+// Django's ModelAdmin.formfield_for_dbfield: radio buttons in the style radio
+// for a foreign key or a field with choices of RadioFields, and the defaults
+// of FORMFIELD_FOR_DBFIELD_DEFAULTS, the admin's widget for each model field
 // that is not a relation and has no choices. ModelAdmin.FormOptions apply
 // after it, as the Meta options of a Django ModelAdmin.form win over the
 // defaults.
-func formfieldForDBField(mf *orm.Field, f forms.Field) forms.Field {
+func formfieldForDBField(mf *orm.Field, f forms.Field, radio RadioStyle) forms.Field {
+	if radio != 0 {
+		return radioField(mf, f, radio)
+	}
 	if mf.Rel != nil || mf.HasChoices {
 		return f
 	}
@@ -27,6 +51,51 @@ func formfieldForDBField(mf *orm.Field, f forms.Field) forms.Field {
 		f.Base().Widget = w
 	}
 	return f
+}
+
+// radioField gives f, the form field of mf, the radio buttons of style,
+// Django's formfield_for_choice_field and formfield_for_foreignkey for a
+// field of RadioFields. Django's AdminRadioSelect renders as a RadioSelect.
+// The empty choice is "None", and only a field that can be blank has it. A
+// field that is neither a foreign key nor a field with choices keeps f.
+func radioField(mf *orm.Field, f forms.Field, style RadioStyle) forms.Field {
+	switch field := f.(type) {
+	case *forms.TypedChoiceField:
+		field.Choices = radioChoices(mf)
+	case *forms.ModelChoiceField:
+		field.EmptyLabel = nil
+		if mf.Blank {
+			field.EmptyLabel = new("None")
+		}
+	default:
+		return f
+	}
+	f.Base().Widget = forms.RadioSelect{Attrs: forms.Attrs{"class": radioClass(style)}}
+	return f
+}
+
+// radioChoices returns the choices of mf as radio buttons, Django's
+// get_choices(include_blank=db_field.blank, blank_choice=[("", "None")]): the
+// empty choice "None" first for a field that can be blank and has no empty
+// choice of its own.
+func radioChoices(mf *orm.Field) []forms.Choice {
+	var out []forms.Choice
+	if mf.Blank && len(mf.GetChoices(true)) > len(mf.GetChoices(false)) {
+		out = append(out, forms.Choice{Value: "", Label: "None"})
+	}
+	for _, c := range mf.FlatChoices() {
+		out = append(out, forms.Choice{Value: c.Value, Label: c.Label})
+	}
+	return out
+}
+
+// radioClass returns the class of the radio buttons of style, Django's
+// get_ul_class.
+func radioClass(style RadioStyle) string {
+	if style == Vertical {
+		return "radiolist"
+	}
+	return "radiolist inline"
 }
 
 // splitDateTimeField returns the admin's field for a date and time model
