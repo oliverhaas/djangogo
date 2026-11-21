@@ -389,6 +389,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   true) opens the new row after the save; false returns to the changelist.
   `ModelAdmin.SaveOnTop` shows the save buttons above the form as well. The
   submit row is in its own template, `admin/submit_line.html`, as in Django.
+- Admin: the filters, search and page of a changelist stay in place when you
+  open, save or delete one of its rows, and the "Save and continue" and "Save
+  and add another" redirects keep the query string of the form, as Django's
+  `preserve_filters`. `ModelAdmin.PreserveFilters`, which had no effect until
+  now, turns this off when set to false. The change form posts to
+  `?_changelist_filters=...` with filters and has no `action` attribute
+  without them.
 
 ### Changed
 

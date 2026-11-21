@@ -34,7 +34,7 @@
 {% endblock %}
 {% block content %}
 <div id="content-main">
-  <form method="post" action="{{ action }}" id="{{ model_name }}_form" novalidate>
+  <form {% if form_url %}action="{{ form_url }}" {% endif %}method="post" id="{{ model_name }}_form" novalidate>
     {% csrf_token %}{% block form_top %}{% endblock %}
     <div>
       {% if is_popup %}<input type="hidden" name="{{ is_popup_var }}" value="1">{% endif %}

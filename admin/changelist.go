@@ -71,6 +71,7 @@ type changeList struct {
 	pageNum             int
 	showAll             bool
 	isPopup             bool
+	preservedFilters    string
 	filterSpecs         []filterSpec
 	hasFilters          bool
 	hasActiveFilters    bool
@@ -265,6 +266,7 @@ func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action)
 		pageNum:             pageNum,
 		showAll:             showAll,
 		isPopup:             isPopup,
+		preservedFilters:    s.preservedFilters(r, e),
 		baseSpec:            baseSpec,
 		showFullResultCount: e.showFullResultCount(),
 	}
@@ -654,7 +656,7 @@ func (cl *changeList) buildRows() ([]map[string]any, []int64) {
 		elem := reflect.ValueOf(obj).Elem()
 		pk := pkOf(elem, cl.entry)
 		pks[i] = pk
-		changeURL := cl.site.changeURL(cl.entry, pk)
+		changeURL := cl.site.addPreservedFilters(cl.entry, cl.site.changeURL(cl.entry, pk), cl.preservedFilters, nil, false, "")
 		objLabel := orm.Label(cl.entry.model, obj)
 		if objLabel == "" {
 			objLabel = emptyVal
@@ -904,7 +906,7 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	ctx["has_add_permission"] = e.hasAddPermission(s, r)
 	ctx["has_change_permission"] = canChange
 	ctx["has_delete_permission"] = e.hasDeletePermission(s, r, nil)
-	ctx["add_url"] = s.addURL(e)
+	ctx["add_url"] = s.addPreservedFilters(e, s.addURL(e), cl.preservedFilters, nil, cl.isPopup, r.URL.Query().Get(toFieldVar))
 
 	// Filter sidebar context.
 	ctx["has_filters"] = cl.hasFilters

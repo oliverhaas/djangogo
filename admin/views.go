@@ -385,18 +385,21 @@ func (s *AdminSite) addForm(w http.ResponseWriter, r *http.Request, e *entry) {
 			continueEditing := r.PostForm.Has("_continue") ||
 				saveAsNew && e.saveAsContinue() && objURL != "" ||
 				hooks != nil && hooks.continueAfterAdd && !r.PostForm.Has("_addanother")
+			// The next page keeps the query string of this one.
+			preserved := s.preservedFilters(r, e)
+			qsl := preservedQSL(r, preserved)
 			if continueEditing && e.hasViewOrChangePermission(s, r, obj) {
 				if objURL != "" {
 					msg += " You may edit it again below."
 				}
 				_ = messages.AddSafe(r, messages.LevelSuccess, msg)
-				http.Redirect(w, r, s.changeURL(e, pk), http.StatusFound)
+				http.Redirect(w, r, s.addPreservedFilters(e, s.changeURL(e, pk), preserved, qsl, false, ""), http.StatusFound)
 				return
 			}
 			if r.PostForm.Has("_addanother") {
 				_ = messages.AddSafe(r, messages.LevelSuccess,
 					fmt.Sprintf("%s You may add another %s below.", msg, forms.Escape(singular)))
-				http.Redirect(w, r, r.URL.Path, http.StatusFound)
+				http.Redirect(w, r, s.addPreservedFilters(e, r.URL.Path, preserved, qsl, false, ""), http.StatusFound)
 				return
 			}
 			_ = messages.AddSafe(r, messages.LevelSuccess, msg)
@@ -546,15 +549,18 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 			}
 			msg := fmt.Sprintf("The %s “%s” was changed successfully.",
 				forms.Escape(singular), objectHTML(displayLabel(e.model, obj), r.URL.Path))
+			// The next page keeps the query string of this one.
+			preserved := s.preservedFilters(r, e)
+			qsl := preservedQSL(r, preserved)
 			if r.PostForm.Has("_continue") {
 				_ = messages.AddSafe(r, messages.LevelSuccess, msg+" You may edit it again below.")
-				http.Redirect(w, r, r.URL.Path, http.StatusFound)
+				http.Redirect(w, r, s.addPreservedFilters(e, r.URL.Path, preserved, qsl, false, ""), http.StatusFound)
 				return
 			}
 			if r.PostForm.Has("_addanother") && e.hasAddPermission(s, r) {
 				_ = messages.AddSafe(r, messages.LevelSuccess,
 					fmt.Sprintf("%s You may add another %s below.", msg, forms.Escape(singular)))
-				http.Redirect(w, r, s.addURL(e), http.StatusFound)
+				http.Redirect(w, r, s.addPreservedFilters(e, s.addURL(e), preserved, qsl, false, ""), http.StatusFound)
 				return
 			}
 			_ = messages.AddSafe(r, messages.LevelSuccess, msg)
@@ -632,7 +638,8 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 		}
 		_ = messages.Success(r, fmt.Sprintf("The %s “%s” was deleted successfully.", singular, objDisplay))
 		if e.hasChangePermission(s, r, nil) {
-			http.Redirect(w, r, s.changelistURL(e), http.StatusFound)
+			u := s.addPreservedFilters(e, s.changelistURL(e), s.preservedFilters(r, e), nil, false, "")
+			http.Redirect(w, r, u, http.StatusFound)
 			return
 		}
 		http.Redirect(w, r, s.indexURL(), http.StatusFound)
@@ -768,7 +775,11 @@ func (s *AdminSite) renderChangeForm(
 	ctx["verbose_name"] = singular
 	ctx["verbose_name_plural"] = capFirst(plural)
 	ctx["changelist_url"] = s.changelistURL(e)
-	ctx["action"] = r.URL.Path
+	// The form posts back to the page; with changelist filters it posts to
+	// "?_changelist_filters=...", as Django's form_url.
+	preserved := s.preservedFilters(r, e)
+	ctx["form_url"] = s.addPreservedFilters(e, "", preserved, nil, false, "")
+	ctx["close_url"] = s.addPreservedFilters(e, s.changelistURL(e), preserved, nil, false, "")
 	popup := isPopup(r)
 	ctx["is_popup"] = popup
 	ctx["is_popup_var"] = isPopupVar
@@ -803,9 +814,9 @@ func (s *AdminSite) renderChangeForm(
 	ctx["history_url"] = ""
 	if obj != nil {
 		pk := pkOf(reflect.ValueOf(obj).Elem(), e)
-		ctx["history_url"] = s.historyURL(e, pk)
+		ctx["history_url"] = s.addPreservedFilters(e, s.historyURL(e, pk), preserved, nil, false, "")
 		if hasObjDelete {
-			ctx["delete_url"] = s.deleteURL(e, pk)
+			ctx["delete_url"] = s.addPreservedFilters(e, s.deleteURL(e, pk), preserved, nil, false, "")
 		}
 	}
 
@@ -906,7 +917,8 @@ func (s *AdminSite) checkSourceModel(r *http.Request) {
 // the admin index otherwise (Django's ModelAdmin._response_post_save).
 func (s *AdminSite) redirectPostSave(w http.ResponseWriter, r *http.Request, e *entry) {
 	if e.hasViewOrChangePermission(s, r, nil) {
-		http.Redirect(w, r, s.changelistURL(e), http.StatusFound)
+		u := s.addPreservedFilters(e, s.changelistURL(e), s.preservedFilters(r, e), nil, false, "")
+		http.Redirect(w, r, u, http.StatusFound)
 		return
 	}
 	http.Redirect(w, r, s.indexURL(), http.StatusFound)

@@ -50,3 +50,9 @@ func (t TestOps) Update(ctx context.Context, pk int64, obj any) error {
 func (t TestOps) Del(ctx context.Context, pk int64) error {
 	return t.ops.del(ctx, pk)
 }
+
+// AddPreservedFilters returns u with the preserved filters added for the model
+// app.slug of site, as Django's add_preserved_filters template tag.
+func AddPreservedFilters(site *AdminSite, app, slug, u, preserved string) string {
+	return site.addPreservedFilters(site.byKey[entryKey{app: app, slug: slug}], u, preserved, nil, false, "")
+}
