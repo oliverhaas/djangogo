@@ -298,7 +298,7 @@ func (f *Form) AddError(field string, err any) {
 	ve := toValidationError(err)
 	byField := map[string][]*ValidationError{}
 	order := []string{}
-	if ve.isDict() {
+	if ve.IsDict() {
 		if field != "" && field != NonFieldErrors {
 			f.fail(fmt.Errorf("forms: AddError: a dictionary error cannot be added to the field %q", field))
 			return

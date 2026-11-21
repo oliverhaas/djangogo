@@ -160,9 +160,9 @@ func (d Decimal) Float64() float64 {
 	return f
 }
 
-// digitCounts returns the total number of digits and the number of decimal
+// DigitCounts returns the total number of digits and the number of decimal
 // places, counted as Django's DecimalValidator counts them.
-func (d Decimal) digitCounts() (digits, decimals int) {
+func (d Decimal) DigitCounts() (digits, decimals int) {
 	n := len(d.digits())
 	if d.exp >= 0 {
 		if !d.IsZero() {

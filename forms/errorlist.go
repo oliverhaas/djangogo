@@ -42,7 +42,7 @@ func (l ErrorList) Len() int { return len(l.data) }
 func (l ErrorList) Messages() []string {
 	out := make([]string, len(l.data))
 	for i, e := range l.data {
-		out[i] = e.format()
+		out[i] = e.Format()
 	}
 	return out
 }
@@ -55,7 +55,7 @@ func (l ErrorList) AsData() []*ValidationError {
 // Contains reports whether msg is one of the formatted messages.
 func (l ErrorList) Contains(msg string) bool {
 	for _, e := range l.data {
-		if e.format() == msg {
+		if e.Format() == msg {
 			return true
 		}
 	}
@@ -74,7 +74,7 @@ type ErrorJSON struct {
 func (l ErrorList) JSONData(escapeHTML bool) []ErrorJSON {
 	out := make([]ErrorJSON, len(l.data))
 	for i, e := range l.data {
-		msg := e.format()
+		msg := e.Format()
 		if escapeHTML {
 			msg = escape(msg)
 		}
@@ -96,7 +96,7 @@ func (l ErrorList) AsText() string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString("* " + e.format())
+		b.WriteString("* " + e.Format())
 	}
 	return b.String()
 }
@@ -118,7 +118,7 @@ func (l ErrorList) AsUL() string {
 	}
 	b.WriteString(">")
 	for _, e := range l.data {
-		b.WriteString("<li>" + escape(e.format()) + "</li>")
+		b.WriteString("<li>" + escape(e.Format()) + "</li>")
 	}
 	b.WriteString("</ul>")
 	return b.String()

@@ -64,7 +64,7 @@ func (l TemplateErrors) HTML() string { return l.String() }
 func (l ErrorList) TemplateValue() any {
 	out := make(TemplateErrors, len(l.data))
 	for i, e := range l.data {
-		out[i] = TemplateError{Message: e.format(), Code: e.Code, class: l.errorClass, fieldID: l.fieldID}
+		out[i] = TemplateError{Message: e.Format(), Code: e.Code, class: l.errorClass, fieldID: l.fieldID}
 	}
 	return out
 }

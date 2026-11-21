@@ -139,7 +139,7 @@ func (b *BaseField) RunValidators(value any) error {
 			continue
 		}
 		ve := toValidationError(err)
-		if msg, ok := b.ErrorMessages[ve.Code]; ok && ve.Code != "" && !ve.isList() && !ve.isDict() {
+		if msg, ok := b.ErrorMessages[ve.Code]; ok && ve.Code != "" && !ve.IsList() && !ve.IsDict() {
 			clone := *ve
 			clone.Message = msg
 			ve = &clone
