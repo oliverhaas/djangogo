@@ -399,13 +399,13 @@ func TestParseStructField_TypeTextOnInt(t *testing.T) {
 func TestParseStructField_UnsupportedType(t *testing.T) {
 	t.Parallel()
 	typ := reflect.TypeOf(struct {
-		Data []byte
+		Data chan int
 	}{})
 	sf := typ.Field(0)
 
 	_, _, err := parseStructField(sf, 0)
 	if err == nil {
-		t.Fatal("expected error for unsupported type []byte")
+		t.Fatal("expected error for unsupported type chan int")
 	}
 	if !strings.Contains(err.Error(), "unsupported type") {
 		t.Errorf("error message should mention 'unsupported type': %v", err)

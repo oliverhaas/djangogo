@@ -41,17 +41,44 @@ func (Dialect) SupportsReturning() bool { return true }
 // Rules:
 //   - KindAuto -> "BIGSERIAL PRIMARY KEY"
 //   - Otherwise: base type + optional constraints (NOT NULL, PRIMARY KEY, UNIQUE)
-func (Dialect) ColumnType(f *orm.Field) string {
+func (d Dialect) ColumnType(f *orm.Field) string {
 	if f.Kind == orm.KindAuto {
 		return "BIGSERIAL PRIMARY KEY"
 	}
 
-	var base string
+	var base, check string
 
 	switch f.Kind {
 	case orm.KindInt:
 		base = "BIGINT"
-	case orm.KindChar:
+	case orm.KindSmallInt:
+		base = "SMALLINT"
+	case orm.KindBigInt:
+		base = "BIGINT"
+	case orm.KindPositiveSmallInt:
+		base = "SMALLINT"
+		if f.Column != "" {
+			check = "CHECK (" + d.Quote(f.Column) + " >= 0)"
+		}
+	case orm.KindPositiveInt:
+		base = "INTEGER"
+		if f.Column != "" {
+			check = "CHECK (" + d.Quote(f.Column) + " >= 0)"
+		}
+	case orm.KindPositiveBigInt:
+		base = "BIGINT"
+		if f.Column != "" {
+			check = "CHECK (" + d.Quote(f.Column) + " >= 0)"
+		}
+	case orm.KindFloat:
+		base = "DOUBLE PRECISION"
+	case orm.KindDecimal:
+		if f.MaxDigits > 0 {
+			base = fmt.Sprintf("NUMERIC(%d, %d)", f.MaxDigits, f.DecimalPlaces)
+		} else {
+			base = "NUMERIC"
+		}
+	case orm.KindChar, orm.KindSlug, orm.KindEmail, orm.KindURL:
 		base = fmt.Sprintf("VARCHAR(%d)", f.MaxLength)
 	case orm.KindText:
 		base = "TEXT"
@@ -59,6 +86,20 @@ func (Dialect) ColumnType(f *orm.Field) string {
 		base = "BOOLEAN"
 	case orm.KindDateTime:
 		base = "TIMESTAMPTZ"
+	case orm.KindDate:
+		base = "DATE"
+	case orm.KindTime:
+		base = "TIME"
+	case orm.KindDuration:
+		base = "INTERVAL"
+	case orm.KindUUID:
+		base = "UUID"
+	case orm.KindJSON:
+		base = "JSONB"
+	case orm.KindBinary:
+		base = "BYTEA"
+	case orm.KindGenericIPAddress:
+		base = "INET"
 	default:
 		base = "TEXT"
 	}
@@ -75,6 +116,11 @@ func (Dialect) ColumnType(f *orm.Field) string {
 		b.WriteString(" PRIMARY KEY")
 	} else if f.Unique {
 		b.WriteString(" UNIQUE")
+	}
+
+	if check != "" {
+		b.WriteByte(' ')
+		b.WriteString(check)
 	}
 
 	return b.String()

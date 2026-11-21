@@ -25,6 +25,40 @@ const (
 	KindBool
 	// KindDateTime maps to time.Time.
 	KindDateTime
+	// KindSmallInt maps to 16-bit signed integers (SMALLINT).
+	KindSmallInt
+	// KindBigInt maps to 64-bit signed integers (BIGINT).
+	KindBigInt
+	// KindPositiveSmallInt maps to non-negative 16-bit integers with CHECK >= 0.
+	KindPositiveSmallInt
+	// KindPositiveInt maps to non-negative 32-bit integers with CHECK >= 0.
+	KindPositiveInt
+	// KindPositiveBigInt maps to non-negative 64-bit integers with CHECK >= 0.
+	KindPositiveBigInt
+	// KindFloat maps to floating-point numbers (float64/float32).
+	KindFloat
+	// KindDecimal maps to exact fixed-point decimals (orm.Decimal).
+	KindDecimal
+	// KindDate maps to calendar dates (orm.Date or time.Time with type=date).
+	KindDate
+	// KindTime maps to wall-clock times (orm.Time or time.Time with type=time).
+	KindTime
+	// KindDuration maps to durations (time.Duration).
+	KindDuration
+	// KindUUID maps to 128-bit UUIDs (orm.UUID or string with type=uuid).
+	KindUUID
+	// KindJSON maps to JSON documents (json.RawMessage or any type with type=json).
+	KindJSON
+	// KindBinary maps to raw byte slices ([]byte).
+	KindBinary
+	// KindSlug maps to slug strings (type=slug, default max_length=50, indexed).
+	KindSlug
+	// KindEmail maps to email strings (type=email, default max_length=254).
+	KindEmail
+	// KindURL maps to URL strings (type=url, default max_length=200).
+	KindURL
+	// KindGenericIPAddress maps to IPv4/IPv6 addresses (netip.Addr or string with type=ip).
+	KindGenericIPAddress
 )
 
 // String returns a human-readable name for the Kind.
@@ -43,7 +77,7 @@ func (k Kind) String() string {
 	case KindDateTime:
 		return "DateTime"
 	default:
-		return fmt.Sprintf("Kind(%d)", k)
+		return kindString(k)
 	}
 }
 
@@ -102,6 +136,14 @@ type Field struct {
 	HelpText string
 	// DBIndex requests a single-column database index (Django's db_index=True).
 	DBIndex bool
+	// MaxDigits is the maximum total digit count for KindDecimal (0 means unspecified).
+	MaxDigits int
+	// DecimalPlaces is the number of fractional digits for KindDecimal.
+	DecimalPlaces int
+	// AllowUnicode allows Unicode letters in KindSlug fields (Django's allow_unicode).
+	AllowUnicode bool
+	// Protocol restricts KindGenericIPAddress to "both", "ipv4", or "ipv6".
+	Protocol string
 }
 
 // timeType is the reflect.Type for time.Time, used for KindDateTime inference.
@@ -155,23 +197,8 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 		return f, true, nil
 	}
 
-	switch sf.Type.Kind() { // unsupported kinds handled by default
-	case reflect.String:
-		f.Kind = KindChar
-		f.MaxLength = 255
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		f.Kind = KindInt
-	case reflect.Bool:
-		f.Kind = KindBool
-	case reflect.Struct:
-		if sf.Type == timeType {
-			f.Kind = KindDateTime
-		} else {
-			return nil, false, fmt.Errorf("orm: field %s: unsupported type %s", sf.Name, sf.Type)
-		}
-	default:
-		return nil, false, fmt.Errorf("orm: field %s: unsupported type %s", sf.Name, sf.Type)
+	if err := inferFieldKind(f, sf.Type, sf.Name, tag); err != nil {
+		return nil, false, err
 	}
 
 	// Step 3: apply orm tag options.
@@ -185,6 +212,9 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 				return nil, false, err
 			}
 		}
+	}
+	if err := validateFieldOptions(f, sf.Name); err != nil {
+		return nil, false, err
 	}
 
 	// auto_now and auto_now_add are mutually exclusive (Django raises the same).
@@ -259,15 +289,12 @@ func applyTagOption(f *Field, fieldName, token string) error {
 	if handled, err := applyCommonTagOption(f, fieldName, token); handled || err != nil {
 		return err
 	}
+	if handled, err := applyKindTagOption(f, fieldName, token); handled || err != nil {
+		return err
+	}
 	switch {
 	case token == "pk":
 		f.PrimaryKey = true
-	case token == "type=text":
-		if f.Kind != KindChar {
-			return fmt.Errorf("orm: field %s: type=text is only valid for string fields", fieldName)
-		}
-		f.Kind = KindText
-		f.MaxLength = 0
 	case strings.HasPrefix(token, "max_length="):
 		raw := token[len("max_length="):]
 		n, err := strconv.Atoi(raw)
@@ -276,13 +303,13 @@ func applyTagOption(f *Field, fieldName, token string) error {
 		}
 		f.MaxLength = n
 	case token == "auto_now_add":
-		if f.Kind != KindDateTime {
-			return fmt.Errorf("orm: field %s: auto_now_add is only valid for time.Time fields", fieldName)
+		if !isTemporalAutoKind(f.Kind) {
+			return fmt.Errorf("orm: field %s: auto_now_add is only valid for date/time fields", fieldName)
 		}
 		f.AutoNowAdd = true
 	case token == "auto_now":
-		if f.Kind != KindDateTime {
-			return fmt.Errorf("orm: field %s: auto_now is only valid for time.Time fields", fieldName)
+		if !isTemporalAutoKind(f.Kind) {
+			return fmt.Errorf("orm: field %s: auto_now is only valid for date/time fields", fieldName)
 		}
 		f.AutoNow = true
 	case strings.HasPrefix(token, "default="):
@@ -324,7 +351,7 @@ func parseDefault(kind Kind, raw string) (any, error) {
 	case KindDateTime:
 		return nil, fmt.Errorf("default= is not supported for datetime fields; use auto_now_add")
 	default:
-		return nil, fmt.Errorf("default= is not supported for this field type")
+		return parseKindDefault(kind, raw)
 	}
 }
 

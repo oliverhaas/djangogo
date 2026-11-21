@@ -102,6 +102,7 @@ func toOrmField(f FieldState) *orm.Field {
 	return &orm.Field{
 		Name: f.Name, Column: f.Column, Kind: f.Kind, PrimaryKey: f.PrimaryKey,
 		Null: f.Null, Unique: f.Unique, MaxLength: f.MaxLength,
+		MaxDigits: f.MaxDigits, DecimalPlaces: f.DecimalPlaces,
 	}
 }
 
@@ -110,9 +111,10 @@ func (e *SchemaEditor) columnDef(f FieldState) string {
 	return e.q(f.Column) + " " + e.dialect.ColumnType(toOrmField(f))
 }
 
-// bareType returns the column type without NULL, UNIQUE or PRIMARY KEY.
+// bareType returns the column type without NULL, UNIQUE, PRIMARY KEY, or CHECK.
 func (e *SchemaEditor) bareType(f FieldState) string {
 	of := toOrmField(f)
+	of.Column = ""
 	of.Null, of.Unique, of.PrimaryKey = true, false, false
 	return e.dialect.ColumnType(of)
 }
@@ -152,9 +154,12 @@ func (e *SchemaEditor) createTableSQL(state *ProjectState, table string, fields 
 	return "CREATE TABLE " + e.q(table) + " (" + strings.Join(defs, ", ") + ")", nil
 }
 
-// shouldIndex reports whether a field gets its own index. A unique or
-// primary-key column is indexed by its constraint already.
-func shouldIndex(f FieldState) bool { return f.DBIndex && !f.Unique && !f.PrimaryKey }
+// shouldIndex reports whether a field gets its own index. Foreign keys are
+// indexed by default, as in Django. A unique or primary-key column is indexed
+// by its constraint already.
+func shouldIndex(f FieldState) bool {
+	return (f.DBIndex || f.IsRelation()) && !f.Unique && !f.PrimaryKey
+}
 
 // fieldIndexName returns the name of the single-column index of a field.
 func (e *SchemaEditor) fieldIndexName(table, column string) string {
@@ -169,6 +174,19 @@ func (e *SchemaEditor) uniqueTogetherName(table string, columns []string) string
 // createIndexSQL renders CREATE INDEX.
 func (e *SchemaEditor) createIndexSQL(name, table string, columns []string) string {
 	return "CREATE INDEX " + e.q(name) + " ON " + e.q(table) + " (" + e.qAll(columns) + ")"
+}
+
+// createOrderedIndexSQL renders CREATE INDEX with optional DESC per column.
+func (e *SchemaEditor) createOrderedIndexSQL(name, table string, cols []indexCol) string {
+	parts := make([]string, len(cols))
+	for i, c := range cols {
+		if c.desc {
+			parts[i] = e.q(c.column) + " DESC"
+		} else {
+			parts[i] = e.q(c.column)
+		}
+	}
+	return "CREATE INDEX " + e.q(name) + " ON " + e.q(table) + " (" + strings.Join(parts, ", ") + ")"
 }
 
 // addUniqueSQL renders the statement that makes columns unique together: a
@@ -198,11 +216,11 @@ func (e *SchemaEditor) indexStatements(ms *ModelState) ([]string, error) {
 		}
 	}
 	for _, idx := range ms.Indexes {
-		cols, err := ms.columns(idx.Fields)
+		cols, err := ms.indexColumns(idx.Fields)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, e.createIndexSQL(idx.Name, ms.Table, cols))
+		out = append(out, e.createOrderedIndexSQL(idx.Name, ms.Table, cols))
 	}
 	for _, set := range ms.UniqueTogether {
 		cols, err := ms.columns(set)
@@ -323,7 +341,8 @@ func (e *SchemaEditor) removeField(ctx context.Context, state *ProjectState, old
 // its name. Options that live only in Go (default, blank, auto_now) are ignored.
 func schemaEqual(a, b FieldState) bool {
 	return a.Kind == b.Kind && a.PrimaryKey == b.PrimaryKey && a.Null == b.Null && a.Unique == b.Unique &&
-		a.MaxLength == b.MaxLength && shouldIndex(a) == shouldIndex(b) && a.IsRelation() == b.IsRelation() &&
+		a.MaxLength == b.MaxLength && a.MaxDigits == b.MaxDigits && a.DecimalPlaces == b.DecimalPlaces &&
+		shouldIndex(a) == shouldIndex(b) && a.IsRelation() == b.IsRelation() &&
 		a.RelTo == b.RelTo && a.RelOnDelete == b.RelOnDelete
 }
 
@@ -485,11 +504,11 @@ func (e *SchemaEditor) alterUniqueTogether(ctx context.Context, oldMS, newMS *Mo
 
 // addIndex creates a named index on the table of ms.
 func (e *SchemaEditor) addIndex(ctx context.Context, ms *ModelState, idx Index) error {
-	cols, err := ms.columns(idx.Fields)
+	cols, err := ms.indexColumns(idx.Fields)
 	if err != nil {
 		return err
 	}
-	return e.Execute(ctx, e.createIndexSQL(idx.Name, ms.Table, cols))
+	return e.Execute(ctx, e.createOrderedIndexSQL(idx.Name, ms.Table, cols))
 }
 
 // removeIndex drops a named index.

@@ -314,6 +314,34 @@ func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, valu
 		return p, c.setSubquery(p, sq.subquery(), "exact")
 	}
 
+	if patternLookups[lookup] {
+		rhs, err := c.prepPatternValue(field, value)
+		if err != nil {
+			return nil, err
+		}
+		if rhs == nil {
+			if lookup != lookupIExact {
+				return nil, errors.New("orm: cannot use nil as a query value")
+			}
+			p.lookup, p.flag = lookupIsNull, true
+			return p, nil
+		}
+		if (lookup == lookupRegex || lookup == lookupIRegex) && !supportsRegex(c.d) {
+			return nil, fmt.Errorf("orm: the %s dialect does not support the %s lookup", c.d.Name(), lookup)
+		}
+		param, ok := rhs.(paramNode)
+		if !ok {
+			p.rhs = []sqlNode{exprPattern(lookup, rhs)}
+			return p, nil
+		}
+		text := fmt.Sprint(param.value)
+		if field != nil && field.Kind == KindUUID && !hasNativeUUID(c.d) && lookup != lookupRegex && lookup != lookupIRegex {
+			text = strings.ReplaceAll(text, "-", "")
+		}
+		p.rhs = []sqlNode{paramNode{value: likePattern(lookup, text)}}
+		return p, nil
+	}
+
 	rhs, err := c.prepValue(field, value)
 	if err != nil {
 		return nil, err
@@ -321,26 +349,13 @@ func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, valu
 	if rhs == nil {
 		// Comparing with NULL is never true in SQL, so "= nil" means IS NULL, as
 		// Django turns exact=None into isnull=True.
-		if lookup != lookupExact && lookup != lookupIExact {
+		if lookup != lookupExact {
 			return nil, errors.New("orm: cannot use nil as a query value")
 		}
 		p.lookup, p.flag = lookupIsNull, true
 		return p, nil
 	}
-	if !patternLookups[lookup] {
-		p.rhs = []sqlNode{rhs}
-		return p, nil
-	}
-
-	if (lookup == lookupRegex || lookup == lookupIRegex) && !supportsRegex(c.d) {
-		return nil, fmt.Errorf("orm: the %s dialect does not support the %s lookup", c.d.Name(), lookup)
-	}
-	param, ok := rhs.(paramNode)
-	if !ok {
-		p.rhs = []sqlNode{exprPattern(lookup, rhs)}
-		return p, nil
-	}
-	p.rhs = []sqlNode{paramNode{value: likePattern(lookup, fmt.Sprint(param.value))}}
+	p.rhs = []sqlNode{rhs}
 	return p, nil
 }
 
@@ -461,6 +476,31 @@ type subqueryer interface {
 // primary key, and an orm.FK[T] or any other driver.Valuer, which stands for
 // the value it yields.
 func (c *compiler) prepValue(field *Field, value any) (sqlNode, error) {
+	switch e := value.(type) {
+	case nil:
+		return nil, nil
+	case Expr:
+		return c.resolveExpr(e)
+	case *Expr:
+		if e == nil {
+			return nil, nil
+		}
+		return c.resolveExpr(*e)
+	}
+	v, err := plainValue(c.q.db.Registry(), field, value)
+	if err != nil || v == nil {
+		return nil, err
+	}
+	bound, err := bindField(c.d, field, v)
+	if err != nil || bound == nil {
+		return nil, err
+	}
+	return paramNode{value: bound}, nil
+}
+
+// prepPatternValue resolves a right-hand value for a text pattern lookup
+// without parsing fragments as full typed values (e.g. UUID substrings).
+func (c *compiler) prepPatternValue(field *Field, value any) (sqlNode, error) {
 	switch e := value.(type) {
 	case nil:
 		return nil, nil

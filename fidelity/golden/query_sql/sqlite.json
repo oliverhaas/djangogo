@@ -1,0 +1,1128 @@
+{
+  "django_version": "6.0.3",
+  "dialect": "sqlite",
+  "cases": [
+    {
+      "name": "filter_exact_char",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" = %s",
+      "params": [
+        "Compilers 101"
+      ],
+      "result": [
+        2
+      ]
+    },
+    {
+      "name": "filter_exact_int",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" = %s",
+      "params": [
+        210
+      ],
+      "result": [
+        3
+      ]
+    },
+    {
+      "name": "filter_exact_bool",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"published\" ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "name": "filter_exact_bool_false",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE NOT \"fid_book\".\"published\" ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        3,
+        5
+      ]
+    },
+    {
+      "name": "filter_exact_datetime",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"created_at\" = %s",
+      "params": [
+        "2024-03-20 14:30:00"
+      ],
+      "result": [
+        2
+      ]
+    },
+    {
+      "name": "filter_exact_null",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"editor_id\" IS NULL ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        2,
+        4
+      ]
+    },
+    {
+      "name": "filter_exact_fk_id",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"author_id\" = %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        1
+      ],
+      "result": [
+        1,
+        4
+      ]
+    },
+    {
+      "name": "filter_iexact",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" LIKE %s ESCAPE '\\'",
+      "params": [
+        "compilers 101"
+      ],
+      "result": [
+        2
+      ]
+    },
+    {
+      "name": "filter_gt",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" > %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        200
+      ],
+      "result": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "filter_gte",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" >= %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        210
+      ],
+      "result": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "filter_lt",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" < %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        200
+      ],
+      "result": [
+        1,
+        5
+      ]
+    },
+    {
+      "name": "filter_lte",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" <= %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        210
+      ],
+      "result": [
+        1,
+        3,
+        5
+      ]
+    },
+    {
+      "name": "filter_contains",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" LIKE %s ESCAPE '\\' ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "%Engine%"
+      ],
+      "result": [
+        1,
+        4
+      ]
+    },
+    {
+      "name": "filter_icontains",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" LIKE %s ESCAPE '\\' ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "%engine%"
+      ],
+      "result": [
+        1,
+        4
+      ]
+    },
+    {
+      "name": "filter_startswith",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" LIKE %s ESCAPE '\\' ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "Comp%"
+      ],
+      "result": [
+        2,
+        3
+      ]
+    },
+    {
+      "name": "filter_istartswith",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" LIKE %s ESCAPE '\\' ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "comp%"
+      ],
+      "result": [
+        2,
+        3
+      ]
+    },
+    {
+      "name": "filter_endswith",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" LIKE %s ESCAPE '\\'",
+      "params": [
+        "%101"
+      ],
+      "result": [
+        2
+      ]
+    },
+    {
+      "name": "filter_iendswith",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" LIKE %s ESCAPE '\\'",
+      "params": [
+        "%design"
+      ],
+      "result": [
+        4
+      ]
+    },
+    {
+      "name": "filter_in",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" IN (%s, %s, %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        120,
+        210,
+        340
+      ],
+      "result": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "name": "filter_in_empty",
+      "kind": "model_ids",
+      "sql": "",
+      "params": [],
+      "result": [],
+      "no_query": true
+    },
+    {
+      "name": "filter_range_int",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" BETWEEN %s AND %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        150,
+        280
+      ],
+      "result": [
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "filter_range_datetime",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"created_at\" BETWEEN %s AND %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "2024-02-01 00:00:00",
+        "2024-10-01 00:00:00"
+      ],
+      "result": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "filter_isnull_true",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"editor_id\" IS NULL ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        2,
+        4
+      ]
+    },
+    {
+      "name": "filter_isnull_false",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"editor_id\" IS NOT NULL ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        1,
+        3,
+        5
+      ]
+    },
+    {
+      "name": "filter_regex",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" REGEXP %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "^Comp"
+      ],
+      "result": [
+        2,
+        3
+      ]
+    },
+    {
+      "name": "filter_iregex",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE \"fid_book\".\"title\" REGEXP '(?i)' || %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "^comp"
+      ],
+      "result": [
+        2,
+        3
+      ]
+    },
+    {
+      "name": "filter_f_expr",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") WHERE \"fid_book\".\"pages\" > (\"fid_author\".\"age\" * %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        4
+      ],
+      "result": [
+        3,
+        4
+      ]
+    },
+    {
+      "name": "exclude_non_null",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE NOT (\"fid_book\".\"pages\" = %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        210
+      ],
+      "result": [
+        1,
+        2,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "exclude_nullable_fk",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE NOT (\"fid_book\".\"editor_id\" = %s AND \"fid_book\".\"editor_id\" IS NOT NULL) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        2
+      ],
+      "result": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "exclude_multi",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE NOT (\"fid_book\".\"author_id\" = %s AND \"fid_book\".\"pages\" > %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        1,
+        200
+      ],
+      "result": [
+        1,
+        2,
+        3,
+        5
+      ]
+    },
+    {
+      "name": "exclude_relation",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") WHERE NOT (\"fid_author\".\"name\" = %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "Ada Lovelace"
+      ],
+      "result": [
+        2,
+        3,
+        5
+      ]
+    },
+    {
+      "name": "q_or",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE (\"fid_book\".\"pages\" < %s OR \"fid_book\".\"pages\" > %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        150,
+        300
+      ],
+      "result": [
+        1,
+        2
+      ]
+    },
+    {
+      "name": "q_and_or",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE (\"fid_book\".\"pages\" >= %s AND (\"fid_book\".\"pages\" > %s OR \"fid_book\".\"title\" = %s)) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        120,
+        300,
+        "Notes on the Engine"
+      ],
+      "result": [
+        1,
+        2
+      ]
+    },
+    {
+      "name": "q_not",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" WHERE NOT (\"fid_book\".\"pages\" > %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        200
+      ],
+      "result": [
+        1,
+        5
+      ]
+    },
+    {
+      "name": "q_or_nullable_relation",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") LEFT OUTER JOIN \"fid_publisher\" ON (\"fid_author\".\"publisher_id\" = \"fid_publisher\".\"id\") WHERE (\"fid_book\".\"pages\" > %s OR \"fid_publisher\".\"name\" = %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        300,
+        "Indie Press"
+      ],
+      "result": [
+        2,
+        3
+      ]
+    },
+    {
+      "name": "join_inner_non_null_fk",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") WHERE \"fid_author\".\"name\" = %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "Ada Lovelace"
+      ],
+      "result": [
+        1,
+        4
+      ]
+    },
+    {
+      "name": "join_outer_nullable_fk_isnull",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" LEFT OUTER JOIN \"fid_author\" ON (\"fid_book\".\"editor_id\" = \"fid_author\".\"id\") WHERE \"fid_author\".\"name\" IS NULL ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        2,
+        4
+      ]
+    },
+    {
+      "name": "join_inner_demoted_nullable_fk",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"editor_id\" = \"fid_author\".\"id\") WHERE \"fid_author\".\"name\" = %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "Grace Hopper"
+      ],
+      "result": [
+        1,
+        5
+      ]
+    },
+    {
+      "name": "join_chain_inner",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") INNER JOIN \"fid_publisher\" ON (\"fid_author\".\"publisher_id\" = \"fid_publisher\".\"id\") INNER JOIN \"fid_country\" ON (\"fid_publisher\".\"country_id\" = \"fid_country\".\"id\") WHERE \"fid_country\".\"code\" = %s ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "UK"
+      ],
+      "result": [
+        1,
+        4
+      ]
+    },
+    {
+      "name": "join_two_fks_same_table",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") INNER JOIN \"fid_author\" T3 ON (\"fid_book\".\"editor_id\" = T3.\"id\") WHERE (\"fid_author\".\"name\" = %s AND T3.\"name\" = %s) ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        "Ada Lovelace",
+        "Grace Hopper"
+      ],
+      "result": [
+        1
+      ]
+    },
+    {
+      "name": "order_by_asc_desc",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" ORDER BY \"fid_book\".\"published\" ASC, \"fid_book\".\"pages\" DESC, \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        3,
+        5,
+        2,
+        4,
+        1
+      ]
+    },
+    {
+      "name": "order_by_relation",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") ORDER BY \"fid_author\".\"name\" ASC, \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        1,
+        4,
+        3,
+        5,
+        2
+      ]
+    },
+    {
+      "name": "order_by_nullable_relation",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" LEFT OUTER JOIN \"fid_author\" ON (\"fid_book\".\"editor_id\" = \"fid_author\".\"id\") ORDER BY \"fid_author\".\"name\" ASC, \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        2,
+        4,
+        3,
+        1,
+        5
+      ]
+    },
+    {
+      "name": "order_by_chain",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") LEFT OUTER JOIN \"fid_publisher\" ON (\"fid_author\".\"publisher_id\" = \"fid_publisher\".\"id\") ORDER BY \"fid_publisher\".\"name\" ASC, \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        5,
+        1,
+        4,
+        2,
+        3
+      ]
+    },
+    {
+      "name": "order_by_random",
+      "kind": "model_ids_unordered",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" ORDER BY RAND() ASC",
+      "params": [],
+      "result": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "limit_only",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" ORDER BY \"fid_book\".\"id\" ASC LIMIT 2",
+      "params": [],
+      "result": [
+        1,
+        2
+      ]
+    },
+    {
+      "name": "offset_only",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" ORDER BY \"fid_book\".\"id\" ASC LIMIT -1 OFFSET 2",
+      "params": [],
+      "result": [
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "limit_and_offset",
+      "kind": "model_ids",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\" FROM \"fid_book\" ORDER BY \"fid_book\".\"id\" ASC LIMIT 2 OFFSET 1",
+      "params": [],
+      "result": [
+        2,
+        3
+      ]
+    },
+    {
+      "name": "count_all",
+      "kind": "count",
+      "sql": "SELECT COUNT(*) AS \"__count\" FROM \"fid_book\"",
+      "params": [],
+      "result": 5
+    },
+    {
+      "name": "count_filtered",
+      "kind": "count",
+      "sql": "SELECT COUNT(*) AS \"__count\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" >= %s",
+      "params": [
+        200
+      ],
+      "result": 3
+    },
+    {
+      "name": "count_distinct",
+      "kind": "count",
+      "sql": "SELECT COUNT(*) FROM (SELECT DISTINCT \"fid_book\".\"author_id\" AS \"author\" FROM \"fid_book\") subquery",
+      "params": [],
+      "result": 4
+    },
+    {
+      "name": "exists_all",
+      "kind": "exists",
+      "sql": "SELECT %s AS \"a\" FROM \"fid_book\" LIMIT 1",
+      "params": [
+        1
+      ],
+      "result": true
+    },
+    {
+      "name": "exists_filtered",
+      "kind": "exists",
+      "sql": "SELECT %s AS \"a\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" > %s LIMIT 1",
+      "params": [
+        1,
+        250
+      ],
+      "result": true
+    },
+    {
+      "name": "exists_none",
+      "kind": "exists",
+      "sql": "SELECT %s AS \"a\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" > %s LIMIT 1",
+      "params": [
+        1,
+        9999
+      ],
+      "result": false
+    },
+    {
+      "name": "values_fields",
+      "kind": "values",
+      "sql": "SELECT \"fid_book\".\"id\" AS \"id\", \"fid_book\".\"title\" AS \"title\", \"fid_author\".\"name\" AS \"author__name\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") ORDER BY 1 ASC",
+      "params": [],
+      "result": [
+        {
+          "id": 1,
+          "title": "Notes on the Engine",
+          "author__name": "Ada Lovelace"
+        },
+        {
+          "id": 2,
+          "title": "Compilers 101",
+          "author__name": "Grace Hopper"
+        },
+        {
+          "id": 3,
+          "title": "Computable Numbers",
+          "author__name": "Alan Turing"
+        },
+        {
+          "id": 4,
+          "title": "Engine Design",
+          "author__name": "Ada Lovelace"
+        },
+        {
+          "id": 5,
+          "title": "Abstraction Patterns",
+          "author__name": "Barbara Liskov"
+        }
+      ]
+    },
+    {
+      "name": "values_all_fields",
+      "kind": "values",
+      "sql": "SELECT \"fid_country\".\"id\", \"fid_country\".\"name\", \"fid_country\".\"code\" FROM \"fid_country\" ORDER BY \"fid_country\".\"id\" ASC",
+      "params": [],
+      "result": [
+        {
+          "id": 1,
+          "name": "United Kingdom",
+          "code": "UK"
+        },
+        {
+          "id": 2,
+          "name": "United States",
+          "code": "US"
+        }
+      ]
+    },
+    {
+      "name": "values_list",
+      "kind": "values_list",
+      "sql": "SELECT \"fid_book\".\"title\" AS \"title\", \"fid_book\".\"pages\" AS \"pages\" FROM \"fid_book\" ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        [
+          "Notes on the Engine",
+          120
+        ],
+        [
+          "Compilers 101",
+          340
+        ],
+        [
+          "Computable Numbers",
+          210
+        ],
+        [
+          "Engine Design",
+          280
+        ],
+        [
+          "Abstraction Patterns",
+          180
+        ]
+      ]
+    },
+    {
+      "name": "values_list_flat",
+      "kind": "values_list_flat",
+      "sql": "SELECT \"fid_book\".\"title\" AS \"title\" FROM \"fid_book\" ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        "Notes on the Engine",
+        "Compilers 101",
+        "Computable Numbers",
+        "Engine Design",
+        "Abstraction Patterns"
+      ]
+    },
+    {
+      "name": "distinct_values",
+      "kind": "values",
+      "sql": "SELECT DISTINCT \"fid_book\".\"published\" AS \"published\" FROM \"fid_book\" ORDER BY 1 ASC",
+      "params": [],
+      "result": [
+        {
+          "published": false
+        },
+        {
+          "published": true
+        }
+      ]
+    },
+    {
+      "name": "distinct_values_relation",
+      "kind": "values",
+      "sql": "SELECT DISTINCT \"fid_author\".\"name\" AS \"author__name\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") ORDER BY 1 ASC",
+      "params": [],
+      "result": [
+        {
+          "author__name": "Ada Lovelace"
+        },
+        {
+          "author__name": "Alan Turing"
+        },
+        {
+          "author__name": "Barbara Liskov"
+        },
+        {
+          "author__name": "Grace Hopper"
+        }
+      ]
+    },
+    {
+      "name": "distinct_extra_order",
+      "kind": "values",
+      "sql": "SELECT DISTINCT \"fid_book\".\"author_id\" AS \"author_id\", \"fid_book\".\"pages\", \"fid_book\".\"id\" FROM \"fid_book\" ORDER BY \"fid_book\".\"pages\" ASC, \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        {
+          "author_id": 1
+        },
+        {
+          "author_id": 4
+        },
+        {
+          "author_id": 3
+        },
+        {
+          "author_id": 1
+        },
+        {
+          "author_id": 2
+        }
+      ]
+    },
+    {
+      "name": "aggregate_basic",
+      "kind": "aggregate",
+      "sql": "SELECT COUNT(\"fid_book\".\"id\") AS \"id__count\", SUM(\"fid_book\".\"pages\") AS \"pages__sum\", AVG(\"fid_book\".\"pages\") AS \"pages__avg\", MIN(\"fid_book\".\"pages\") AS \"pages__min\", MAX(\"fid_book\".\"pages\") AS \"pages__max\" FROM \"fid_book\"",
+      "params": [],
+      "result": {
+        "id__count": 5,
+        "pages__sum": 1130,
+        "pages__avg": 226.0,
+        "pages__min": 120,
+        "pages__max": 340
+      }
+    },
+    {
+      "name": "aggregate_filtered",
+      "kind": "aggregate",
+      "sql": "SELECT SUM(\"fid_book\".\"pages\") AS \"total_pages\", COUNT(\"fid_book\".\"id\") AS \"book_count\" FROM \"fid_book\" WHERE \"fid_book\".\"pages\" >= %s",
+      "params": [
+        200
+      ],
+      "result": {
+        "total_pages": 830,
+        "book_count": 3
+      }
+    },
+    {
+      "name": "aggregate_distinct",
+      "kind": "aggregate",
+      "sql": "SELECT COUNT(DISTINCT \"fid_book\".\"author_id\") AS \"distinct_authors\" FROM \"fid_book\"",
+      "params": [],
+      "result": {
+        "distinct_authors": 4
+      }
+    },
+    {
+      "name": "annotate_values_groupby",
+      "kind": "values",
+      "sql": "SELECT \"fid_author\".\"name\" AS \"author__name\", COUNT(\"fid_book\".\"id\") AS \"book_count\", SUM(\"fid_book\".\"pages\") AS \"total_pages\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") GROUP BY 1 ORDER BY 1 ASC",
+      "params": [],
+      "result": [
+        {
+          "author__name": "Ada Lovelace",
+          "book_count": 2,
+          "total_pages": 400
+        },
+        {
+          "author__name": "Alan Turing",
+          "book_count": 1,
+          "total_pages": 210
+        },
+        {
+          "author__name": "Barbara Liskov",
+          "book_count": 1,
+          "total_pages": 180
+        },
+        {
+          "author__name": "Grace Hopper",
+          "book_count": 1,
+          "total_pages": 340
+        }
+      ]
+    },
+    {
+      "name": "annotate_having",
+      "kind": "values",
+      "sql": "SELECT \"fid_author\".\"name\" AS \"author__name\", COUNT(\"fid_book\".\"id\") AS \"book_count\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") GROUP BY 1 HAVING COUNT(\"fid_book\".\"id\") >= %s ORDER BY 1 ASC",
+      "params": [
+        2
+      ],
+      "result": [
+        {
+          "author__name": "Ada Lovelace",
+          "book_count": 2
+        }
+      ]
+    },
+    {
+      "name": "annotate_expr",
+      "kind": "values",
+      "sql": "SELECT \"fid_book\".\"title\" AS \"title\", (\"fid_book\".\"pages\" * %s) AS \"double_pages\" FROM \"fid_book\" ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [
+        2
+      ],
+      "result": [
+        {
+          "title": "Notes on the Engine",
+          "double_pages": 240
+        },
+        {
+          "title": "Compilers 101",
+          "double_pages": 680
+        },
+        {
+          "title": "Computable Numbers",
+          "double_pages": 420
+        },
+        {
+          "title": "Engine Design",
+          "double_pages": 560
+        },
+        {
+          "title": "Abstraction Patterns",
+          "double_pages": 360
+        }
+      ]
+    },
+    {
+      "name": "update_simple",
+      "kind": "update",
+      "sql": "UPDATE \"fid_book\" SET \"published\" = %s WHERE \"fid_book\".\"pages\" < %s",
+      "params": [
+        true,
+        200
+      ],
+      "result": {
+        "affected": 2,
+        "books": [
+          {
+            "id": 1,
+            "pages": 120,
+            "published": true
+          },
+          {
+            "id": 2,
+            "pages": 340,
+            "published": true
+          },
+          {
+            "id": 3,
+            "pages": 210,
+            "published": false
+          },
+          {
+            "id": 4,
+            "pages": 280,
+            "published": true
+          },
+          {
+            "id": 5,
+            "pages": 180,
+            "published": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "update_relation_expr",
+      "kind": "update",
+      "sql": "UPDATE \"fid_book\" SET \"pages\" = (\"fid_book\".\"pages\" + %s) WHERE \"fid_book\".\"id\" IN (SELECT U0.\"id\" FROM \"fid_book\" U0 INNER JOIN \"fid_author\" U1 ON (U0.\"author_id\" = U1.\"id\") WHERE U1.\"name\" = %s)",
+      "params": [
+        10,
+        "Ada Lovelace"
+      ],
+      "result": {
+        "affected": 2,
+        "books": [
+          {
+            "id": 1,
+            "pages": 130,
+            "published": true
+          },
+          {
+            "id": 2,
+            "pages": 340,
+            "published": true
+          },
+          {
+            "id": 3,
+            "pages": 210,
+            "published": false
+          },
+          {
+            "id": 4,
+            "pages": 290,
+            "published": true
+          },
+          {
+            "id": 5,
+            "pages": 180,
+            "published": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "delete_simple",
+      "kind": "delete",
+      "sql": "DELETE FROM \"fid_book\" WHERE \"fid_book\".\"pages\" < %s",
+      "params": [
+        200
+      ],
+      "result": {
+        "affected": 2,
+        "remaining_ids": [
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "delete_relation",
+      "kind": "delete",
+      "sql": "DELETE FROM \"fid_book\" WHERE \"fid_book\".\"id\" IN (SELECT U0.\"id\" FROM \"fid_book\" U0 INNER JOIN \"fid_author\" U1 ON (U0.\"author_id\" = U1.\"id\") WHERE U1.\"name\" = %s)",
+      "params": [
+        "Grace Hopper"
+      ],
+      "result": {
+        "affected": 1,
+        "remaining_ids": [
+          1,
+          3,
+          4,
+          5
+        ]
+      }
+    },
+    {
+      "name": "select_related_single",
+      "kind": "select_related",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\", \"fid_author\".\"id\", \"fid_author\".\"name\", \"fid_author\".\"age\", \"fid_author\".\"active\", \"fid_author\".\"publisher_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        {
+          "id": 1,
+          "author": "Ada Lovelace"
+        },
+        {
+          "id": 2,
+          "author": "Grace Hopper"
+        },
+        {
+          "id": 3,
+          "author": "Alan Turing"
+        },
+        {
+          "id": 4,
+          "author": "Ada Lovelace"
+        },
+        {
+          "id": 5,
+          "author": "Barbara Liskov"
+        }
+      ]
+    },
+    {
+      "name": "select_related_nullable",
+      "kind": "select_related",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\", \"fid_author\".\"id\", \"fid_author\".\"name\", \"fid_author\".\"age\", \"fid_author\".\"active\", \"fid_author\".\"publisher_id\" FROM \"fid_book\" LEFT OUTER JOIN \"fid_author\" ON (\"fid_book\".\"editor_id\" = \"fid_author\".\"id\") ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        {
+          "id": 1,
+          "editor": "Grace Hopper"
+        },
+        {
+          "id": 2,
+          "editor": null
+        },
+        {
+          "id": 3,
+          "editor": "Ada Lovelace"
+        },
+        {
+          "id": 4,
+          "editor": null
+        },
+        {
+          "id": 5,
+          "editor": "Grace Hopper"
+        }
+      ]
+    },
+    {
+      "name": "select_related_chain",
+      "kind": "select_related",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\", \"fid_author\".\"id\", \"fid_author\".\"name\", \"fid_author\".\"age\", \"fid_author\".\"active\", \"fid_author\".\"publisher_id\", \"fid_publisher\".\"id\", \"fid_publisher\".\"name\", \"fid_publisher\".\"country_id\", \"fid_country\".\"id\", \"fid_country\".\"name\", \"fid_country\".\"code\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") LEFT OUTER JOIN \"fid_publisher\" ON (\"fid_author\".\"publisher_id\" = \"fid_publisher\".\"id\") LEFT OUTER JOIN \"fid_country\" ON (\"fid_publisher\".\"country_id\" = \"fid_country\".\"id\") ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        {
+          "id": 1,
+          "author": "Ada Lovelace",
+          "publisher": "Analytic Press",
+          "country": "UK"
+        },
+        {
+          "id": 2,
+          "author": "Grace Hopper",
+          "publisher": "Compiler House",
+          "country": "US"
+        },
+        {
+          "id": 3,
+          "author": "Alan Turing",
+          "publisher": "Indie Press",
+          "country": null
+        },
+        {
+          "id": 4,
+          "author": "Ada Lovelace",
+          "publisher": "Analytic Press",
+          "country": "UK"
+        },
+        {
+          "id": 5,
+          "author": "Barbara Liskov",
+          "publisher": null,
+          "country": null
+        }
+      ]
+    },
+    {
+      "name": "select_related_multiple",
+      "kind": "select_related",
+      "sql": "SELECT \"fid_book\".\"id\", \"fid_book\".\"title\", \"fid_book\".\"pages\", \"fid_book\".\"published\", \"fid_book\".\"created_at\", \"fid_book\".\"author_id\", \"fid_book\".\"editor_id\", \"fid_author\".\"id\", \"fid_author\".\"name\", \"fid_author\".\"age\", \"fid_author\".\"active\", \"fid_author\".\"publisher_id\", T3.\"id\", T3.\"name\", T3.\"age\", T3.\"active\", T3.\"publisher_id\" FROM \"fid_book\" INNER JOIN \"fid_author\" ON (\"fid_book\".\"author_id\" = \"fid_author\".\"id\") LEFT OUTER JOIN \"fid_author\" T3 ON (\"fid_book\".\"editor_id\" = T3.\"id\") ORDER BY \"fid_book\".\"id\" ASC",
+      "params": [],
+      "result": [
+        {
+          "id": 1,
+          "author": "Ada Lovelace",
+          "editor": "Grace Hopper"
+        },
+        {
+          "id": 2,
+          "author": "Grace Hopper",
+          "editor": null
+        },
+        {
+          "id": 3,
+          "author": "Alan Turing",
+          "editor": "Ada Lovelace"
+        },
+        {
+          "id": 4,
+          "author": "Ada Lovelace",
+          "editor": null
+        },
+        {
+          "id": 5,
+          "author": "Barbara Liskov",
+          "editor": "Grace Hopper"
+        }
+      ]
+    }
+  ]
+}

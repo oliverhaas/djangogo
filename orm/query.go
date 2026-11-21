@@ -17,6 +17,7 @@ type query struct {
 	// The order matters: each call may change the type of the joins it uses.
 	filters       []Cond
 	orders        []orderTerm
+	explicitOrder bool
 	selectRelated []string
 	annotations   []annotation
 	values        *valuesSpec
@@ -100,35 +101,65 @@ func (q *query) filter(args []any, negate bool) *query {
 	return cp
 }
 
-// orderBy returns a clone with the given terms appended to the ordering. No
-// terms clears the ordering.
-func (q *query) orderBy(fields []string) *query {
-	cp := q.clone()
-	if len(fields) == 0 {
-		cp.orders = nil
-		return cp
-	}
+// parseOrderTerms turns raw ordering field strings (e.g. "-pub_date", "?")
+// into orderTerms.
+func parseOrderTerms(fields []string) []orderTerm {
+	out := make([]orderTerm, 0, len(fields))
 	for _, field := range fields {
 		if field == "?" {
-			cp.orders = append(cp.orders, orderTerm{random: true})
+			out = append(out, orderTerm{random: true})
 			continue
 		}
 		desc := strings.HasPrefix(field, "-")
 		key := strings.TrimPrefix(strings.TrimPrefix(field, "-"), "+")
-		cp.orders = append(cp.orders, orderTerm{key: key, desc: desc})
+		out = append(out, orderTerm{key: key, desc: desc})
 	}
+	return out
+}
+
+// effectiveOrders returns the ordering terms that apply to q: the explicit
+// OrderBy terms when OrderBy was called, or the model's Meta.Ordering
+// otherwise. Default Meta.Ordering is omitted for GROUP BY queries produced by
+// Values().Annotate(), matching Django.
+func (q *query) effectiveOrders() []orderTerm {
+	if q.explicitOrder {
+		return q.orders
+	}
+	if q.values != nil && q.values.groups && q.hasAggregates() {
+		return nil
+	}
+	if q.model != nil && len(q.model.ordering) > 0 {
+		return parseOrderTerms(q.model.ordering)
+	}
+	return nil
+}
+
+// orderBy returns a clone with the given terms appended to the explicit
+// ordering, replacing any default Meta.Ordering. No terms clears the ordering.
+func (q *query) orderBy(fields []string) *query {
+	cp := q.clone()
+	cp.explicitOrder = true
+	if len(fields) == 0 {
+		cp.orders = nil
+		return cp
+	}
+	cp.orders = append(cp.orders, parseOrderTerms(fields)...)
 	return cp
 }
 
-// reversed returns a clone with every ordering term flipped. An unordered
-// query is ordered by descending primary key, as Django's reverse of the
-// default "pk" ordering used by first() and last().
+// reversed returns a clone with every effective ordering term flipped. An
+// unordered query is ordered by descending primary key, as Django's reverse of
+// the default "pk" ordering used by first() and last().
 func (q *query) reversed() *query {
 	cp := q.clone()
-	if len(cp.orders) == 0 {
+	terms := cp.effectiveOrders()
+	cp.explicitOrder = true
+	if len(terms) == 0 {
 		cp.orders = []orderTerm{{key: "pk", desc: true}}
 		return cp
 	}
+	cp.orders = make([]orderTerm, len(terms))
+	copy(cp.orders, terms)
 	for i := range cp.orders {
 		cp.orders[i].desc = !cp.orders[i].desc
 	}

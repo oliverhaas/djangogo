@@ -24,6 +24,9 @@ type FieldState struct {
 	Unique     bool
 	// MaxLength is the VARCHAR length of a Char field.
 	MaxLength int
+	// MaxDigits and DecimalPlaces hold precision and scale for KindDecimal.
+	MaxDigits     int
+	DecimalPlaces int
 	// DBIndex requests a single-column index (the field option "index").
 	DBIndex bool
 	// Blank mirrors Django's blank=True. A non-null Char or Text field that may
@@ -44,6 +47,10 @@ type FieldState struct {
 
 // Equal reports whether two field states are identical.
 func (f FieldState) Equal(other FieldState) bool {
+	if !defaultsEqual(f.Default, other.Default) {
+		return false
+	}
+	f.Default, other.Default = nil, nil
 	return f == other
 }
 
@@ -51,8 +58,11 @@ func (f FieldState) Equal(other FieldState) bool {
 // column. A renamed field keeps its definition, which is what rename detection
 // looks for.
 func (f FieldState) sameDefinition(other FieldState) bool {
-	f.Name, f.Column = "", ""
-	other.Name, other.Column = "", ""
+	if !defaultsEqual(f.Default, other.Default) {
+		return false
+	}
+	f.Name, f.Column, f.Default = "", "", nil
+	other.Name, other.Column, other.Default = "", "", nil
 	return f == other
 }
 
@@ -66,17 +76,19 @@ func (f FieldState) Attr() string { return snakeCase(f.Name) }
 // fieldStateFromField snapshots an orm field.
 func fieldStateFromField(f *orm.Field) FieldState {
 	fs := FieldState{
-		Name:       f.Name,
-		Column:     f.Column,
-		Kind:       f.Kind,
-		PrimaryKey: f.PrimaryKey,
-		Null:       f.Null,
-		Unique:     f.Unique,
-		MaxLength:  f.MaxLength,
-		DBIndex:    f.DBIndex,
-		Blank:      f.Blank,
-		AutoNow:    f.AutoNow,
-		AutoNowAdd: f.AutoNowAdd,
+		Name:          f.Name,
+		Column:        f.Column,
+		Kind:          f.Kind,
+		PrimaryKey:    f.PrimaryKey,
+		Null:          f.Null,
+		Unique:        f.Unique,
+		MaxLength:     f.MaxLength,
+		MaxDigits:     f.MaxDigits,
+		DecimalPlaces: f.DecimalPlaces,
+		DBIndex:       f.DBIndex,
+		Blank:         f.Blank,
+		AutoNow:       f.AutoNow,
+		AutoNowAdd:    f.AutoNowAdd,
 	}
 	if f.HasDefault {
 		fs.Default = f.Default
@@ -147,6 +159,28 @@ func (m *ModelState) IndexByName(name string) (*Index, bool) {
 		}
 	}
 	return nil, false
+}
+
+// indexCol pairs a database column with whether an index orders it descending.
+type indexCol struct {
+	column string
+	desc   bool
+}
+
+// indexColumns resolves index field names (which may carry a leading "-" for
+// descending order) to their database columns.
+func (m *ModelState) indexColumns(fields []string) ([]indexCol, error) {
+	out := make([]indexCol, len(fields))
+	for i, raw := range fields {
+		desc := strings.HasPrefix(raw, "-")
+		name := strings.TrimPrefix(raw, "-")
+		f, ok := m.FieldByName(name)
+		if !ok {
+			return nil, fmt.Errorf("migrations: %s has no field named %q", m.Label(), name)
+		}
+		out[i] = indexCol{column: f.Column, desc: desc}
+	}
+	return out, nil
 }
 
 // columns resolves Go field names to their database columns.
@@ -302,9 +336,8 @@ type fieldRef struct {
 	field *FieldState
 }
 
-// StateFromRegistry snapshots every model of r. Models keep their registration
-// order. Model-level indexes and unique-together sets are not read, because
-// the registry does not expose them.
+// StateFromRegistry snapshots every model of r, including its Meta.Indexes and
+// Meta.UniqueTogether options. Models keep their registration order.
 func StateFromRegistry(r *orm.Registry) *ProjectState {
 	ps := NewProjectState()
 	for _, m := range r.Models() {
@@ -313,7 +346,22 @@ func StateFromRegistry(r *orm.Registry) *ProjectState {
 		for i, f := range raw {
 			fields[i] = fieldStateFromField(f)
 		}
-		ps.AddModel(&ModelState{App: m.App(), Name: m.Name(), Table: m.Table(), Fields: fields})
+		rawIndexes := m.Indexes()
+		var indexes []Index
+		if len(rawIndexes) > 0 {
+			indexes = make([]Index, len(rawIndexes))
+			for i, idx := range rawIndexes {
+				indexes[i] = Index{Name: idx.Name, Fields: idx.Fields}
+			}
+		}
+		ps.AddModel(&ModelState{
+			App:            m.App(),
+			Name:           m.Name(),
+			Table:          m.Table(),
+			Fields:         fields,
+			Indexes:        indexes,
+			UniqueTogether: m.UniqueTogether(),
+		})
 	}
 	return ps
 }

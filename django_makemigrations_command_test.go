@@ -155,7 +155,9 @@ func TestMakemigrationsInteractiveNotNullAddition(t *testing.T) {
 	assertIn(t, output, inputMsg)
 	assertIn(t, output, "Please enter the default value as a Go literal.")
 	assertIn(t, output, "Type 'exit' to exit this prompt")
-	assertIn(t, c.read("migrations", "0003_remove_author_age_remove_author_name_and_more.go"), "Default: true,")
+	files := c.files()
+	djangotest.AssertEqual(t, len(files), 1)
+	assertIn(t, c.read("migrations", files[0]), "Default: true,")
 }
 
 // Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_non_interactive_not_null_alteration
@@ -208,7 +210,9 @@ func TestMakemigrationsInteractiveNotNullAlteration(t *testing.T) {
 	assertIn(t, output, inputMsg)
 	assertIn(t, output, "Please enter the default value as a Go literal.")
 	assertIn(t, output, "Type 'exit' to exit this prompt")
-	assertIn(t, c.read("migrations", "0003_remove_author_age_remove_author_name_and_more.go"), `Default: "none",`)
+	files := c.files()
+	djangotest.AssertEqual(t, len(files), 1)
+	assertIn(t, c.read("migrations", files[0]), `Default: "none",`)
 }
 
 // declinedRenameWarning is the Go addition to Django's output: under

@@ -7,13 +7,14 @@ import (
 	"reflect"
 )
 
-// CreateTable creates the table for m using the dialect's DDL.
+// CreateTable creates the table for m using the dialect's DDL, along with its
+// field indexes, Meta.Indexes, and Meta.UniqueTogether constraints.
 func (db *DB) CreateTable(ctx context.Context, m *Model) error {
 	ddl := db.dialect.CreateTableSQL(m)
 	if _, err := db.conn(ctx).ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("orm: create table %s: %w", m.Table(), err)
 	}
-	return nil
+	return db.createTableExtras(ctx, m)
 }
 
 // Annotated is a model row together with the values of the queryset's
@@ -125,7 +126,7 @@ func (qs *QuerySet[T]) Get(ctx context.Context, args ...any) (T, error) {
 // is empty, where Django's first() returns None.
 func (qs *QuerySet[T]) First(ctx context.Context) (T, error) {
 	q := qs.q
-	if len(q.orders) == 0 {
+	if len(q.effectiveOrders()) == 0 {
 		q = q.orderBy([]string{"pk"})
 	}
 	return first[T](ctx, q)
@@ -221,21 +222,17 @@ func (qs *QuerySet[T]) Update(ctx context.Context, assignments ...any) (int64, e
 	return affected, nil
 }
 
-// Delete removes every row matching the queryset, in one DELETE statement,
-// and returns the number of rows deleted. Delete on a queryset with a Limit
-// or Offset is an error.
+// Delete removes every row matching the queryset and returns the total number
+// of rows deleted (including cascaded dependents). Delete on a queryset with a
+// Limit or Offset is an error.
 //
-// When a PreDelete or PostDelete handler is registered for T, Delete first
-// fetches the matching rows, so that it can fire PreDelete for each before
-// the DELETE and PostDelete for each after it.
+// When incoming foreign keys or PreDelete/PostDelete handlers exist, Delete
+// uses a collector that enforces on_delete=protect (ErrProtected),
+// on_delete=restrict (ErrRestricted), on_delete=set_null, and
+// on_delete=cascade in dependency order, firing PreDelete and PostDelete
+// handlers on the affected models. Otherwise it runs a single DELETE statement.
 func (qs *QuerySet[T]) Delete(ctx context.Context) (int64, error) {
-	if qs.q.err != nil {
-		return 0, qs.q.err
-	}
-	if hasDeleteHandlers[T]() {
-		return qs.deleteWithSignals(ctx)
-	}
-	return qs.deleteRows(ctx)
+	return qs.deleteWithCollector(ctx)
 }
 
 // deleteRows runs the DELETE and returns the number of rows affected.
@@ -254,33 +251,6 @@ func (qs *QuerySet[T]) deleteRows(ctx context.Context) (int64, error) {
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("orm: delete %s: rows affected: %w", qs.q.model.Name(), err)
-	}
-	return affected, nil
-}
-
-// deleteWithSignals fetches the matching rows, fires PreDelete for each, runs
-// the DELETE, then fires PostDelete for each.
-func (qs *QuerySet[T]) deleteWithSignals(ctx context.Context) (int64, error) {
-	if qs.q.sliced() {
-		return 0, errDeleteSliced
-	}
-	rows, err := qs.All(ctx)
-	if err != nil {
-		return 0, err
-	}
-	for i := range rows {
-		if err := firePreDelete(ctx, qs.q.db, &rows[i]); err != nil {
-			return 0, err
-		}
-	}
-	affected, err := qs.deleteRows(ctx)
-	if err != nil {
-		return 0, err
-	}
-	for i := range rows {
-		if err := firePostDelete(ctx, qs.q.db, &rows[i]); err != nil {
-			return 0, err
-		}
 	}
 	return affected, nil
 }

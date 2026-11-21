@@ -133,13 +133,6 @@ func satisfies(op Operation, dep opDep) bool {
 // It cannot tell a renamed field or model from a removed and an added one,
 // so it asks its Questioner when a pair looks like a rename.
 type Autodetector struct {
-	// PreserveModelOptions keeps the indexes and unique-together sets that
-	// the migrations declare for a model that stays, instead of comparing them
-	// with the target state. Set it when the target state comes from a source
-	// that cannot express them; without it, a hand-written AddIndex would be
-	// taken back by the next generated migration.
-	PreserveModelOptions bool
-
 	from, to   *ProjectState
 	questioner Questioner
 

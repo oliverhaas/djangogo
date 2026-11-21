@@ -138,7 +138,7 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 	if pkField.Kind == KindInt {
 		pkField.Kind = KindAuto
 	}
-	if pkField.HasDefault {
+	if pkField.Kind == KindAuto && pkField.HasDefault {
 		return nil, fmt.Errorf("orm: model %s: primary key %s cannot have a default", name, pkField.Name)
 	}
 
@@ -185,6 +185,9 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 		byAttr:   byAttr,
 		byColumn: byColumn,
 		goType:   st,
+	}
+	if err := applyModelMeta(m, model); err != nil {
+		return nil, err
 	}
 	r.models = append(r.models, m)
 	r.byType[st] = m
