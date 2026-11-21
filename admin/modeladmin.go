@@ -414,14 +414,16 @@ type ModelAdmin struct {
 	// as in ListDisplay. A model method that returns an error shows the
 	// empty value.
 	ReadonlyFields []string
-	// ExcludeFields names fields omitted from the add and change forms.
+	// ExcludeFields names fields omitted from the add and change forms. A
+	// list that is not empty replaces the forms.WithExclude of FormOptions,
+	// as Django's ModelAdmin.exclude replaces the Meta.exclude of the form.
 	ExcludeFields []string
 	// FormOptions customize the model form of the add and change pages, the
 	// counterpart of a ModelAdmin.form with Meta options and declared
-	// fields: forms.WithWidget, WithLabel, WithHelpText, WithFormField and
-	// the like. They apply after the admin's own widgets, so they win. The
-	// fields of the form come from Fields, Fieldsets and ExcludeFields, not
-	// from a forms.WithFields here.
+	// fields: forms.WithWidget, WithLabel, WithHelpText, WithFormField,
+	// WithExclude and the like. They apply after the admin's own widgets, so
+	// they win. The fields of the form come from Fields, Fieldsets and
+	// ExcludeFields, not from a forms.WithFields here.
 	FormOptions []forms.ModelFormOption
 	// GetFormOptions returns the options of the model form for r and obj, nil
 	// on the add page, in place of FormOptions (Django's get_form, which can
@@ -581,7 +583,9 @@ type ModelAdmin struct {
 	// get_prepopulated_fields).
 	GetPrepopulatedFields func(r *http.Request, obj any) map[string][]string
 	// GetExclude returns the fields that the form leaves out for r and obj,
-	// nil on the add page (Django's get_exclude). It replaces ExcludeFields.
+	// nil on the add page (Django's get_exclude). It replaces ExcludeFields,
+	// and a result that is not nil replaces the forms.WithExclude of the form
+	// options.
 	GetExclude func(r *http.Request, obj any) []string
 	// GetQuerysetFilter returns an extra orm.Cond applied to the base
 	// changelist queryset for r (the Go analog of overriding ModelAdmin.get_queryset).

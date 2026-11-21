@@ -177,10 +177,16 @@ func TestModelAdminFormsetOverridingGetExcludeWithFormFields(t *testing.T) {
 	})
 }
 
-// No Go counterpart: tests/modeladmin/tests.py::ModelAdminTests.test_formset_overriding_get_exclude_with_form_exclude
-// lets get_exclude override the Meta.exclude of a custom form. The exclusions
-// of FormOptions add to those of the admin; there is no form class whose
-// Meta.exclude the admin could override.
+// Ported from Django: tests/modeladmin/tests.py::ModelAdminTests.test_formset_overriding_get_exclude_with_form_exclude
+func TestModelAdminFormsetOverridingGetExcludeWithFormExclude(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		fields := concertFormFields(t, db, admin.InlineModelAdmin{
+			FormOptions: []forms.ModelFormOption{forms.WithExclude("day")},
+			GetExclude:  func(*http.Request, any) []string { return []string{"opening_band"} },
+		}, false)
+		djangotest.AssertEqual(t, fields, []string{"main_band", "day", "transport", "id", "DELETE"})
+	})
+}
 
 // No Go counterpart: tests/modeladmin/tests.py::ModelAdminTests.test_form_exclude_kwarg_override,
 // test_formset_exclude_kwarg_override, test_raw_id_fields_widget_override and
@@ -223,13 +229,11 @@ func TestInlineHasAddPermissionUsesObj(t *testing.T) {
 }
 
 // Ported from Django: tests/modeladmin/tests.py::ModelAdminTests.test_custom_form_meta_exclude_with_readonly
+// Ported from Django: tests/modeladmin/tests.py::ModelAdminTests.test_custom_form_meta_exclude
 // Ported from Django: tests/modeladmin/tests.py::ModelAdminTests.test_custom_formfield_override_readonly
 // Ported from Django: tests/modeladmin/tests.py::ModelAdminTests.test_custom_form_validation
 func TestModelAdminCustomForm(t *testing.T) {
 	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
-		// Django's test_custom_form_meta_exclude has no Go counterpart: the
-		// exclusions of FormOptions add to ExcludeFields, there is no form
-		// class whose Meta.exclude ExcludeFields could override.
 		t.Run("test_custom_form_meta_exclude_with_readonly", func(t *testing.T) {
 			resp := bandAdminPage(t, db, admin.ModelAdmin{
 				ReadonlyFields: []string{"name"},
@@ -243,6 +247,30 @@ func TestModelAdminCustomForm(t *testing.T) {
 				FormOptions:    []forms.ModelFormOption{forms.WithExclude("day")},
 			}, false)
 			djangotest.AssertEqual(t, fields, []string{"main_band", "opening_band", "id", "DELETE"})
+		})
+
+		t.Run("test_custom_form_meta_exclude", func(t *testing.T) {
+			// The exclusions of FormOptions, the Meta.exclude of a custom
+			// form, give way to ExcludeFields of the ModelAdmin or the
+			// InlineModelAdmin (#14496).
+
+			// With ModelAdmin
+			resp := bandAdminPage(t, db, admin.ModelAdmin{
+				ExcludeFields: []string{"name"},
+				FormOptions:   []forms.ModelFormOption{forms.WithExclude("bio")},
+			}, false)
+			form, ok := forms.FormOf(ctxVal(t, resp, "form"))
+			if !ok {
+				t.Fatal("the context form is not a form")
+			}
+			djangotest.AssertEqual(t, form.FieldNames(), []string{"bio", "sign_date"})
+
+			// With InlineModelAdmin
+			fields := concertFormFields(t, db, admin.InlineModelAdmin{
+				ExcludeFields: []string{"transport"},
+				FormOptions:   []forms.ModelFormOption{forms.WithExclude("day")},
+			}, false)
+			djangotest.AssertEqual(t, fields, []string{"main_band", "opening_band", "day", "id", "DELETE"})
 		})
 
 		t.Run("test_custom_formfield_override_readonly", func(t *testing.T) {

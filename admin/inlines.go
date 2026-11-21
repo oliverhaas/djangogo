@@ -65,7 +65,8 @@ type InlineModelAdmin struct {
 	// ReadonlyFields names what each form shows as values, as
 	// ModelAdmin.ReadonlyFields does.
 	ReadonlyFields []string
-	// ExcludeFields names fields left out of the forms.
+	// ExcludeFields names fields left out of the forms. It replaces the
+	// forms.WithExclude of FormOptions, as ModelAdmin.ExcludeFields does.
 	ExcludeFields []string
 	// FormOptions customize the model form of the rows, as
 	// ModelAdmin.FormOptions does.
@@ -541,13 +542,13 @@ func (s *AdminSite) buildInlineFormSet(r *http.Request, ifs *inlineFormSet, pare
 	ifs.sets = s.fieldsets(r, ie, obj)
 	ifs.readonly = ie.readonlyFields(r, obj)
 	fields := formNames(ie.model, flattenFieldsets(ifs.sets))
-	ifs.exclude = slices.Concat(s.excluded(r, ie, obj), ifs.readonly)
+	excluded, own := s.excluded(r, ie, obj)
+	ifs.exclude = slices.Concat(excluded, ifs.readonly)
 	built := map[string]bool{}
 	opts := slices.Concat([]forms.ModelFormOption{
 		forms.WithFields(fields...),
-		forms.WithExclude(ifs.exclude...),
 		forms.WithFormFieldCallback(ie.formfieldCallback(r, built)),
-	}, s.relationWidgets(r, ie), in.cfg.FormOptions)
+	}, s.relationWidgets(r, ie), in.cfg.FormOptions, []forms.ModelFormOption{excludeOption(ie.model, ifs.exclude, own)})
 	ordering := make([]string, len(in.cfg.Ordering))
 	for i, o := range in.cfg.Ordering {
 		ordering[i] = normalizeFieldPath(ie.model, o)

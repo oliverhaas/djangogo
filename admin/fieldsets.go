@@ -102,8 +102,8 @@ func (s *AdminSite) layoutFields(r *http.Request, e *entry, obj any) []any {
 		return e.admin.Fields
 	}
 	readonly := e.readonlyFields(r, obj)
-	opts := append([]forms.ModelFormOption{forms.WithExclude(slices.Concat(s.excluded(r, e, obj), readonly)...)},
-		e.formOptions(r, obj)...)
+	excluded, own := s.excluded(r, e, obj)
+	opts := append(slices.Clone(e.formOptions(r, obj)), excludeOption(e.model, slices.Concat(excluded, readonly), own))
 	base := forms.FromModel(e.model, opts...)
 	out := make([]any, 0, len(base.FieldNames())+len(readonly))
 	for _, name := range base.FieldNames() {

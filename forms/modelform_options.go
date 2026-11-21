@@ -76,6 +76,19 @@ func WithExclude(names ...string) ModelFormOption {
 	}
 }
 
+// ReplaceExclude drops the exclusions of the options before it and excludes
+// the named fields instead, as the exclude argument of Django's
+// modelform_factory replaces the Meta.exclude of the form it extends. The
+// exclusions of later options add to it.
+func ReplaceExclude(names ...string) ModelFormOption {
+	return func(c *modelFormConfig) {
+		c.exclude = make(map[string]bool, len(names))
+		for _, n := range names {
+			c.exclude[n] = true
+		}
+	}
+}
+
 // WithLabel overrides the label of a field (Meta.labels).
 func WithLabel(field, label string) ModelFormOption {
 	return func(c *modelFormConfig) { c.labels[field] = label }

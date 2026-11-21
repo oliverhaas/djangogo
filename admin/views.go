@@ -138,7 +138,8 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj, instance any, can
 	sets := s.fieldsets(r, e, obj)
 	fields := formNames(e.model, flattenFieldsets(sets))
 	readonly := e.readonlyFields(r, obj)
-	exclude := slices.Concat(s.excluded(r, e, obj), readonly)
+	excluded, own := s.excluded(r, e, obj)
+	exclude := slices.Concat(excluded, readonly)
 	if !canChange {
 		exclude = append(exclude, fields...)
 		readonly = fields
@@ -147,9 +148,8 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj, instance any, can
 	adminOpts := e.formOptions(r, obj)
 	opts := slices.Concat([]forms.ModelFormOption{
 		forms.WithFields(fields...),
-		forms.WithExclude(exclude...),
 		forms.WithFormFieldCallback(e.formfieldCallback(r, built)),
-	}, s.relationWidgets(r, e), adminOpts)
+	}, s.relationWidgets(r, e), adminOpts, []forms.ModelFormOption{excludeOption(e.model, exclude, own)})
 	form := forms.FromInstance(s.db, e.model, instance, opts...)
 	syncAutocompleteRequired(form)
 	s.wrapRelatedWidgets(r, e, form, built)
@@ -168,21 +168,34 @@ func namesField(names []string, f *orm.Field) bool {
 }
 
 // excluded returns the field names the admin omits from a model's form for r
-// and obj: GetExclude, else the configured ExcludeFields, Django's
-// get_exclude, and the many-to-many fields with an explicit through model,
-// which Django's formfield_for_manytomany leaves out.
-func (s *AdminSite) excluded(r *http.Request, e *entry, obj any) []string {
+// and obj, GetExclude, else the configured ExcludeFields (Django's
+// get_exclude), and whether the admin defines them, a list that is not nil.
+func (s *AdminSite) excluded(r *http.Request, e *entry, obj any) ([]string, bool) {
 	names := e.admin.ExcludeFields
 	if e.admin.GetExclude != nil {
 		names = e.admin.GetExclude(r, obj)
 	}
-	out := formNames(e.model, names)
-	for _, mf := range e.model.ManyToMany() {
+	return formNames(e.model, names), names != nil
+}
+
+// excludeOption returns the option that drops exclude from the model form of
+// m, the exclude argument of modelform_factory in Django's get_form and
+// get_formset. When the admin defines its own exclusions (own) and exclude is
+// not empty, it replaces the exclusions of the form options, else it adds to
+// them. It also drops the many-to-many fields with an explicit through
+// model, which Django's formfield_for_manytomany leaves out. Pass it after
+// the form options.
+func excludeOption(m *orm.Model, exclude []string, own bool) forms.ModelFormOption {
+	out := slices.Clone(exclude)
+	for _, mf := range m.ManyToMany() {
 		if mf.Rel != nil && !mf.Rel.AutoCreated {
 			out = append(out, mf.Attr)
 		}
 	}
-	return out
+	if own && len(exclude) > 0 {
+		return forms.ReplaceExclude(out...)
+	}
+	return forms.WithExclude(out...)
 }
 
 // formFieldNames returns the set of the names of the fields of form.

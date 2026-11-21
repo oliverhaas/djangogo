@@ -636,6 +636,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   link goes back in the browser history.
 - djangotest: `NewDB` and `NewPostgresDB` create the tables in one
   transaction, which sets up a PostgreSQL test database faster.
+- Admin: when a `ModelAdmin` or an inline sets `ExcludeFields` or
+  `GetExclude`, a `forms.WithExclude` in its `FormOptions` no longer applies.
+  The admin's list replaces it, as `ModelAdmin.exclude` replaces the
+  `Meta.exclude` of a custom form in Django. Without `ExcludeFields` and
+  `GetExclude`, the exclusions of `FormOptions` apply as before. Add the
+  names to `ExcludeFields` to keep both. The new `forms.ReplaceExclude`
+  option replaces the exclusions of the options before it.
 
 ### Fixed
 

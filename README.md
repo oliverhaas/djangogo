@@ -204,9 +204,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `FormfieldOverrides` sets only the widget and the empty label of a model
   field class, not the other arguments of `formfield_overrides`, such as
   `form_class`. The scripts and
-  pages are in English only. There is no custom form class: `FormOptions`
-  adds fields and options to the model form, and its exclusions add to
-  `ExcludeFields` instead of being overridden by it. The date
+  pages are in English only. The date
   hierarchy reads a datetime in UTC. A search field with `@` uses
   `icontains`, not full-text search. A template option such as
   `ChangeFormTemplate` names one template, not a list. Blocks that Django names with hyphens, such as `object-tools-items`,
