@@ -1,71 +1,102 @@
 package admin
 
 import (
+	"cmp"
 	"fmt"
 	"html"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
-// formfieldCallback returns the form field callback of the forms of e for r:
-// formfieldForDBField with the RadioFields style of each field that is not
-// an autocomplete or raw-id field. It adds the attribute name of each field
-// it builds to built.
+// formfieldCallback returns the form field callback of the forms of e for r,
+// formfieldForDBField. It adds the attribute name of each field it builds to
+// built.
 func (e *entry) formfieldCallback(r *http.Request, built map[string]bool) func(mf *orm.Field, f forms.Field) forms.Field {
 	autocomplete := e.autocompleteFields(r)
 	return func(mf *orm.Field, f forms.Field) forms.Field {
 		built[mf.Attr] = true
-		style, ok := e.admin.RadioFields[mf.Attr]
-		if !ok {
-			style = e.admin.RadioFields[mf.Name]
-		}
-		if namesField(autocomplete, mf) || namesField(e.admin.RawIDFields, mf) {
-			style = 0
-		}
-		return formfieldForDBField(mf, f, style)
+		return e.formfieldForDBField(mf, f, autocomplete)
 	}
 }
 
-// formfieldForDBField is the form field callback of the add and change forms,
-// Django's ModelAdmin.formfield_for_dbfield: radio buttons in the style radio
-// for a foreign key or a field with choices of RadioFields, and the defaults
-// of FORMFIELD_FOR_DBFIELD_DEFAULTS, the admin's widget for each model field
-// that is not a relation and has no choices. ModelAdmin.FormOptions apply
-// after it, as the Meta options of a Django ModelAdmin.form win over the
-// defaults.
-func formfieldForDBField(mf *orm.Field, f forms.Field, radio RadioStyle) forms.Field {
-	if radio != 0 {
-		return radioField(mf, f, radio)
+// formfieldForDBField gives f, the form field of mf, the admin's widget,
+// Django's ModelAdmin.formfield_for_dbfield. A field with choices or a
+// foreign key of RadioFields gets radio buttons, unless the foreign key is an
+// autocomplete field or a raw-id field or FormfieldOverrides gives it a
+// widget. A foreign key takes the empty label of FormfieldOverrides. Any
+// other field takes the widget of formfieldOverride, and a date and time
+// field becomes a SplitDateTimeField. relationWidgets sets the other widgets
+// of the relations. ModelAdmin.FormOptions apply after it, as the Meta
+// options of a Django ModelAdmin.form win over the defaults.
+func (e *entry) formfieldForDBField(mf *orm.Field, f forms.Field, autocomplete []string) forms.Field {
+	style, ok := e.admin.RadioFields[mf.Attr]
+	if !ok {
+		style = e.admin.RadioFields[mf.Name]
 	}
-	if mf.Rel != nil || mf.HasChoices {
-		return f
-	}
-	if mf.Kind == orm.KindDateTime {
-		return splitDateTimeField(f)
-	}
-	if w := dbFieldWidget(mf); w != nil {
-		f.Base().Widget = w
+	class, o := e.formfieldOverride(mf)
+	switch {
+	case mf.HasChoices:
+		if style != 0 {
+			return radioField(mf, f, style, nil)
+		}
+	case mf.Rel != nil:
+		if style != 0 && o.Widget == nil && !namesField(autocomplete, mf) && !namesField(e.admin.RawIDFields, mf) {
+			return radioField(mf, f, style, o.EmptyLabel)
+		}
+		if field, ok := f.(*forms.ModelChoiceField); ok && o.EmptyLabel != nil {
+			field.EmptyLabel = o.EmptyLabel
+		}
+	case class == DateTimeField:
+		return splitDateTimeField(f, o.Widget)
+	case o.Widget != nil:
+		f.Base().Widget = o.Widget
 	}
 	return f
+}
+
+// formfieldOverride returns the class of mf whose FormfieldOverrides entry
+// or default widget applies to mf, with the entry merged over the default,
+// as Django's formfield_for_dbfield walks the mro of the model field class.
+// A relation has its own class alone and no default. class is 0 when no
+// class of mf has an entry or a default.
+func (e *entry) formfieldOverride(mf *orm.Field) (FieldClass, FormfieldOverride) {
+	classes := fieldClasses(mf)
+	if mf.Rel != nil {
+		return classes[0], e.admin.FormfieldOverrides[classes[0]]
+	}
+	for _, class := range classes {
+		o, ok := e.admin.FormfieldOverrides[class]
+		def := defaultWidget(class)
+		if !ok && def == nil {
+			continue
+		}
+		if o.Widget == nil {
+			o.Widget = def
+		}
+		return class, o
+	}
+	return 0, FormfieldOverride{}
 }
 
 // radioField gives f, the form field of mf, the radio buttons of style,
 // Django's formfield_for_choice_field and formfield_for_foreignkey for a
 // field of RadioFields. Django's AdminRadioSelect renders as a RadioSelect.
-// The empty choice is "None", and only a field that can be blank has it. A
-// field that is neither a foreign key nor a field with choices keeps f.
-func radioField(mf *orm.Field, f forms.Field, style RadioStyle) forms.Field {
+// Only a field that can be blank has the empty choice. Its label is "None",
+// or emptyLabel for a foreign key with one. A field that is neither a
+// foreign key nor a field with choices keeps f.
+func radioField(mf *orm.Field, f forms.Field, style RadioStyle, emptyLabel *string) forms.Field {
 	switch field := f.(type) {
 	case *forms.TypedChoiceField:
 		field.Choices = radioChoices(mf)
 	case *forms.ModelChoiceField:
 		field.EmptyLabel = nil
 		if mf.Blank {
-			field.EmptyLabel = new("None")
+			field.EmptyLabel = cmp.Or(emptyLabel, new("None"))
 		}
 	default:
 		return f
@@ -99,38 +130,84 @@ func radioClass(style RadioStyle) string {
 }
 
 // splitDateTimeField returns the admin's field for a date and time model
-// field, which Django's defaults give the form class SplitDateTimeField and
-// the widget AdminSplitDateTime: a SplitDateTimeField with the options of
-// the model form's field f.
-func splitDateTimeField(f forms.Field) forms.Field {
+// field, which Django's defaults give the form class SplitDateTimeField: a
+// SplitDateTimeField with the options of the model form's field f and the
+// widget w.
+func splitDateTimeField(f forms.Field, w forms.Widget) forms.Field {
 	b := f.Base()
 	split := forms.NewSplitDateTimeField(forms.Required(b.Required), forms.Initial(b.Initial),
-		forms.HelpText(b.HelpText), forms.Validators(b.Validators...), forms.UseWidget(NewAdminSplitDateTime(nil)))
+		forms.HelpText(b.HelpText), forms.Validators(b.Validators...), forms.UseWidget(w))
 	split.Label, split.LabelSuffix = b.Label, b.LabelSuffix
 	return split
 }
 
-// dbFieldWidget returns the admin's widget for the kind of mf, nil for a kind
-// that keeps the widget of its form field.
-func dbFieldWidget(mf *orm.Field) forms.Widget {
-	switch mf.Kind {
-	case orm.KindDate:
+// kindClasses maps each kind of a model field that is not a relation to the
+// Django class of the kind and the classes it derives from, most specific
+// first, without Field.
+var kindClasses = map[orm.Kind][]FieldClass{
+	orm.KindBool:             {BooleanField},
+	orm.KindChar:             {CharField},
+	orm.KindSlug:             {SlugField, CharField},
+	orm.KindEmail:            {EmailField, CharField},
+	orm.KindURL:              {URLField, CharField},
+	orm.KindText:             {TextField},
+	orm.KindDate:             {DateField},
+	orm.KindDateTime:         {DateTimeField, DateField},
+	orm.KindTime:             {TimeField},
+	orm.KindDuration:         {DurationField},
+	orm.KindDecimal:          {DecimalField},
+	orm.KindFloat:            {FloatField},
+	orm.KindInt:              {IntegerField},
+	orm.KindSmallInt:         {SmallIntegerField, IntegerField},
+	orm.KindBigInt:           {BigIntegerField, IntegerField},
+	orm.KindPositiveInt:      {PositiveIntegerField, IntegerField},
+	orm.KindPositiveSmallInt: {PositiveSmallIntegerField, SmallIntegerField, IntegerField},
+	orm.KindPositiveBigInt:   {PositiveBigIntegerField, BigIntegerField, IntegerField},
+	orm.KindUUID:             {UUIDField},
+	orm.KindJSON:             {JSONField},
+	orm.KindBinary:           {BinaryField},
+	orm.KindGenericIPAddress: {GenericIPAddressField},
+}
+
+// fieldClasses returns the classes of mf, most specific first, as the mro of
+// its Django class: ForeignKey, OneToOneField or ManyToManyField for a
+// relation, else the classes of its kind and Field.
+func fieldClasses(mf *orm.Field) []FieldClass {
+	if mf.Rel != nil {
+		switch mf.Rel.Kind {
+		case orm.RelO2O:
+			return []FieldClass{OneToOneField}
+		case orm.RelM2M:
+			return []FieldClass{ManyToManyField}
+		}
+		return []FieldClass{ForeignKey}
+	}
+	return append(slices.Clone(kindClasses[mf.Kind]), Field)
+}
+
+// defaultWidget returns the admin's widget for the model fields of class,
+// Django's FORMFIELD_FOR_DBFIELD_DEFAULTS, or nil for a class without one.
+func defaultWidget(class FieldClass) forms.Widget {
+	switch class {
+	case DateTimeField:
+		return NewAdminSplitDateTime(nil)
+	case DateField:
 		return NewAdminDateWidget(nil)
-	case orm.KindTime:
+	case TimeField:
 		return NewAdminTimeWidget(nil)
-	case orm.KindText:
+	case TextField:
 		return NewAdminTextareaWidget(nil)
-	case orm.KindURL:
+	case URLField:
 		return NewAdminURLFieldWidget(nil)
-	case orm.KindInt, orm.KindSmallInt, orm.KindPositiveInt, orm.KindPositiveSmallInt:
+	case IntegerField:
 		return NewAdminIntegerFieldWidget(nil)
-	case orm.KindBigInt, orm.KindPositiveBigInt:
+	case BigIntegerField:
 		return NewAdminBigIntegerFieldWidget(nil)
-	case orm.KindChar, orm.KindSlug:
+	case CharField:
 		return NewAdminTextInputWidget(nil)
-	case orm.KindEmail:
+	case EmailField:
 		return NewAdminEmailInputWidget(nil)
-	case orm.KindUUID:
+	case UUIDField:
 		return NewAdminUUIDInputWidget(nil)
 	}
 	return nil

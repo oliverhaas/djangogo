@@ -34,11 +34,15 @@ func (e *entry) searchFields(r *http.Request) []string {
 
 // limitedFields returns the relation fields of e whose form field loads only
 // the related rows it shows or receives: the autocomplete fields for r and
-// the raw-id fields.
+// the raw-id fields, without the fields that FormfieldOverrides gives a
+// widget.
 func (e *entry) limitedFields(r *http.Request) []*orm.Field {
 	autocomplete := e.autocompleteFields(r)
 	var out []*orm.Field
 	for _, f := range slices.Concat(e.model.Relations(), e.model.ManyToMany()) {
+		if _, o := e.formfieldOverride(f); o.Widget != nil {
+			continue
+		}
 		if namesField(autocomplete, f) || namesField(e.admin.RawIDFields, f) {
 			out = append(out, f)
 		}
@@ -48,16 +52,19 @@ func (e *entry) limitedFields(r *http.Request) []*orm.Field {
 
 // relationWidgets returns the widget options of Django's
 // formfield_for_foreignkey and formfield_for_manytomany for the relation
-// fields of e: an autocomplete widget for an autocomplete field, else a
-// raw-id widget for a raw-id field, else a FilteredSelectMultiple for a
-// many-to-many field named in FilterHorizontal or FilterVertical. A
-// many-to-many field shown as a list gets the multiple selection hint after
-// its help text.
+// fields of e: the widget of FormfieldOverrides, else an autocomplete widget
+// for an autocomplete field, else a raw-id widget for a raw-id field, else a
+// FilteredSelectMultiple for a many-to-many field named in FilterHorizontal
+// or FilterVertical. A many-to-many field shown as a list gets the multiple
+// selection hint after its help text.
 func (s *AdminSite) relationWidgets(r *http.Request, e *entry) []forms.ModelFormOption {
 	autocomplete := e.autocompleteFields(r)
 	var opts []forms.ModelFormOption
 	for _, f := range e.model.Relations() {
+		_, o := e.formfieldOverride(f)
 		switch {
+		case o.Widget != nil:
+			opts = append(opts, forms.WithWidget(f.Attr, o.Widget))
 		case namesField(autocomplete, f):
 			opts = append(opts, forms.WithWidget(f.Attr, NewAutocompleteSelect(s, e.model, f, nil)))
 		case namesField(e.admin.RawIDFields, f):
@@ -68,19 +75,23 @@ func (s *AdminSite) relationWidgets(r *http.Request, e *entry) []forms.ModelForm
 		if mf.Rel == nil || !mf.Rel.AutoCreated {
 			continue
 		}
+		_, o := e.formfieldOverride(mf)
+		w := o.Widget
 		vertical := namesField(e.admin.FilterVertical, mf)
 		switch {
+		case w != nil:
 		case namesField(autocomplete, mf):
-			opts = append(opts, forms.WithWidget(mf.Attr, NewAutocompleteSelectMultiple(s, e.model, mf, nil)))
-			continue
+			w = NewAutocompleteSelectMultiple(s, e.model, mf, nil)
 		case namesField(e.admin.RawIDFields, mf):
-			opts = append(opts, forms.WithWidget(mf.Attr, NewManyToManyRawIDWidget(s, mf)))
-			continue
+			w = NewManyToManyRawIDWidget(s, mf)
 		case vertical || namesField(e.admin.FilterHorizontal, mf):
-			opts = append(opts, forms.WithWidget(mf.Attr, FilteredSelectMultiple{
-				VerboseName: fieldVerboseName(mf),
-				IsStacked:   vertical,
-			}))
+			w = FilteredSelectMultiple{VerboseName: fieldVerboseName(mf), IsStacked: vertical}
+		}
+		if w != nil {
+			opts = append(opts, forms.WithWidget(mf.Attr, w))
+		}
+		if !selectsMultiple(w) {
+			continue
 		}
 		help := multipleSelectHint
 		if mf.HelpText != "" {
@@ -89,6 +100,18 @@ func (s *AdminSite) relationWidgets(r *http.Request, e *entry) []forms.ModelForm
 		opts = append(opts, forms.WithHelpText(mf.Attr, help))
 	}
 	return opts
+}
+
+// selectsMultiple reports whether w, the widget of a many-to-many field, is
+// a list that selects several rows with the Control key, which Django's
+// formfield_for_manytomany explains in the help text: the default list (nil),
+// a SelectMultiple or a FilteredSelectMultiple.
+func selectsMultiple(w forms.Widget) bool {
+	switch w.(type) {
+	case nil, forms.SelectMultiple, FilteredSelectMultiple:
+		return true
+	}
+	return false
 }
 
 // syncAutocompleteRequired sets IsRequired of every autocomplete widget of

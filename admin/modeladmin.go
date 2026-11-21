@@ -234,6 +234,53 @@ const (
 	Vertical RadioStyle = 2
 )
 
+// FieldClass names a Django model field class, a key of
+// ModelAdmin.FormfieldOverrides.
+type FieldClass int
+
+// The model field classes of FormfieldOverrides, Django's models.CharField and
+// the like. A model field has the class of its kind and the classes that the
+// Django class derives from, such as SlugField, CharField and Field.
+const (
+	Field FieldClass = iota + 1
+	BooleanField
+	CharField
+	SlugField
+	EmailField
+	URLField
+	TextField
+	DateField
+	DateTimeField
+	TimeField
+	DurationField
+	DecimalField
+	FloatField
+	IntegerField
+	SmallIntegerField
+	BigIntegerField
+	PositiveIntegerField
+	PositiveSmallIntegerField
+	PositiveBigIntegerField
+	UUIDField
+	JSONField
+	BinaryField
+	GenericIPAddressField
+	ForeignKey
+	OneToOneField
+	ManyToManyField
+)
+
+// FormfieldOverride sets the form field of the model fields of a class, the
+// keyword arguments of an entry of Django's formfield_overrides.
+type FormfieldOverride struct {
+	// Widget is the widget of the form field. For a foreign key or a
+	// many-to-many field it wins over AutocompleteFields, RawIDFields,
+	// RadioFields, FilterHorizontal and FilterVertical.
+	Widget forms.Widget
+	// EmptyLabel is the label of the empty option of a foreign key.
+	EmptyLabel *string
+}
+
 // DeletedObjects holds what the delete page and the delete_selected
 // confirmation page show (returned by ModelAdmin.GetDeletedObjects), Django's
 // get_deleted_objects result.
@@ -346,6 +393,16 @@ type ModelAdmin struct {
 	// on the add page, in place of FormOptions (Django's get_form, which can
 	// pick a form class per page, as the admin of users does).
 	GetFormOptions func(r *http.Request, obj any) []forms.ModelFormOption
+	// FormfieldOverrides sets the form fields of the add and change forms by
+	// model field class (Django's formfield_overrides), such as
+	// {admin.TextField: {Widget: forms.Textarea{Attrs: forms.Attrs{"rows": "4"}}}}.
+	// An entry merges over the admin's default for its class. A field takes
+	// the entry or the default of the first of its classes that has one, so
+	// an entry for CharField applies to a SlugField but not to an EmailField,
+	// which has a default of its own. A foreign key, a one-to-one field and a
+	// many-to-many field take only the entry of their own class, and a field
+	// with choices takes none. FormOptions win over the entries.
+	FormfieldOverrides map[FieldClass]FormfieldOverride
 	// Fields lays out the add and change forms (Django's fields). Each entry
 	// is a field name or a []string of names shown on one line. Empty shows
 	// the form fields in model order, then the ReadonlyFields.
@@ -370,8 +427,8 @@ type ModelAdmin struct {
 	// RadioFields names foreign keys and fields with choices shown as radio
 	// buttons in place of a select (Django's radio_fields), laid out
 	// Horizontal or Vertical. Only a field that can be blank gets the empty
-	// choice, labeled "None". AutocompleteFields and RawIDFields win over
-	// it.
+	// choice, labeled "None". AutocompleteFields, RawIDFields and the
+	// widget of FormfieldOverrides win over it.
 	RadioFields map[string]RadioStyle
 	// RawIDFields names foreign keys and many-to-many fields edited as a text
 	// input for the primary keys with a link to the related changelist

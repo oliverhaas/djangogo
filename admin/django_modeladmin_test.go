@@ -272,11 +272,11 @@ func TestModelAdminCustomForm(t *testing.T) {
 }
 
 // concertAddPage returns the add page of Concert under ma, with the band
-// "The Doors" of ModelAdminTests.setUpTestData.
+// "The Doors" of ModelAdminTests.setUpTestData. Band has no admin, as on the
+// AdminSite of ModelAdminTests.
 func concertAddPage(t *testing.T, db *orm.DB, ma admin.ModelAdmin) (*djangotest.Response, *Band) {
 	t.Helper()
 	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
-		admin.Register[Band](site, admin.ModelAdmin{})
 		admin.Register[Concert](site, ma)
 	})
 	env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
@@ -286,10 +286,8 @@ func concertAddPage(t *testing.T, db *orm.DB, ma admin.ModelAdmin) (*djangotest.
 	return resp, band
 }
 
-// formWidget returns the widget of the field name of the form of resp,
-// unwrapped from the RelatedFieldWidgetWrapper of a relation, as Django's
-// tests read widget.widget.
-func formWidget(t *testing.T, resp *djangotest.Response, name string) forms.Widget {
+// formField returns the field name of the context form of resp.
+func formField(t *testing.T, resp *djangotest.Response, name string) forms.Field {
 	t.Helper()
 	form, ok := forms.FormOf(ctxVal(t, resp, "form"))
 	if !ok {
@@ -297,9 +295,17 @@ func formWidget(t *testing.T, resp *djangotest.Response, name string) forms.Widg
 	}
 	f, ok := form.FieldDef(name)
 	if !ok {
-		t.Fatalf("form has no field %q", name)
+		t.Fatalf("the form has no field %q", name)
 	}
-	w := f.Base().Widget
+	return f
+}
+
+// formWidget returns the widget of the field name of the form of resp,
+// unwrapped from the RelatedFieldWidgetWrapper of a relation, as Django's
+// tests read widget.widget.
+func formWidget(t *testing.T, resp *djangotest.Response, name string) forms.Widget {
+	t.Helper()
+	w := formField(t, resp, name).Base().Widget
 	if u, ok := w.(interface{ Unwrap() forms.Widget }); ok {
 		w = u.Unwrap()
 	}
@@ -379,5 +385,55 @@ func TestModelAdminForeignKeyAsRadioField(t *testing.T) {
 			djangotest.AssertEqual(t, w.Attrs, forms.Attrs{"class": tc.class})
 			djangotest.AssertEqual(t, pageChoices(t, resp, tc.name), tc.want)
 		}
+	})
+}
+
+// concertForm returns the context form of the Concert add page under ma as
+// Django's form.render() writes it, with the band of concertAddPage.
+func concertForm(t *testing.T, db *orm.DB, ma admin.ModelAdmin) (string, *Band) {
+	t.Helper()
+	resp, band := concertAddPage(t, db, ma)
+	form, ok := forms.FormOf(ctxVal(t, resp, "form"))
+	if !ok {
+		t.Fatal("the context form is not a form")
+	}
+	return form.Render(), band
+}
+
+// The widget holds the attribute that Django's CustomSelectMultiple adds in
+// build_attrs. Django 6.1 labels the empty option "- Select an option -";
+// the port follows Django 6.0.
+//
+// Ported from Django: tests/modeladmin/tests.py::ModelAdminTests.test_foreign_key_as_custom_widget
+func TestModelAdminForeignKeyAsCustomWidget(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		page, band := concertForm(t, db, admin.ModelAdmin{FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+			admin.ForeignKey: {Widget: forms.SelectMultiple{Attrs: forms.Attrs{"data-custom-widget": "true"}}},
+		}})
+		djangotest.AssertInHTML(t, fmt.Sprintf(`<div><label for="id_main_band">Main band:</label><div `+
+			`class="related-widget-wrapper" data-model-ref="band"><select `+
+			`name="main_band" data-context="available-source" required `+
+			`id="id_main_band" data-custom-widget="true" multiple>`+
+			`<option value="">---------</option>`+
+			`<option value="%d">The Doors</option>`+
+			`</select></div></div>`, band.ID), page)
+	})
+}
+
+// The widget holds the attribute that Django's CustomSelectMultipleFieldset
+// adds in build_attrs; a RadioSelect already uses a fieldset.
+//
+// Ported from Django: tests/modeladmin/tests.py::ModelAdminTests.test_foreign_key_as_custom_widget_with_fieldset
+func TestModelAdminForeignKeyAsCustomWidgetWithFieldset(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		page, band := concertForm(t, db, admin.ModelAdmin{FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+			admin.ForeignKey: {Widget: forms.RadioSelect{Attrs: forms.Attrs{"use_fieldset": "true"}}},
+		}})
+		djangotest.AssertInHTML(t, fmt.Sprintf(`<fieldset><legend>Main band:</legend><div class="related-widget-wrapper" `+
+			`data-model-ref="band"><div id="id_main_band"><div><label `+
+			`for="id_main_band_0"><input type="radio" name="main_band" `+
+			`value="%d" data-context="available-source" `+
+			`required id="id_main_band_0" use_fieldset="true">The Doors</label>`+
+			`</div></div></div></fieldset>`, band.ID), page)
 	})
 }

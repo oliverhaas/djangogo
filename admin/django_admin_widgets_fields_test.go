@@ -16,18 +16,13 @@ import (
 	"github.com/oliverhaas/djangogo/orm"
 )
 
-// The Django tests ask formfield_for_dbfield for the widget of a model field;
-// the Go admin builds its forms through a form field callback that is not
-// exported, so these tests read the widget off the rendered add page.
+// The Django tests ask formfield_for_dbfield for the form field of a model
+// field; the Go admin builds its forms through a form field callback that is
+// not exported, so these tests read the field off the add page and its
+// context form.
 //
-// FIXME-PORT: test_FileField and test_inheritance need file fields.
-// test_radio_fields_foreignkey_formfield_overrides_empty_label,
-// test_formfield_overrides_widget_instances,
-// test_formfield_overrides_m2m_filter_widget,
-// test_formfield_overrides_for_datetime_field and
-// test_formfield_overrides_for_custom_field set formfield_overrides by model
-// field class, which the Go admin does not have; FormOptions set widgets by
-// field name.
+// FIXME-PORT: test_FileField, test_inheritance and
+// test_formfield_overrides_for_custom_field need file fields.
 //
 // Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_DateField
 // Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_DateTimeField
@@ -40,30 +35,37 @@ import (
 // Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_ForeignKey
 // Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_field_with_choices
 // Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_formfield_overrides
+// Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_formfield_overrides_widget_instances
+// Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_formfield_overrides_m2m_filter_widget
+// Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_formfield_overrides_for_datetime_field
 // Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_radio_fields_ForeignKey
+// Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_radio_fields_foreignkey_formfield_overrides_empty_label
 // Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldTests.test_choices_with_radio_fields
 func TestAdminFormfieldForDBField(t *testing.T) {
 	djangotest.EachDB(t, widgetRelatedModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		addPage := func(t *testing.T, event, member admin.ModelAdmin, route string) *djangotest.Response {
+		// addPage returns the add page of model, with each model under its
+		// admin in admins.
+		addPage := func(t *testing.T, model string, admins map[string]admin.ModelAdmin) *djangotest.Response {
 			t.Helper()
 			env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
-				admin.Register[WidgetBand](site, admin.ModelAdmin{})
-				admin.Register[WidgetMember](site, member)
-				admin.Register[WidgetEvent](site, event)
+				admin.Register[WidgetBand](site, admins["widgetband"])
+				admin.Register[WidgetMember](site, admins["widgetmember"])
+				admin.Register[WidgetEvent](site, admins["widgetevent"])
+				admin.Register[WidgetInventory](site, admins["widgetinventory"])
 			})
 			env.client.ForceLogin(super)
-			resp := env.client.Get(mustReverse(t, env.router, route))
+			resp := env.client.Get(mustReverse(t, env.router, "admin:admin_widgets_"+model+"_add"))
 			djangotest.AssertStatus(t, resp, 200)
 			return resp
 		}
 		event := func(t *testing.T) *djangotest.Response {
 			t.Helper()
-			return addPage(t, admin.ModelAdmin{}, admin.ModelAdmin{}, "admin:admin_widgets_widgetevent_add")
+			return addPage(t, "widgetevent", nil)
 		}
 		member := func(t *testing.T) *djangotest.Response {
 			t.Helper()
-			return addPage(t, admin.ModelAdmin{}, admin.ModelAdmin{}, "admin:admin_widgets_widgetmember_add")
+			return addPage(t, "widgetmember", nil)
 		}
 
 		t.Run("test_DateField", func(t *testing.T) {
@@ -129,10 +131,52 @@ func TestAdminFormfieldForDBField(t *testing.T) {
 				djangotest.HTML())
 		})
 		t.Run("test_formfield_overrides", func(t *testing.T) {
-			resp := addPage(t, admin.ModelAdmin{FormOptions: []forms.ModelFormOption{
-				forms.WithWidget("start_date", forms.TextInput{}),
-			}}, admin.ModelAdmin{}, "admin:admin_widgets_widgetevent_add")
+			resp := addPage(t, "widgetevent", map[string]admin.ModelAdmin{"widgetevent": {
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{admin.DateField: {Widget: forms.TextInput{}}},
+			}})
 			djangotest.AssertContains(t, resp, `<input type="text" name="start_date" id="id_start_date">`, djangotest.HTML())
+		})
+		// Each field renders its own maximum length next to the shared size.
+		t.Run("test_formfield_overrides_widget_instances", func(t *testing.T) {
+			resp := addPage(t, "widgetband", map[string]admin.ModelAdmin{"widgetband": {
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.CharField: {Widget: forms.TextInput{Attrs: forms.Attrs{"size": "10"}}},
+				},
+			}})
+			djangotest.AssertContains(t, resp,
+				`<input type="text" name="name" size="10" maxlength="100" required id="id_name">`, djangotest.HTML())
+			djangotest.AssertContains(t, resp,
+				`<input type="text" name="style" size="10" maxlength="20" required id="id_style">`, djangotest.HTML())
+		})
+		t.Run("test_formfield_overrides_m2m_filter_widget", func(t *testing.T) {
+			resp := addPage(t, "widgetband", map[string]admin.ModelAdmin{"widgetband": {
+				FilterVertical: []string{"members"},
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.ManyToManyField: {Widget: forms.CheckboxSelectMultiple{}},
+				},
+			}})
+			w := formField(t, resp, "members").Base().Widget
+			wrapper, ok := w.(admin.RelatedFieldWidgetWrapper)
+			if !ok {
+				t.Fatalf("members widget = %T, want admin.RelatedFieldWidgetWrapper", w)
+			}
+			if _, ok := wrapper.Widget.(forms.CheckboxSelectMultiple); !ok {
+				t.Errorf("wrapped widget = %T, want forms.CheckboxSelectMultiple", wrapper.Widget)
+			}
+		})
+		t.Run("test_formfield_overrides_for_datetime_field", func(t *testing.T) {
+			resp := addPage(t, "widgetmember", map[string]admin.ModelAdmin{"widgetmember": {
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.DateTimeField: {Widget: admin.NewAdminSplitDateTime(nil)},
+				},
+			}})
+			f := formField(t, resp, "birthdate")
+			if _, ok := f.Base().Widget.(admin.AdminSplitDateTime); !ok {
+				t.Errorf("birthdate widget = %T, want admin.AdminSplitDateTime", f.Base().Widget)
+			}
+			if _, ok := f.(*forms.SplitDateTimeField); !ok {
+				t.Errorf("birthdate = %T, want *forms.SplitDateTimeField", f)
+			}
 		})
 		// The foreign key cannot be blank, so the buttons have no empty
 		// choice: Django's empty_label is None.
@@ -143,17 +187,32 @@ func TestAdminFormfieldForDBField(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			resp := addPage(t, admin.ModelAdmin{RadioFields: map[string]admin.RadioStyle{"main_band": admin.Vertical}},
-				admin.ModelAdmin{}, "admin:admin_widgets_widgetevent_add")
+			resp := addPage(t, "widgetevent", map[string]admin.ModelAdmin{"widgetevent": {
+				RadioFields: map[string]admin.RadioStyle{"main_band": admin.Vertical},
+			}})
 			djangotest.AssertContains(t, resp, fmt.Sprintf(`<div id="id_main_band" class="radiolist"><div>`+
 				`<label for="id_main_band_0"><input type="radio" name="main_band" value="%d" class="radiolist" `+
 				`required id="id_main_band_0" data-context="available-source"> Linkin Park</label></div></div>`, band.ID),
 				djangotest.HTML())
 		})
+		t.Run("test_radio_fields_foreignkey_formfield_overrides_empty_label", func(t *testing.T) {
+			resp := addPage(t, "widgetinventory", map[string]admin.ModelAdmin{"widgetinventory": {
+				RadioFields: map[string]admin.RadioStyle{"parent": admin.Vertical},
+				FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+					admin.ForeignKey: {EmptyLabel: new("Custom empty label")},
+				},
+			}})
+			f := formField(t, resp, "parent")
+			field, ok := f.(*forms.ModelChoiceField)
+			if !ok || field.EmptyLabel == nil {
+				t.Fatalf("parent = %#v, want a ModelChoiceField with an empty label", f)
+			}
+			djangotest.AssertEqual(t, *field.EmptyLabel, "Custom empty label")
+		})
 		t.Run("test_choices_with_radio_fields", func(t *testing.T) {
-			resp := addPage(t, admin.ModelAdmin{},
-				admin.ModelAdmin{RadioFields: map[string]admin.RadioStyle{"gender": admin.Vertical}},
-				"admin:admin_widgets_widgetmember_add")
+			resp := addPage(t, "widgetmember", map[string]admin.ModelAdmin{"widgetmember": {
+				RadioFields: map[string]admin.RadioStyle{"gender": admin.Vertical},
+			}})
 			djangotest.AssertContains(t, resp, `<div id="id_gender" class="radiolist"><div>`+
 				`<label for="id_gender_0"><input type="radio" name="gender" value="" class="radiolist" `+
 				`id="id_gender_0" checked> None</label></div><div>`+

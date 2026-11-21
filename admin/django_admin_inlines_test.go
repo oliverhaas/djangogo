@@ -376,8 +376,10 @@ func registerInlinesAdmin(site *admin.AdminSite, db *orm.DB) {
 	}})
 	admin.Register[Holder3](site, admin.ModelAdmin{Inlines: []admin.Inline{
 		admin.StackedInline[Holder3, Inner3](admin.InlineModelAdmin{
-			Media:       inlineScripts(),
-			FormOptions: []forms.ModelFormOption{forms.WithWidget("dummy", customNumberWidget{})},
+			Media: inlineScripts(),
+			FormfieldOverrides: map[admin.FieldClass]admin.FormfieldOverride{
+				admin.IntegerField: {Widget: customNumberWidget{}},
+			},
 		}),
 	}})
 	admin.Register[Poll](site, admin.ModelAdmin{DisplayColumns: callable("Callable in PollAdmin"), Inlines: []admin.Inline{

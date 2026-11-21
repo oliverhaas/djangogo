@@ -467,6 +467,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   Django's `radio_fields`. `Horizontal` and `Vertical` set the layout. Only a
   field that can be blank gets the empty choice, labeled "None". The checks
   report admin.E022 to admin.E024.
+- Admin: `ModelAdmin.FormfieldOverrides` and
+  `InlineModelAdmin.FormfieldOverrides` set the widget and the empty label of
+  the form fields by model field class, Django's `formfield_overrides`, such
+  as `{admin.TextField: {Widget: forms.Textarea{}}}`. An entry for a class
+  also applies to the classes that derive from it, such as `SlugField` from
+  `CharField`. The widget of a foreign key or a many-to-many field wins over
+  the autocomplete, raw-id, radio and filter widgets.
 
 ### Changed
 

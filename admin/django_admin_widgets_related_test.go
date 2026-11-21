@@ -110,6 +110,17 @@ type Individual struct {
 	Soulmate orm.FK[Individual] `orm:"null;on_delete=cascade;related_name=soulmates"`
 }
 
+// WidgetInventory stands in for tests/admin_widgets/models.py::Inventory. Its
+// parent references the primary key, as the Go ORM has no to_field.
+type WidgetInventory struct {
+	ID     int64
+	Parent orm.FK[WidgetInventory] `orm:"null;blank;on_delete=set_null"`
+	Name   string                  `orm:"max_length=20"`
+}
+
+// String returns the inventory name.
+func (i WidgetInventory) String() string { return i.Name }
+
 // WidgetVideoStream stands in for tests/admin_widgets/models.py::VideoStream.
 type WidgetVideoStream struct {
 	ID           int64
@@ -121,7 +132,7 @@ type WidgetVideoStream struct {
 func widgetRelatedModels() []any {
 	return []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_widgets",
 		&Company{}, &Advisor{}, &WidgetMember{}, &WidgetBand{}, &WidgetAlbum{}, &WidgetReleaseEvent{},
-		&WidgetEvent{}, &Honeycomb{}, &Bee{}, &Individual{}, &WidgetVideoStream{},
+		&WidgetEvent{}, &Honeycomb{}, &Bee{}, &Individual{}, &WidgetVideoStream{}, &WidgetInventory{},
 	)}
 }
 

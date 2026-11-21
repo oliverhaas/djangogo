@@ -70,6 +70,9 @@ type InlineModelAdmin struct {
 	// FormOptions customize the model form of the rows, as
 	// ModelAdmin.FormOptions does.
 	FormOptions []forms.ModelFormOption
+	// FormfieldOverrides sets the form fields by model field class, as
+	// ModelAdmin.FormfieldOverrides does.
+	FormfieldOverrides map[FieldClass]FormfieldOverride
 	// RawIDFields names relation fields edited as raw primary keys.
 	RawIDFields []string
 	// AutocompleteFields names relation fields edited with autocomplete.
@@ -217,6 +220,7 @@ func (c InlineModelAdmin) modelAdmin() ModelAdmin {
 		ReadonlyFields:               c.ReadonlyFields,
 		ExcludeFields:                c.ExcludeFields,
 		FormOptions:                  c.FormOptions,
+		FormfieldOverrides:           c.FormfieldOverrides,
 		RawIDFields:                  c.RawIDFields,
 		AutocompleteFields:           c.AutocompleteFields,
 		FilterHorizontal:             c.FilterHorizontal,
