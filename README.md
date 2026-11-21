@@ -209,8 +209,8 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `ExcludeFields` instead of being overridden by it. A read-only field shows
   a model field or a `DisplayColumns` value, not a model method. The system
   checks cover `AutocompleteFields`, `RawIDFields`, `Fields`, `Fieldsets`,
-  `ExcludeFields`, `FilterHorizontal`, `FilterVertical`, `ReadonlyFields`,
-  `Inlines` and `ListDisplay` only. A search field with `@` uses
+  `ExcludeFields`, `FilterHorizontal`, `FilterVertical`,
+  `PrepopulatedFields`, `ReadonlyFields`, `Inlines` and `ListDisplay` only. A search field with `@` uses
   `icontains`, not full-text search. The views take no `extra_context`, and
   a template option such as `ChangeFormTemplate` names one template, not a
   list. Blocks that Django names with hyphens, such as `object-tools-items`,

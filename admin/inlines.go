@@ -72,6 +72,9 @@ type InlineModelAdmin struct {
 	FilterHorizontal []string
 	// FilterVertical names many-to-many fields with stacked lists.
 	FilterVertical []string
+	// PrepopulatedFields maps a field to the fields that fill it in the
+	// forms that add a row, as ModelAdmin.PrepopulatedFields does.
+	PrepopulatedFields map[string][]string
 	// DisplayColumns defines computed values that ReadonlyFields can name.
 	DisplayColumns map[string]DisplayColumn
 	// Ordering orders the rows of the inline.
@@ -103,6 +106,9 @@ type InlineModelAdmin struct {
 	// GetReadonlyFields returns the read-only fields, Django's
 	// get_readonly_fields.
 	GetReadonlyFields func(r *http.Request, obj any) []string
+	// GetPrepopulatedFields returns the prepopulated fields for the parent
+	// row obj, Django's get_prepopulated_fields.
+	GetPrepopulatedFields func(r *http.Request, obj any) map[string][]string
 	// GetExclude returns the fields that the forms leave out, Django's
 	// get_exclude. It replaces ExcludeFields.
 	GetExclude func(r *http.Request, obj any) []string
@@ -206,6 +212,7 @@ func (c InlineModelAdmin) modelAdmin() ModelAdmin {
 		AutocompleteFields:           c.AutocompleteFields,
 		FilterHorizontal:             c.FilterHorizontal,
 		FilterVertical:               c.FilterVertical,
+		PrepopulatedFields:           c.PrepopulatedFields,
 		DisplayColumns:               c.DisplayColumns,
 		Ordering:                     c.Ordering,
 		EmptyValueDisplay:            c.EmptyValueDisplay,
@@ -213,6 +220,7 @@ func (c InlineModelAdmin) modelAdmin() ModelAdmin {
 		GetFields:                    c.GetFields,
 		GetFieldsets:                 c.GetFieldsets,
 		GetReadonlyFields:            c.GetReadonlyFields,
+		GetPrepopulatedFields:        c.GetPrepopulatedFields,
 		GetExclude:                   c.GetExclude,
 	}
 }
@@ -425,6 +433,26 @@ type inlineFormSet struct {
 
 // formSet returns the formset.
 func (ifs *inlineFormSet) formSet() *forms.FormSet { return ifs.set.base() }
+
+// addForms returns the forms that add a row, those that Django's
+// InlineAdminFormSet yields without an original: the extra forms and, with
+// the add permission, the empty form.
+func (ifs *inlineFormSet) addForms() []*forms.Form {
+	fs := ifs.formSet()
+	instances := ifs.set.instances()
+	initial := fs.InitialFormCount()
+	var out []*forms.Form
+	for i, form := range fs.Forms() {
+		if i < initial && i < len(instances) && instanceHasPK(ifs.in.entry.model, instances[i]) {
+			continue
+		}
+		out = append(out, form)
+	}
+	if ifs.hasAdd {
+		out = append(out, fs.EmptyForm())
+	}
+	return out
+}
 
 // inlineFormSets builds the formsets of the inlines of e for the parent row
 // parent, Django's _create_formsets and get_inline_formsets. obj is the

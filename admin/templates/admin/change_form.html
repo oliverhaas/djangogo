@@ -61,6 +61,8 @@
       {% block admin_change_form_document_ready %}
       <script id="django-admin-form-add-constants" src="{% static 'admin/js/change_form.js' %}"{% if adminform and add %} data-model-name="{{ model_name }}"{% endif %} async></script>
       {% endblock %}
+
+      {% include includes.prepopulated_fields_js %}
     </div>
   </form>
 </div>

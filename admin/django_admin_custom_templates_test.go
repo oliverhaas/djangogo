@@ -83,6 +83,12 @@ var adminViewsTemplates = map[string]string{
 {{ result_count }} {{ result_count_label }}
 </p>
 `,
+	"admin/admin_views/article/prepopulated_fields_js.html": `<script id="django-admin-prepopulated-fields-constants"
+        class="override-prepopulated_fields_js"
+        src="{% static "admin/js/prepopulate_init.js" %}"
+        data-prepopulated-fields="{{ prepopulated_fields_json }}">
+</script>
+`,
 	"admin/admin_views/article/search_form.html": `{% if has_search %}
 <div id="toolbar" class="override-search_form"><form id="changelist-search" method="get">
 <div>
@@ -496,8 +502,7 @@ func TestOverrideChangeFormTemplateTags(t *testing.T) {
 		// Go.
 		djangotest.AssertContains(t, resp, `name="_save"`)
 		djangotest.AssertContains(t, resp, "override-change_form_object_tools")
-		// FIXME-PORT: "override-prepopulated_fields_js" needs
-		// prepopulated_fields.
+		djangotest.AssertContains(t, resp, "override-prepopulated_fields_js")
 	})
 }
 

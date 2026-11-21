@@ -49,6 +49,7 @@ type Concert struct {
 type ValidationTestModel struct {
 	ID         int64
 	Name       string             `orm:"max_length=100"`
+	Slug       string             `orm:"type=slug"`
 	Users      orm.M2M[auth.User] `orm:"related_name=validationtestmodels"`
 	Band       orm.FK[Band]       `orm:"on_delete=cascade"`
 	BestFriend orm.O2O[auth.User] `orm:"on_delete=cascade;related_name=best_friend"`
@@ -249,6 +250,59 @@ func TestFilterVerticalCheck(t *testing.T) {
 // Ported from Django: tests/modeladmin/test_checks.py::FilterHorizontalCheckTests.test_valid_case
 func TestFilterHorizontalCheck(t *testing.T) {
 	filterCheckTests(t, "filter_horizontal")
+}
+
+// No Go counterpart: tests/modeladmin/test_checks.py::PrepopulatedFieldsCheckTests.test_not_list_or_tuple
+// (admin.E029) and test_not_dictionary (admin.E026): PrepopulatedFields is a
+// map[string][]string.
+
+// Ported from Django: tests/modeladmin/test_checks.py::PrepopulatedFieldsCheckTests.test_missing_field
+// Ported from Django: tests/modeladmin/test_checks.py::PrepopulatedFieldsCheckTests.test_missing_field_again
+// Ported from Django: tests/modeladmin/test_checks.py::PrepopulatedFieldsCheckTests.test_invalid_field_type
+// Ported from Django: tests/modeladmin/test_checks.py::PrepopulatedFieldsCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::PrepopulatedFieldsCheckTests.test_one_to_one_field
+func TestPrepopulatedFieldsCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		with := func(t *testing.T, fields map[string][]string) *admin.AdminSite {
+			t.Helper()
+			return checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{PrepopulatedFields: fields})
+			})
+		}
+		t.Run("test_missing_field", func(t *testing.T) {
+			assertIsInvalid(t, with(t, map[string][]string{"non_existent_field": {"slug"}}),
+				"modeladmin.ValidationTestModel",
+				"The value of 'prepopulated_fields' refers to 'non_existent_field', "+
+					"which is not a field of 'modeladmin.ValidationTestModel'.",
+				"admin.E027")
+		})
+		t.Run("test_missing_field_again", func(t *testing.T) {
+			assertIsInvalid(t, with(t, map[string][]string{"slug": {"non_existent_field"}}),
+				"modeladmin.ValidationTestModel",
+				"The value of 'prepopulated_fields[\"slug\"][0]' refers to "+
+					"'non_existent_field', which is not a field of "+
+					"'modeladmin.ValidationTestModel'.",
+				"admin.E030")
+		})
+		t.Run("test_invalid_field_type", func(t *testing.T) {
+			assertIsInvalid(t, with(t, map[string][]string{"users": {"name"}}),
+				"modeladmin.ValidationTestModel",
+				"The value of 'prepopulated_fields' refers to 'users', which must not be "+
+					"a DateTimeField, a ForeignKey, a OneToOneField, or a ManyToManyField.",
+				"admin.E028")
+		})
+		t.Run("test_valid_case", func(t *testing.T) {
+			assertIsValid(t, with(t, map[string][]string{"slug": {"name"}}))
+		})
+		t.Run("test_one_to_one_field", func(t *testing.T) {
+			assertIsInvalid(t, with(t, map[string][]string{"best_friend": {"name"}}),
+				"modeladmin.ValidationTestModel",
+				"The value of 'prepopulated_fields' refers to 'best_friend', which must "+
+					"not be a DateTimeField, a ForeignKey, a OneToOneField, or a "+
+					"ManyToManyField.",
+				"admin.E028")
+		})
+	})
 }
 
 // listDisplayE108 is Django's admin.E108 message for name on

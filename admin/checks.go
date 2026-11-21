@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -28,8 +29,9 @@ func (o adminObject) Label() string { return o.kind + " of " + o.model.Label() }
 // (admin.E004, admin.E005, admin.E006,
 // admin.E013), Fieldsets (admin.E008, admin.E011, admin.E012, admin.E013),
 // ExcludeFields (admin.E015), FilterVertical and FilterHorizontal
-// (admin.E013, admin.E019, admin.E020), ReadonlyFields (admin.E035), the
-// inlines (see checkInlines), then ListDisplay (admin.E108, admin.E109).
+// (admin.E013, admin.E019, admin.E020), PrepopulatedFields (admin.E027,
+// admin.E028, admin.E030), ReadonlyFields (admin.E035), the inlines (see
+// checkInlines), then ListDisplay (admin.E108, admin.E109).
 func (s *AdminSite) Check() []checks.Message {
 	var out []checks.Message
 	for _, e := range s.entries {
@@ -65,6 +67,7 @@ func (s *AdminSite) checkBase(e *entry, obj adminObject) []checks.Message {
 	for i, name := range e.admin.FilterHorizontal {
 		out = append(out, checkFilterItem(e, obj, name, fmt.Sprintf("filter_horizontal[%d]", i))...)
 	}
+	out = append(out, checkPrepopulated(e, obj)...)
 	for i, name := range e.admin.ReadonlyFields {
 		out = append(out, checkReadonlyItem(e, obj, name, fmt.Sprintf("readonly_fields[%d]", i))...)
 	}
@@ -100,6 +103,37 @@ func (s *AdminSite) checkAutocompleteItem(e *entry, obj adminObject, name, label
 			f.Rel.Target.Label()), checks.Obj(obj), checks.ID("admin.E040"))}
 	}
 	return nil
+}
+
+// checkPrepopulated checks PrepopulatedFields, Django's
+// _check_prepopulated_fields, in the order of the sorted keys: each key is a
+// field that is not a date and time, a foreign key or a many-to-many field,
+// and each value names fields.
+func checkPrepopulated(e *entry, obj adminObject) []checks.Message {
+	var out []checks.Message
+	fields := e.admin.PrepopulatedFields
+	for _, name := range slices.Sorted(maps.Keys(fields)) {
+		f, exists := relationOrField(e.model, name)
+		switch {
+		case !exists:
+			out = append(out, checks.Error(fmt.Sprintf(
+				"The value of 'prepopulated_fields' refers to '%s', which is not a field of '%s'.",
+				name, e.model.Label()), checks.Obj(obj), checks.ID("admin.E027")))
+		case f != nil && (f.Kind == orm.KindDateTime || f.Rel != nil):
+			out = append(out, checks.Error(fmt.Sprintf(
+				"The value of 'prepopulated_fields' refers to '%s', which must not be a DateTimeField, "+
+					"a ForeignKey, a OneToOneField, or a ManyToManyField.", name),
+				checks.Obj(obj), checks.ID("admin.E028")))
+		}
+		for i, dep := range fields[name] {
+			if _, exists := relationOrField(e.model, dep); !exists {
+				out = append(out, checks.Error(fmt.Sprintf(
+					"The value of 'prepopulated_fields[\"%s\"][%d]' refers to '%s', which is not a field of '%s'.",
+					name, i, dep, e.model.Label()), checks.Obj(obj), checks.ID("admin.E030")))
+			}
+		}
+	}
+	return out
 }
 
 // checkRawIDItem checks one entry of RawIDFields, Django's

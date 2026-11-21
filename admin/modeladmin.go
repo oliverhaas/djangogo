@@ -292,6 +292,12 @@ type ModelAdmin struct {
 	// FilteredSelectMultiple with the two lists stacked (Django's
 	// filter_vertical).
 	FilterVertical []string
+	// PrepopulatedFields maps a field to the fields that a script fills it
+	// from as the user types (Django's prepopulated_fields), such as
+	// {"slug": {"title"}}: the script joins their values and turns them
+	// into a slug. The field must not be a date and time, a foreign key or
+	// a many-to-many field.
+	PrepopulatedFields map[string][]string
 	// RawIDFields names foreign keys and many-to-many fields edited as a text
 	// input for the primary keys with a link to the related changelist
 	// (Django's raw_id_fields). The form loads only the related rows it
@@ -392,6 +398,10 @@ type ModelAdmin struct {
 	// GetReadonlyFields returns the read-only fields for r and obj, nil on
 	// the add page (Django's get_readonly_fields).
 	GetReadonlyFields func(r *http.Request, obj any) []string
+	// GetPrepopulatedFields returns the prepopulated fields for r and obj,
+	// nil on the add page, in place of PrepopulatedFields (Django's
+	// get_prepopulated_fields).
+	GetPrepopulatedFields func(r *http.Request, obj any) map[string][]string
 	// GetExclude returns the fields that the form leaves out for r and obj,
 	// nil on the add page (Django's get_exclude). It replaces ExcludeFields.
 	GetExclude func(r *http.Request, obj any) []string

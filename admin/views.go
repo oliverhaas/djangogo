@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -837,12 +838,67 @@ func (s *AdminSite) renderChangeForm(
 	ctx["show_close"] = !showSave
 	ctx["show_delete_link"] = !popup && hasObjDelete
 
-	ctx["includes"] = s.includes(e, "submit_line", "change_form_object_tools")
+	ctx["prepopulated_fields_json"] = prepopulatedJSON(r, e, obj, af, inlines, mode)
+
+	ctx["includes"] = s.includes(e, "submit_line", "change_form_object_tools", "prepopulated_fields_js")
 	custom := e.admin.ChangeFormTemplate
 	if isAdd && e.admin.AddFormTemplate != "" {
 		custom = e.admin.AddFormTemplate
 	}
 	s.renderPage(w, r, e, custom, "change_form.html", ctx)
+}
+
+// prepopulatedJSON returns the data of the script that fills fields from
+// other fields as the user types, Django's prepopulated_fields_js tag: the
+// fields of the form, unless the user may only view it, then those of the
+// inline forms that add a row.
+func prepopulatedJSON(r *http.Request, e *entry, obj any, af *adminForm, inlines []*inlineFormSet, mode formMode) string {
+	var items []string
+	if mode != formView {
+		items = appendPrepopulated(items, e.model, af.form, e.prepopulatedFields(r, obj))
+	}
+	for _, ifs := range inlines {
+		ie := ifs.in.entry
+		fields := ie.prepopulatedFields(r, obj)
+		if len(fields) == 0 {
+			continue
+		}
+		for _, form := range ifs.addForms() {
+			items = appendPrepopulated(items, ie.model, form, fields)
+		}
+	}
+	return "[" + strings.Join(items, ", ") + "]"
+}
+
+// appendPrepopulated appends to items the script data of each field of
+// form that fields fills, Django's AdminForm.prepopulated_fields, in the
+// order of the sorted names and as json.dumps writes it. It skips the
+// names that form lacks, such as read-only fields, where Django fails.
+// maxLength and allowUnicode come from the model field, else 50 and false.
+func appendPrepopulated(items []string, m *orm.Model, form *forms.Form, fields map[string][]string) []string {
+	for _, name := range slices.Sorted(maps.Keys(fields)) {
+		bf := form.Field(formName(m, name))
+		if bf == nil {
+			continue
+		}
+		var ids, names []string
+		for _, dep := range fields[name] {
+			if d := form.Field(formName(m, dep)); d != nil {
+				ids = append(ids, templates.QuoteJSON("#"+d.AutoID()))
+				names = append(names, templates.QuoteJSON(d.Name))
+			}
+		}
+		maxLength, allowUnicode := 50, false
+		if f, _ := relationOrField(m, name); f != nil {
+			maxLength = cmp.Or(f.MaxLength, 50)
+			allowUnicode = f.AllowUnicode
+		}
+		items = append(items, fmt.Sprintf(
+			`{"id": %s, "name": %s, "dependency_ids": [%s], "dependency_list": [%s], "maxLength": %d, "allowUnicode": %t}`,
+			templates.QuoteJSON("#"+bf.AutoID()), templates.QuoteJSON(bf.Name),
+			strings.Join(ids, ", "), strings.Join(names, ", "), maxLength, allowUnicode))
+	}
+	return items
 }
 
 // manyLabels returns the labels of the rows obj is related to through the

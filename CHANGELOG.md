@@ -424,6 +424,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   of `admin/base_site.html`. A block that Django names with hyphens has
   underscores here: `object_tools`, `object_tools_items`, `submit_row`,
   `actions_form`, `actions_submit` and `actions_counter`.
+- Admin: `ModelAdmin.PrepopulatedFields` and `InlineModelAdmin.PrepopulatedFields`
+  fill a field from other fields as the user types, Django's
+  `prepopulated_fields`, such as `{"slug": {"title"}}`.
+  `GetPrepopulatedFields` picks them per request and object. The change form
+  renders Django's `admin/prepopulated_fields_js.html` with the fields of the
+  form, unless the user can only view it, and those of the inline forms that
+  add a row. The checks report admin.E027, admin.E028 and admin.E030.
 
 ### Changed
 

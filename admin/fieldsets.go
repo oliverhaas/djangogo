@@ -50,6 +50,15 @@ func (e *entry) readonlyFields(r *http.Request, obj any) []string {
 	return formNames(e.model, names)
 }
 
+// prepopulatedFields returns the prepopulated fields for r and obj, Django's
+// get_prepopulated_fields.
+func (e *entry) prepopulatedFields(r *http.Request, obj any) map[string][]string {
+	if e.admin.GetPrepopulatedFields != nil {
+		return e.admin.GetPrepopulatedFields(r, obj)
+	}
+	return e.admin.PrepopulatedFields
+}
+
 // lineNames returns the field names of one entry of a layout: a name, or a
 // []string of names on one line. ok is false for any other type.
 func lineNames(entry any) (names []string, ok bool) {
