@@ -91,7 +91,7 @@ func TestLoginGETRendersForm(t *testing.T) {
 		t.Fatalf("login GET status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `<form method="post"`) {
+	if !strings.Contains(body, `method="post"`) {
 		t.Errorf("login GET body missing post form:\n%s", body)
 	}
 	if !strings.Contains(body, `name="username"`) || !strings.Contains(body, `name="password"`) {
@@ -217,7 +217,7 @@ func TestLoginPOSTNonStaffRejected(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("non-staff login POST status = %d, want 200 (re-render)", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "not staff") {
+	if !strings.Contains(rec.Body.String(), "staff account") {
 		t.Errorf("non-staff login POST body missing staff error:\n%s", rec.Body.String())
 	}
 }

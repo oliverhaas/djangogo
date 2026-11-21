@@ -28,6 +28,9 @@ type Article struct {
 	Published bool
 }
 
+// String returns the article's title.
+func (a Article) String() string { return a.Title }
+
 // newArticleDB builds a frozen registry, opens an in-memory SQLite database,
 // creates the articles table, seeds rows, and returns the DB handle.
 func newArticleDB(t *testing.T) *orm.DB {
@@ -91,21 +94,19 @@ func newSite(t *testing.T, db *orm.DB) *admin.AdminSite {
 	return site
 }
 
-// staffInjector wraps next, placing a staff user into each request's context to
-// simulate an authenticated staff session.
+// staffInjector wraps next, placing an active superuser staff user into each
+// request's context to simulate an authenticated admin session.
 func staffInjector(next http.Handler) http.Handler {
-	u := &auth.User{ID: 1, Username: "admin", IsStaff: true}
+	u := &auth.User{ID: 1, Username: "admin", IsActive: true, IsStaff: true, IsSuperuser: true}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), u)))
 	})
 }
 
-// staffCSRF wraps next with a staff user, a fresh session, and the CSRF
-// middleware so a token is seeded and exposed via csrf.Token(ctx). It models the
-// real middleware chain the admin runs under so handlers can read the token and
-// render {% csrf_token %}.
+// staffCSRF wraps next with an active superuser staff user, a fresh session,
+// and the CSRF middleware so a token is seeded and exposed via csrf.Token(ctx).
 func staffCSRF(next http.Handler) http.Handler {
-	u := &auth.User{ID: 1, Username: "admin", IsStaff: true}
+	u := &auth.User{ID: 1, Username: "admin", IsActive: true, IsStaff: true, IsSuperuser: true}
 	withSession := func(inner http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := auth.WithUser(r.Context(), u)
@@ -670,7 +671,7 @@ func TestChangeGETPrefillsForm(t *testing.T) {
 	}
 }
 
-func TestChangeGETMissing404(t *testing.T) {
+func TestChangeGETMissingRedirectsToIndex(t *testing.T) {
 	db := newArticleDB(t)
 	site := newSite(t, db)
 	router := urls.NewRouter(site.Routes()...)
@@ -678,8 +679,11 @@ func TestChangeGETMissing404(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/admin/article/99999/change/", nil)
 	staffCSRF(router).ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("change GET missing status = %d, want 404", rec.Code)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("change GET missing status = %d, want 302", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/admin/" {
+		t.Fatalf("change GET missing Location = %q, want /admin/", loc)
 	}
 }
 

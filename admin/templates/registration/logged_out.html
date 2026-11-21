@@ -1,0 +1,11 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<ol class="breadcrumbs">
+  <li><a href="{% url 'admin:index' %}">Home</a></li>
+  <li aria-current="page">Logout</li>
+</ol>
+{% endblock %}
+{% block content %}
+<p>Thanks for spending some quality time with the web site today.</p>
+<p><a href="{% url 'admin:index' %}">Log in again</a></p>
+{% endblock %}

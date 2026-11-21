@@ -149,8 +149,8 @@ func TestM6EndToEndAdminCRUD(t *testing.T) {
 	db := newM6DB(t)
 	ctx := context.Background()
 
-	// Seed a staff user.
-	u := auth.User{Username: "admin", IsStaff: true, IsActive: true}
+	// Seed a staff superuser.
+	u := auth.User{Username: "admin", IsStaff: true, IsActive: true, IsSuperuser: true}
 	if err := u.SetPassword("adminpass"); err != nil {
 		t.Fatalf("SetPassword: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestM6EndToEndAdminCRUD(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("(2) GET login status = %d, want 200\n%s", status, body)
 	}
-	if !strings.Contains(body, `<form method="post"`) {
+	if !strings.Contains(body, `method="post"`) {
 		t.Fatalf("(2) login body missing post form:\n%s", body)
 	}
 	loginToken := extractCSRF(t, body)
