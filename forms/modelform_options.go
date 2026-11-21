@@ -38,6 +38,7 @@ type modelFormConfig struct {
 	errorMessages map[string]map[string]string
 	formFields    map[string]Field
 	factories     map[string]fieldFactory
+	callback      func(mf *orm.Field, f Field) Field
 }
 
 // AllFields is the name list entry that selects every editable field of the
@@ -135,6 +136,17 @@ func WithQuerySet[R any](field string, qs *orm.QuerySet[R]) ModelFormOption {
 			return NewModelChoiceField(db, qs, opts...)
 		}
 	}
+}
+
+// WithFormFieldCallback builds the form fields of the model fields through fn,
+// Django's formfield_callback. fn receives each model field of the form with
+// its default form field and returns the field to use; nil leaves the field
+// out. It is not called for the auto primary key, which has no form field,
+// nor for a field declared with WithFormField. The overrides of WithWidget,
+// WithLabel and the like apply to the field that fn returns. A later
+// WithFormFieldCallback replaces an earlier one.
+func WithFormFieldCallback(fn func(mf *orm.Field, f Field) Field) ModelFormOption {
+	return func(c *modelFormConfig) { c.callback = fn }
 }
 
 // newModelFormConfig applies opts to an empty configuration.

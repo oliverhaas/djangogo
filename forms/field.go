@@ -258,6 +258,9 @@ type fieldOptions struct {
 	choices       []Choice
 	coerce        func(string) (any, error)
 	inputFormats  []string
+	dateFormats   []string
+	timeFormats   []string
+	requireAll    *bool
 	maxDigits     int
 	decimalPlaces int
 	emptyLabel    *string
@@ -403,6 +406,24 @@ func Coerce(fn func(string) (any, error)) FieldOption {
 // Each is a Go layout ("02.01.2006") or a strftime string ("%d.%m.%Y").
 func InputFormats(formats ...string) FieldOption {
 	return func(o *fieldOptions) { o.inputFormats = formats }
+}
+
+// InputDateFormats sets the layouts the date of a SplitDateTimeField accepts
+// (input_date_formats=), as InputFormats does for a DateField.
+func InputDateFormats(formats ...string) FieldOption {
+	return func(o *fieldOptions) { o.dateFormats = formats }
+}
+
+// InputTimeFormats sets the layouts the time of a SplitDateTimeField accepts
+// (input_time_formats=), as InputFormats does for a TimeField.
+func InputTimeFormats(formats ...string) FieldOption {
+	return func(o *fieldOptions) { o.timeFormats = formats }
+}
+
+// RequireAllFields sets whether a required MultiValueField needs a value for
+// every subfield (require_all_fields=); it does by default.
+func RequireAllFields(all bool) FieldOption {
+	return func(o *fieldOptions) { o.requireAll = &all }
 }
 
 // MaxDigits limits the total number of digits of a decimal (max_digits=).

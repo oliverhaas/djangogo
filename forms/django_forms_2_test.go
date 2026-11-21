@@ -1269,9 +1269,6 @@ func TestAriaDescribedbyCalledMultipleTimes(t *testing.T) {
 }
 
 // Ported from Django: tests/forms_tests/tests/test_forms.py::FormsTestCase.test_fieldset_aria_describedby
-//
-// The package has no SplitDateTimeField, so the datetime field of the Django
-// form and its markup are left out.
 func TestFieldsetAriaDescribedby(t *testing.T) {
 	newForm := func() *forms.Form {
 		return forms.New(
@@ -1279,6 +1276,7 @@ func TestFieldsetAriaDescribedby(t *testing.T) {
 				forms.UseWidget(forms.CheckboxSelectMultiple{}), forms.HelpText("Checkbox help text"))),
 			forms.F("radio", forms.NewMultipleChoiceField(forms.Choices("a", "A", "b", "B"),
 				forms.UseWidget(forms.RadioSelect{}), forms.HelpText("Radio help text"))),
+			forms.F("datetime", forms.NewSplitDateTimeField(forms.HelpText("Enter Date and Time"))),
 		)
 	}
 	assertHTMLEqual(t, newForm().String(),
@@ -1301,7 +1299,13 @@ func TestFieldsetAriaDescribedby(t *testing.T) {
 			`</div><div>`+
 			`<label for="id_radio_1"><input type="radio" name="radio" value="b" `+
 			`required id="id_radio_1" /> B</label>`+
-			`</div></div></fieldset></div>`)
+			`</div></div></fieldset></div>`+
+			`<div><fieldset aria-describedby="id_datetime_helptext">`+
+			`<legend>Datetime:</legend>`+
+			`<div class="helptext" id="id_datetime_helptext">Enter Date and Time</div>`+
+			`<input type="text" name="datetime_0" required id="id_datetime_0" />`+
+			`<input type="text" name="datetime_1" required id="id_datetime_1" />`+
+			`</fieldset></div>`)
 	assertHTMLEqual(t,
 		`<div><fieldset aria-describedby="id_checkbox_helptext `+
 			`id_checkbox_error"> <legend>Checkbox:</legend> <div class="helptext" `+
@@ -1320,7 +1324,13 @@ func TestFieldsetAriaDescribedby(t *testing.T) {
 			`aria-invalid="true" id="id_radio_0" />A</label></div><div><label `+
 			`for="id_radio_1"><input type="radio" name="radio" value="b" required `+
 			`aria-invalid="true" id="id_radio_1" />B</label></div></div></fieldset>`+
-			`</div>`,
+			`</div><div><fieldset aria-describedby="id_datetime_helptext `+
+			`id_datetime_error"><legend>Datetime:</legend><div class="helptext" `+
+			`id="id_datetime_helptext">Enter Date and Time</div><ul class="errorlist" `+
+			`id="id_datetime_error"><li>This field is required.</li></ul><input `+
+			`type="text" name="datetime_0" required aria-invalid="true" `+
+			`id="id_datetime_0" /><input type="text" name="datetime_1" required `+
+			`aria-invalid="true" id="id_datetime_1" /></fieldset></div>`,
 		newForm().Bind(vals()).String())
 
 	// aria-describedby is not included without an auto id.

@@ -86,7 +86,8 @@ func TestAdminFormfieldForDBFieldManyToMany(t *testing.T) {
 		t.Run("test_many_to_many", func(t *testing.T) {
 			resp := advisorAddPage(t, db, superuser, admin.ModelAdmin{})
 			djangotest.AssertContains(t, resp,
-				`<select name="companies" id="id_companies" multiple required aria-describedby="id_companies_helptext">`+
+				`<select name="companies" id="id_companies" multiple required aria-describedby="id_companies_helptext" `+
+					`data-context="available-source">`+
 					`<option value="1">Acme</option><option value="2">Globex</option></select>`,
 				djangotest.HTML())
 		})
@@ -95,7 +96,7 @@ func TestAdminFormfieldForDBFieldManyToMany(t *testing.T) {
 			resp := advisorAddPage(t, db, superuser, admin.ModelAdmin{FilterVertical: []string{"companies"}})
 			djangotest.AssertContains(t, resp,
 				`<select name="companies" id="id_companies" multiple required `+
-					`class="selectfilterstacked" data-field-name="companies" data-is-stacked="1">`+
+					`class="selectfilterstacked" data-context="available-source" data-field-name="companies" data-is-stacked="1">`+
 					`<option value="1">Acme</option><option value="2">Globex</option></select>`,
 				djangotest.HTML())
 		})

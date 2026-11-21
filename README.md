@@ -192,17 +192,17 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   literal name, and `{% lorem %}` is pongo2's tag. A template never runs a
   query: a relation renders empty unless the view loaded it with
   `SelectRelated` or `PrefetchRelated`.
-- **Forms:** no formsets, file fields, option groups, `MultiValueField` or
-  `SplitDateTimeField`, no localization and no custom renderers. A template
+- **Forms:** no formsets, file fields or option groups, no localization and no
+  custom renderers. A template
   cannot loop over a form with `{% for field in form %}`: use `form.fields`.
   `ModelChoiceField` and `ModelMultipleChoiceField` have no `to_field_name` or
   `label_from_instance`, and they load their options once per form, where
   Django loads them on each render.
 - **Admin:** no inlines, `list_editable`, `date_hierarchy` or facets, no
-  history (`LogEntry`) and no admin for users and groups. A foreign key has no
-  add, change or delete link next to it, and a date or time field has no
-  calendar or clock: the form fields keep the widgets of the model form, not
-  the admin's. The scripts and pages are in English only. There is no custom form class:
+  history (`LogEntry`) and no admin for users and groups. There are no
+  `radio_fields`, and `FormOptions` sets widgets per field name, not per
+  model field class as `formfield_overrides` does. The scripts and pages are
+  in English only. There is no custom form class:
   `FormOptions` adds fields and options to the model form, and its exclusions
   add to `ExcludeFields` instead of being overridden by it. A read-only field
   shows a model field or a `DisplayColumns` value, not a model method. The

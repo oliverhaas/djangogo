@@ -220,6 +220,11 @@ type autocomplete struct {
 	Debug bool
 }
 
+// isAutocomplete marks the autocomplete widgets, which a
+// RelatedFieldWidgetWrapper gives no data-context attribute, as Django's
+// checks for AutocompleteMixin.
+func (autocomplete) isAutocomplete() {}
+
 // NewAutocompleteSelect returns the widget of the foreign key f of model m on
 // site, Django's AutocompleteSelect(field, admin_site, attrs).
 func NewAutocompleteSelect(site *AdminSite, m *orm.Model, f *orm.Field, attrs forms.Attrs) AutocompleteSelect {

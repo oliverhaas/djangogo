@@ -97,7 +97,6 @@
 // # Not covered
 //
 // File uploads (FileField, ImageField, ClearableFileInput), option groups in
-// choices, iteration over the inputs of a RadioSelect in a template,
-// MultiValueField and SplitDateTimeField, localized input formats and many-to-many
-// fields are not part of this package.
+// choices, iteration over the inputs of a RadioSelect in a template and
+// localized input formats are not part of this package.
 package forms

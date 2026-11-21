@@ -75,6 +75,9 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[
 			continue
 		default:
 			field = formFieldFor(db, mf, cfg.factories[name])
+			if cfg.callback != nil && field != nil {
+				field = cfg.callback(mf, field)
+			}
 		}
 		if field == nil {
 			continue

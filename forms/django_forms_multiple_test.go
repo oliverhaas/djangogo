@@ -121,8 +121,6 @@ func TestFormWithDisabledFields(t *testing.T) {
 }
 
 // Ported from Django: tests/forms_tests/tests/test_forms.py::FormsTestCase.test_hidden_data
-//
-// The SplitDateTimeField part is left out; the package has no such field.
 func TestHiddenData(t *testing.T) {
 	song := func(data ...string) *forms.Form {
 		f := songForm(forms.NewMultipleChoiceField(composerChoices()))
@@ -137,6 +135,16 @@ func TestHiddenData(t *testing.T) {
 	f = song("name", "From Me To You", "composers", "P", "composers", "J")
 	djangotest.AssertHTMLEqual(t, f.Field("composers").AsHidden(nil), `<input type="hidden" name="composers" value="P">
 <input type="hidden" name="composers" value="J">`)
+
+	// A SplitDateTimeField rendered as hidden is special too.
+	message := forms.New(forms.F("when", forms.NewSplitDateTimeField())).Bind(vals("when_0", "1992-01-01", "when_1", "01:01"))
+	equal(t, message.IsValid(), true)
+	djangotest.AssertHTMLEqual(t, message.Field("when").String(),
+		`<input type="text" name="when_0" value="1992-01-01" id="id_when_0" required>`+
+			`<input type="text" name="when_1" value="01:01" id="id_when_1" required>`)
+	djangotest.AssertHTMLEqual(t, message.Field("when").AsHidden(nil),
+		`<input type="hidden" name="when_0" value="1992-01-01" id="id_when_0">`+
+			`<input type="hidden" name="when_1" value="01:01" id="id_when_1">`)
 }
 
 // Ported from Django: tests/forms_tests/tests/test_forms.py::FormsTestCase.test_escaping

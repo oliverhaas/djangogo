@@ -257,8 +257,15 @@ func TestMediaMultiMedia(t *testing.T) {
 <script src="/path/to/js4"></script>`)
 }
 
-// FIXME-PORT: tests/forms_tests/tests/test_media.py::FormsMediaTestCase.test_multi_widget
-// needs MultiWidget, which the Go forms package does not have.
+// Ported from Django: tests/forms_tests/tests/test_media.py::FormsMediaTestCase.test_multi_widget
+func TestMediaMultiWidget(t *testing.T) {
+	mediaStaticURL(t)
+	// A MultiWidget's media is the media of its subwidgets.
+	mymulti := forms.MultiWidget{Widgets: []forms.Widget{
+		mediaWidget{media: media1}, mediaWidget{media: media2}, mediaWidget{media: media3},
+	}}
+	assertMedia(t, forms.WidgetMedia(mymulti), combinedHTML)
+}
 
 // Ported from Django: tests/forms_tests/tests/test_media.py::FormsMediaTestCase.test_form_media
 func TestFormMedia(t *testing.T) {

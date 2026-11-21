@@ -19,14 +19,15 @@ import (
 
 // Changelist query parameter names, matching django.contrib.admin.views.main.
 const (
-	allVar      = "all"
-	orderVar    = "o"
-	pageVar     = "p"
-	searchVar   = "q"
-	errorFlag   = "e"
-	isPopupVar  = "_popup"
-	toFieldVar  = "_to_field"
-	isFacetsVar = "_facets"
+	allVar         = "all"
+	orderVar       = "o"
+	pageVar        = "p"
+	searchVar      = "q"
+	errorFlag      = "e"
+	isPopupVar     = "_popup"
+	sourceModelVar = "_source_model"
+	toFieldVar     = "_to_field"
+	isFacetsVar    = "_facets"
 )
 
 // defaultListPerPage and defaultListMaxShowAll mirror Django's ModelAdmin defaults.
@@ -42,7 +43,7 @@ var ignoredFilterParams = []string{
 	searchVar,
 	isFacetsVar,
 	isPopupVar,
-	"_source_model",
+	sourceModelVar,
 	toFieldVar,
 }
 

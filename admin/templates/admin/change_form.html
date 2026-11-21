@@ -26,6 +26,9 @@
   <form method="post" action="{{ action }}" id="{{ model_name }}_form" novalidate>
     {% csrf_token %}
     <div>
+      {% if is_popup %}<input type="hidden" name="{{ is_popup_var }}" value="1">{% endif %}
+      {% if to_field %}<input type="hidden" name="{{ to_field_var }}" value="{{ to_field }}">{% endif %}
+      {% if source_model %}<input type="hidden" name="{{ source_model_var }}" value="{{ source_model }}">{% endif %}
       {% if errors %}
       <p class="errornote">
       {% if errors == 1 %}Please correct the error below.{% else %}Please correct the errors below.{% endif %}

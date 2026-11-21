@@ -246,6 +246,16 @@ func NewDateTimeField(opts ...FieldOption) *DateTimeField {
 	return f
 }
 
+// PrepareValue shows a time.Time in UTC, the current time zone of the
+// package, as Django's to_current_timezone does: a database driver may return
+// it in the local time zone.
+func (f *DateTimeField) PrepareValue(value any) any {
+	if t, ok := value.(time.Time); ok {
+		return t.UTC()
+	}
+	return value
+}
+
 // ToGo parses a date and time. ISO 8601 is tried first, as the values of a
 // datetime-local input and of an API client have that form.
 func (f *DateTimeField) ToGo(value any) (any, error) {

@@ -118,6 +118,15 @@ func pyJSON(b *strings.Builder, v any) error {
 	return nil
 }
 
+// QuoteJSON returns s as a JSON string the way Python's json.dumps writes it:
+// in ASCII, with every non-ASCII character as a \u escape. Code that builds
+// the JSON of a Django view by hand uses it for the strings.
+func QuoteJSON(s string) string {
+	var b strings.Builder
+	pyJSONString(&b, s)
+	return b.String()
+}
+
 // pyJSONString writes s as a JSON string in ASCII.
 func pyJSONString(b *strings.Builder, s string) {
 	b.WriteByte('"')

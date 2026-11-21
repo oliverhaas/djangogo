@@ -48,6 +48,10 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// Escape escapes s for HTML as Django's django.utils.html.escape does, for
+// widgets outside this package that write their own HTML.
+func Escape(s string) string { return escape(s) }
+
 // escape escapes s for HTML exactly as Django's escape() does (html.escape of
 // the Python standard library), which differs from Go's html.EscapeString in
 // the entities of the quote characters.

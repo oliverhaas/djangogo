@@ -111,3 +111,16 @@ func TestDatetimefieldChanged(t *testing.T) {
 	d := datetime(2006, 9, 17, 14, 30, 0, 0)
 	equal(t, f.HasChanged(d, "2006 09 17 2:30 PM"), false)
 }
+
+// No Django test exists: Django's tests of to_current_timezone set a current
+// time zone, which the Go package does not have; UTC is its current time
+// zone. A database driver may return a time in the local zone.
+func TestDatetimeShownInUTC(t *testing.T) {
+	zoned := time.Date(1940, 7, 7, 14, 30, 0, 0, time.FixedZone("CEST", 2*60*60))
+	form := forms.New(
+		forms.F("at", forms.NewDateTimeField(forms.Initial(zoned))),
+		forms.F("split", forms.NewSplitDateTimeField(forms.Initial(zoned))),
+	)
+	requireSubstring(t, form.Field("at").String(), `value="1940-07-07 12:30:00"`)
+	requireSubstring(t, form.Field("split").String(), `value="12:30:00"`)
+}

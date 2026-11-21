@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/auth"
@@ -20,8 +21,18 @@ import (
 
 // WidgetMember stands in for tests/admin_widgets/models.py::Member.
 type WidgetMember struct {
-	ID   int64
-	Name string `orm:"max_length=100"`
+	ID        int64
+	Name      string     `orm:"max_length=100"`
+	Birthdate *time.Time `orm:"null;blank"`
+	Gender    string     `orm:"max_length=1;blank"`
+	Email     string     `orm:"type=email;blank"`
+}
+
+// Meta gives the gender its choices, as Django's Member does.
+func (WidgetMember) Meta() orm.Meta {
+	return orm.Meta{Choices: map[string][]orm.Choice{
+		"Gender": {{Value: "M", Label: "Male"}, {Value: "F", Label: "Female"}},
+	}}
 }
 
 // String returns the member name.
@@ -64,13 +75,16 @@ func (e WidgetReleaseEvent) String() string { return e.Name }
 // Meta orders release events by name, as Django's ReleaseEvent does.
 func (WidgetReleaseEvent) Meta() orm.Meta { return orm.Meta{Ordering: []string{"name"}} }
 
-// WidgetEvent stands in for tests/admin_widgets/models.py::Event, with the
-// fields the ported tests use.
+// WidgetEvent stands in for tests/admin_widgets/models.py::Event.
 type WidgetEvent struct {
 	ID              int64
 	MainBand        orm.FK[WidgetBand]  `orm:"on_delete=cascade;related_name=events_main_band_at"`
 	SupportingBands orm.M2M[WidgetBand] `orm:"blank;related_name=events_supporting_band_at"`
+	StartDate       *orm.Date           `orm:"null;blank"`
+	StartTime       *orm.Time           `orm:"null;blank"`
 	Description     string              `orm:"type=text;blank"`
+	Link            string              `orm:"type=url;blank"`
+	MinAge          *int64              `orm:"null;blank"`
 }
 
 // Honeycomb stands in for tests/admin_widgets/models.py::Honeycomb, with an
@@ -87,12 +101,19 @@ type Bee struct {
 	Honeycomb orm.FK[Honeycomb] `orm:"on_delete=cascade"`
 }
 
-// Individual stands in for tests/admin_widgets/models.py::Individual: a
-// foreign key to itself, without an admin.
+// Individual stands in for tests/admin_widgets/models.py::Individual: two
+// foreign keys to itself, without an admin.
 type Individual struct {
-	ID     int64
-	Name   string             `orm:"max_length=20"`
-	Parent orm.FK[Individual] `orm:"null;on_delete=set_null"`
+	ID       int64
+	Name     string             `orm:"max_length=20"`
+	Parent   orm.FK[Individual] `orm:"null;on_delete=set_null"`
+	Soulmate orm.FK[Individual] `orm:"null;on_delete=cascade;related_name=soulmates"`
+}
+
+// WidgetVideoStream stands in for tests/admin_widgets/models.py::VideoStream.
+type WidgetVideoStream struct {
+	ID           int64
+	ReleaseEvent orm.FK[WidgetReleaseEvent] `orm:"on_delete=cascade"`
 }
 
 // widgetRelatedModels returns the model set of the ported raw-id and
@@ -100,7 +121,7 @@ type Individual struct {
 func widgetRelatedModels() []any {
 	return []any{auth.App{}, contenttypes.App{}, djangotest.App("admin_widgets",
 		&Company{}, &Advisor{}, &WidgetMember{}, &WidgetBand{}, &WidgetAlbum{}, &WidgetReleaseEvent{},
-		&WidgetEvent{}, &Honeycomb{}, &Bee{}, &Individual{},
+		&WidgetEvent{}, &Honeycomb{}, &Bee{}, &Individual{}, &WidgetVideoStream{},
 	)}
 }
 

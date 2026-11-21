@@ -61,6 +61,7 @@ func adminViewsModels() []any {
 			&Actor{},
 			&Worker{},
 			&RowLevelChangePermissionModel{},
+			&Album{},
 		),
 	}
 }

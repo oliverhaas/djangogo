@@ -463,8 +463,21 @@ func (f *ModelChoiceField) hasEmptyOption() bool {
 	if f.EmptyLabel == nil || f.Required && f.Initial != nil {
 		return false
 	}
-	_, radio := f.Widget.(RadioSelect)
+	_, radio := unwrapWidget(f.Widget).(RadioSelect)
 	return !radio || f.Blank
+}
+
+// unwrapWidget returns the widget that w wraps, following the Unwrap methods
+// of wrappers such as the admin's RelatedFieldWidgetWrapper, so that a rule
+// that depends on the kind of widget sees through the wrapper.
+func unwrapWidget(w Widget) Widget {
+	for {
+		u, ok := w.(interface{ Unwrap() Widget })
+		if !ok {
+			return w
+		}
+		w = u.Unwrap()
+	}
 }
 
 // setChoices implements choiceField: the choices become the rows, and an

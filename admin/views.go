@@ -120,10 +120,19 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj any, canChange boo
 		exclude = append(exclude, fields...)
 		readonly = fields
 	}
-	opts := slices.Concat([]forms.ModelFormOption{forms.WithFields(fields...), forms.WithExclude(exclude...)},
-		s.relationWidgets(r, e), e.admin.FormOptions)
+	built := map[string]bool{}
+	callback := func(mf *orm.Field, f forms.Field) forms.Field {
+		built[mf.Attr] = true
+		return formfieldForDBField(mf, f)
+	}
+	opts := slices.Concat([]forms.ModelFormOption{
+		forms.WithFields(fields...),
+		forms.WithExclude(exclude...),
+		forms.WithFormFieldCallback(callback),
+	}, s.relationWidgets(r, e), e.admin.FormOptions)
 	form := forms.FromModel(e.model, opts...)
 	syncAutocompleteRequired(form)
+	s.wrapRelatedWidgets(r, e, form, built)
 	s.populateChoices(r, form, e)
 	shown := obj
 	if shown == nil {
@@ -288,6 +297,12 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 				http.Error(w, "failed to create row", http.StatusInternalServerError)
 				return
 			}
+			if r.PostForm.Has(isPopupVar) {
+				s.checkSourceModel(r)
+				pk := pkOf(reflect.ValueOf(obj).Elem(), e)
+				s.popupResponse(w, r, "value", strconv.FormatInt(pk, 10), "obj", orm.Label(e.model, obj))
+				return
+			}
 			objDisplay := displayLabel(e.model, obj)
 			msg := fmt.Sprintf("The %s “%s” was added successfully.", singular, objDisplay)
 			if r.PostForm.Has("_continue") && e.hasViewOrChangePermission(s, r, obj) {
@@ -373,6 +388,12 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 				http.Error(w, "failed to update row", http.StatusInternalServerError)
 				return
 			}
+			if r.PostForm.Has(isPopupVar) {
+				newPK := pkOf(reflect.ValueOf(obj).Elem(), e)
+				s.popupResponse(w, r, "action", "change", "value", objectID,
+					"obj", orm.Label(e.model, obj), "new_value", strconv.FormatInt(newPK, 10))
+				return
+			}
 			objDisplay := displayLabel(e.model, obj)
 			msg := fmt.Sprintf("The %s “%s” was changed successfully.", singular, objDisplay)
 			if r.PostForm.Has("_continue") {
@@ -439,6 +460,10 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 			http.Error(w, "failed to delete row", http.StatusInternalServerError)
 			return
 		}
+		if r.PostForm.Has(isPopupVar) {
+			s.popupResponse(w, r, "action", "delete", "value", strconv.FormatInt(pk, 10))
+			return
+		}
 		_ = messages.Success(r, fmt.Sprintf("The %s “%s” was deleted successfully.", singular, objDisplay))
 		if e.hasChangePermission(s, r, nil) {
 			http.Redirect(w, r, s.changelistURL(e), http.StatusFound)
@@ -462,6 +487,10 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 	ctx["change_url"] = s.changeURL(e, pk)
 	ctx["action"] = r.URL.Path
 	ctx["media"] = e.media(s)
+	ctx["is_popup"] = isPopup(r)
+	ctx["is_popup_var"] = isPopupVar
+	ctx["to_field"] = r.FormValue(toFieldVar)
+	ctx["to_field_var"] = toFieldVar
 	s.render(w, r, "admin/delete_confirmation.html", ctx)
 }
 
@@ -533,6 +562,13 @@ func (s *AdminSite) renderChangeForm(
 	ctx["verbose_name_plural"] = capFirst(plural)
 	ctx["changelist_url"] = s.changelistURL(e)
 	ctx["action"] = r.URL.Path
+	popup := isPopup(r)
+	ctx["is_popup"] = popup
+	ctx["is_popup_var"] = isPopupVar
+	ctx["to_field"] = r.FormValue(toFieldVar)
+	ctx["to_field_var"] = toFieldVar
+	ctx["source_model"] = r.URL.Query().Get(sourceModelVar)
+	ctx["source_model_var"] = sourceModelVar
 
 	hasAdd := e.hasAddPermission(s, r)
 	hasModelView := e.hasViewOrChangePermission(s, r, nil)
@@ -562,10 +598,10 @@ func (s *AdminSite) renderChangeForm(
 	// Submit-row button visibility mirrors Django's submit_row template tag.
 	showSave := isAdd || canChange
 	ctx["show_save"] = showSave
-	ctx["show_save_and_add_another"] = hasAdd && showSave
-	ctx["show_save_and_continue"] = showSave && (hasObjChange || hasObjView)
+	ctx["show_save_and_add_another"] = !popup && hasAdd && showSave
+	ctx["show_save_and_continue"] = !popup && showSave && (hasObjChange || hasObjView)
 	ctx["show_close"] = !showSave && hasModelView
-	ctx["show_delete_link"] = hasObjDelete
+	ctx["show_delete_link"] = !popup && hasObjDelete
 
 	s.render(w, r, "admin/change_form.html", ctx)
 }
@@ -587,6 +623,49 @@ func (s *AdminSite) manyLabels(ctx context.Context, obj any, f *orm.Field) strin
 		labels[i] = row[1]
 	}
 	return strings.Join(labels, ", ")
+}
+
+// isPopup reports whether r comes from a popup window, Django's IS_POPUP_VAR
+// in request.POST or request.GET.
+func isPopup(r *http.Request) bool {
+	_ = r.ParseForm()
+	return r.Form.Has(isPopupVar)
+}
+
+// popupResponse writes the page that closes a popup window and hands data to
+// the window that opened it, Django's admin/popup_response.html. pairs are
+// the keys and values of the data, written in order as Python's json.dumps
+// writes an object.
+func (s *AdminSite) popupResponse(w http.ResponseWriter, r *http.Request, pairs ...string) {
+	var b strings.Builder
+	b.WriteByte('{')
+	for i := 0; i+1 < len(pairs); i += 2 {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(templates.QuoteJSON(pairs[i]) + ": " + templates.QuoteJSON(pairs[i+1]))
+	}
+	b.WriteByte('}')
+	s.render(w, r, "admin/popup_response.html", map[string]any{"popup_response_data": b.String()})
+}
+
+// checkSourceModel adds Django's error message to the request when the
+// _source_model of a popup add names no model. Django then looks for the
+// choice of the new object in the option groups of the source model's form;
+// Go choices have no option groups, so a model that exists needs no lookup.
+func (s *AdminSite) checkSourceModel(r *http.Request) {
+	name := r.PostForm.Get(sourceModelVar)
+	if name == "" {
+		return
+	}
+	if app, model, ok := strings.Cut(name, "."); ok {
+		for _, m := range s.db.Registry().AppModels(app) {
+			if strings.EqualFold(m.Name(), model) {
+				return
+			}
+		}
+	}
+	_ = messages.Error(r, fmt.Sprintf(`The app "%s" could not be found.`, name))
 }
 
 // redirectPostSave redirects after a successful add or change save: to the

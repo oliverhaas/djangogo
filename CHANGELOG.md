@@ -242,6 +242,27 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   counter of the bulk actions. The `jsi18n/` view serves the English
   catalog of the scripts. `AdminSite.Debug`, set from `Settings.Debug`, loads
   the unminified jQuery and Select2.
+- Admin: the add and change forms use Django's admin widgets. A date field
+  gets a calendar and a "Today" link, a time field a clock and a "Now" link,
+  and a date and time field is split into a date and a time input
+  (`AdminSplitDateTime`). Text, URL, integer, email and UUID fields get the
+  admin's classes, and a URL field shows its current value as a link. A
+  foreign key or many-to-many field gets the links that add, change, view and
+  delete the related object, as far as the user's permissions allow
+  (`RelatedFieldWidgetWrapper`). These links open the related admin in a
+  popup, and saving or deleting there updates the field in the form that
+  opened it. `FormOptions` still replaces any of these widgets.
+- Forms: `MultiValueField` cleans one value made of several fields, and
+  `SplitDateTimeField` takes a date and a time in two inputs. `MultiWidget`
+  renders several widgets as one; `SplitDateTimeWidget` and
+  `SplitHiddenDateTimeWidget` are its date and time forms. A widget outside
+  the package can implement `forms.MultiValueWidget` to lay out its own
+  subwidgets. The options `InputDateFormats`, `InputTimeFormats` and
+  `RequireAllFields` configure the new fields.
+- Forms: `WithFormFieldCallback` builds the form fields of a model form
+  through a function, as Django's `formfield_callback` does. `forms.Escape`
+  escapes HTML as Django does, and `templates.QuoteJSON` quotes a string as
+  Python's `json.dumps` does.
 - Forms: `forms.Media` holds the stylesheets and scripts of a widget or a form,
   as Django's `Media` does: a widget declares them with a `Media` method,
   `Form.Media` adds up the media of its widgets and `Form.ExtraMedia`, and a
@@ -376,6 +397,9 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   now adds `USING` only when the base type changes. `RemoveField` no longer
   drops dependent objects with `CASCADE`, and `RemoveIndex` uses
   `DROP INDEX IF EXISTS`, as Django does.
+- On PostgreSQL, a form showed a date and time in the server's local time
+  zone, so saving the form unchanged could move the value. A `DateTimeField`
+  now shows its value in UTC, the time zone in which it reads the input.
 
 ### Security
 

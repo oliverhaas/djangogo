@@ -162,8 +162,11 @@ func (bf *BoundField) AsWidget(w Widget, attrs Attrs) string {
 	w = bf.widget(w)
 	base := bf.field.Base()
 	built := mergeAttrs(bf.field.WidgetAttrs(w), attrs)
+	var subRequired []bool
 	if w.UseRequiredAttribute(bf.Initial()) && base.Required && bf.form.UseRequiredAttribute {
-		built["required"] = true
+		if subRequired = bf.subwidgetsRequired(w); subRequired == nil {
+			built["required"] = true
+		}
 	}
 	if base.Disabled {
 		built["disabled"] = true
@@ -183,7 +186,32 @@ func (bf *BoundField) AsWidget(w Widget, attrs Attrs) string {
 			}
 		}
 	}
+	if subRequired != nil {
+		return w.(MultiValueWidget).RenderRequired(bf.HTMLName(), bf.Value(), built, subRequired)
+	}
 	return w.Render(bf.HTMLName(), bf.Value(), built)
+}
+
+// subwidgetsRequired returns whether each subwidget of w gets the required
+// attribute, for a MultiValueField that does not require all its subfields:
+// a subwidget does when its subfield is required. It returns nil for any
+// other field or widget, which gets the required attribute as a whole.
+func (bf *BoundField) subwidgetsRequired(w Widget) []bool {
+	mf, ok := bf.field.(interface{ multiValue() *MultiValueField })
+	if !ok || mf.multiValue().RequireAllFields {
+		return nil
+	}
+	mw, ok := w.(MultiValueWidget)
+	if !ok {
+		return nil
+	}
+	fields := mf.multiValue().Fields
+	subs := mw.Subwidgets()
+	required := make([]bool, min(len(fields), len(subs)))
+	for i := range required {
+		required[i] = subs[i].UseRequiredAttribute(bf.Initial()) && fields[i].Base().Required
+	}
+	return required
 }
 
 // String renders the field with its own widget.
@@ -204,6 +232,8 @@ func (bf *BoundField) AsHidden(attrs Attrs) string {
 	switch bf.field.(type) {
 	case *MultipleChoiceField, *TypedMultipleChoiceField, *ModelMultipleChoiceField:
 		return bf.AsWidget(MultipleHiddenInput{}, attrs)
+	case *SplitDateTimeField:
+		return bf.AsWidget(SplitHiddenDateTimeWidget{}, attrs)
 	}
 	return bf.AsWidget(HiddenInput{}, attrs)
 }
