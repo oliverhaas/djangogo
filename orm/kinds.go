@@ -317,6 +317,12 @@ func applyKindTagOption(f *Field, fieldName, token string) (bool, error) {
 			return true, fmt.Errorf("orm: field %s: invalid protocol %q: must be both, ipv4, or ipv6", fieldName, proto)
 		}
 		return true, nil
+	case token == "unpack_ipv4":
+		if f.Kind != KindGenericIPAddress {
+			return true, fmt.Errorf("orm: field %s: unpack_ipv4 is only valid for IP address fields", fieldName)
+		}
+		f.UnpackIPv4 = true
+		return true, nil
 	case strings.HasPrefix(token, "max_digits="):
 		raw := token[len("max_digits="):]
 		n, err := strconv.Atoi(raw)
@@ -463,6 +469,9 @@ func validateFieldOptions(f *Field, fieldName string) error {
 	if f.Kind == KindDecimal && f.MaxDigits > 0 && f.DecimalPlaces > f.MaxDigits {
 		return fmt.Errorf("orm: field %s: decimal_places (%d) must not exceed max_digits (%d)",
 			fieldName, f.DecimalPlaces, f.MaxDigits)
+	}
+	if f.UnpackIPv4 && f.Protocol != "" && f.Protocol != "both" {
+		return fmt.Errorf("orm: field %s: unpack_ipv4 requires protocol=both", fieldName)
 	}
 	return nil
 }
@@ -682,6 +691,21 @@ func normalizeIPAddress(s, protocol string) (string, error) {
 	return addr.String(), nil
 }
 
+// normalizeIPAddressUnpack trims s, validates it according to protocol, and
+// unpacks IPv4-mapped IPv6 addresses when unpackIPv4 is true.
+func normalizeIPAddressUnpack(s, protocol string, unpackIPv4 bool) (string, error) {
+	norm, err := normalizeIPAddress(s, protocol)
+	if err != nil {
+		return "", err
+	}
+	if unpackIPv4 {
+		if addr, err := netip.ParseAddr(norm); err == nil && addr.Is4In6() {
+			return addr.Unmap().String(), nil
+		}
+	}
+	return norm, nil
+}
+
 // bindField converts a Go value v for field f into the parameter value expected
 // by dialect d's database/sql driver.
 func bindField(d Dialect, f *Field, v any) (any, error) {
@@ -782,7 +806,7 @@ func bindIPAddress(f *Field, v any) (any, error) {
 			}
 			return nil, fmt.Errorf("orm: field %s: invalid IP address", f.Name)
 		}
-		return normalizeIPAddress(x.String(), f.Protocol)
+		return normalizeIPAddressUnpack(x.String(), f.Protocol, f.UnpackIPv4)
 	case string:
 		if strings.TrimSpace(x) == "" {
 			if f.Null {
@@ -790,7 +814,7 @@ func bindIPAddress(f *Field, v any) (any, error) {
 			}
 			return nil, fmt.Errorf("orm: field %s: IP address cannot be blank", f.Name)
 		}
-		return normalizeIPAddress(x, f.Protocol)
+		return normalizeIPAddressUnpack(x, f.Protocol, f.UnpackIPv4)
 	default:
 		return nil, fmt.Errorf("orm: field %s: unsupported IP value %T", f.Name, v)
 	}
