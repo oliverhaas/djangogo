@@ -29,6 +29,18 @@ type Meta struct {
 	// VerboseNamePlural overrides the human-readable plural name (Django's
 	// Meta.verbose_name_plural).
 	VerboseNamePlural string
+	// Choices declares per-field choices keyed by Go struct field name,
+	// attribute name, or column name (Django's Field(choices=...)).
+	Choices map[string][]Choice
+	// ChoicesFunc declares per-field dynamic choice providers evaluated on
+	// demand (Django's Field(choices=callable)).
+	ChoicesFunc map[string]func() []Choice
+	// Validators declares per-field custom validators keyed by Go struct field
+	// name, attribute name, or column name (Django's Field(validators=[...])).
+	Validators map[string][]Validator
+	// ErrorMessages declares per-field error message overrides keyed by field
+	// name then error code (Django's Field(error_messages={...})).
+	ErrorMessages map[string]map[string]string
 }
 
 // withMeta is implemented by models that customize their Meta.
@@ -36,11 +48,18 @@ type withMeta interface {
 	Meta() Meta
 }
 
-// Choice is one (value, label) option for a choices-constrained field, the analog
-// of one entry in Django's choices=[(value, label), ...].
+// Choice is one (value, label) option or optgroup for a choices-constrained
+// field, the analog of one entry in Django's choices=[(value, label), ...] or
+// choices=[("Group", [(value, label), ...])].
 type Choice struct {
 	Value string
 	Label string
+	// Group holds nested choices when this entry is an optgroup heading.
+	// When non-empty, Label is the group name and Value is ignored.
+	Group []Choice
+	// Raw holds the typed choice value (such as int, Decimal, Date, bool, or
+	// UUID) when constructed via ChoiceOf. When nil, Value is used.
+	Raw any
 }
 
 // withChoices is implemented by models that declare per-field choices. The map

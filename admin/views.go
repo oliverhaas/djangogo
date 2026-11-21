@@ -3,139 +3,111 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
-	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/oliverhaas/djangogo/auth"
-	"github.com/oliverhaas/djangogo/csrf"
 	"github.com/oliverhaas/djangogo/forms"
+	"github.com/oliverhaas/djangogo/messages"
 	"github.com/oliverhaas/djangogo/orm"
-	"github.com/oliverhaas/djangogo/sessions"
+	"github.com/oliverhaas/djangogo/templates"
 	"github.com/oliverhaas/djangogo/urls"
 )
 
-// Routes returns the admin's URL routes: the login page, the index, the
-// per-model changelist, and the form-driven add, change, and delete write views.
-// The write routes are registered without a method token so each handler sees
-// both GET and POST and dispatches on r.Method. Every handler except login is
-// wrapped with staffRequired so only authenticated staff users reach it; the
-// login view must stay reachable anonymously, so it is mounted unwrapped. Its
-// exact path (LoginURL) takes precedence over the {model} changelist pattern
-// under net/http's ServeMux specificity rules.
-func (s *AdminSite) Routes() []urls.Route {
-	staff := s.staffRequired
-	p := s.Prefix
-	return []urls.Route{
-		urls.Path(s.LoginURL+"{$}", http.HandlerFunc(s.login), "admin-login"),
-		urls.Path(p+"/{$}", staff(http.HandlerFunc(s.index)), "admin-index"),
-		urls.Path(p+"/{model}/{$}", staff(http.HandlerFunc(s.changelist)), "admin-changelist"),
-		urls.Path(p+"/{model}/add/{$}", staff(http.HandlerFunc(s.add)), "admin-add"),
-		urls.Path(p+"/{model}/{pk}/change/{$}", staff(http.HandlerFunc(s.change)), "admin-change"),
-		urls.Path(p+"/{model}/{pk}/delete/{$}", staff(http.HandlerFunc(s.delete)), "admin-delete"),
-	}
-}
-
-// staffRequired wraps next so it runs only for an authenticated staff user.
-// Anonymous or non-staff requests get a 302 to LoginURL carrying a ?next= of the
-// original path.
-func (s *AdminSite) staffRequired(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, ok := auth.CurrentUser(r.Context())
-		if !ok || !u.IsStaff {
-			target := s.LoginURL + "?next=" + url.QueryEscape(r.URL.Path)
-			http.Redirect(w, r, target, http.StatusFound)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// login renders and processes the admin login form. It is mounted unwrapped by
-// staffRequired so anonymous users can reach it. GET renders the form. POST looks
-// up the user by username, and on a correct password for a staff account logs the
-// user into the session and redirects to a safe next target (falling back to the
-// admin index); any failure re-renders the form with an error.
-func (s *AdminSite) login(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		s.loginPOST(w, r)
-		return
-	}
-	s.renderLogin(w, r, safeNext(r.URL.Query().Get("next")), "")
-}
-
-// loginPOST validates submitted credentials and, on success, establishes the
-// session and redirects; otherwise it re-renders the login form with an error.
-func (s *AdminSite) loginPOST(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-	next := safeNext(r.PostForm.Get("next"))
-	username := r.PostForm.Get("username")
-	password := r.PostForm.Get("password")
-
-	user, err := orm.Query[auth.User](s.db).Get(r.Context(), "username", username)
-	if err != nil || !user.CheckPassword(password) || !user.IsStaff || !user.IsActive {
-		s.renderLogin(w, r, next, "Please enter a correct username and password, or you are not staff.")
-		return
-	}
-
-	sess, ok := sessions.FromContext(r.Context())
-	if !ok {
-		http.Error(w, "no session", http.StatusInternalServerError)
-		return
-	}
-	auth.Login(sess, &user)
-
-	target := next
-	if target == "" {
-		target = s.Prefix + "/"
-	}
-	http.Redirect(w, r, target, http.StatusFound)
-}
-
-// renderLogin renders the login form with the optional next target and error.
-func (s *AdminSite) renderLogin(w http.ResponseWriter, r *http.Request, next, errMsg string) {
-	s.render(w, r, "login.html", map[string]any{
-		"csrf_token": csrf.Token(r.Context()),
-		"action":     s.LoginURL,
-		"next":       next,
-		"error":      errMsg,
-		"prefix":     s.Prefix,
-	})
-}
-
-// safeNext returns next when it is a safe, local path (begins with a single "/")
-// and otherwise the empty string, guarding the login redirect against open
-// redirects to "//host" or absolute URLs.
-func safeNext(next string) string {
-	if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
-		return next
-	}
-	return ""
-}
-
-// index renders the admin landing page listing every registered model.
+// index renders the admin landing page grouped by app, listing only apps and
+// models the current user has permission to access.
 func (s *AdminSite) index(w http.ResponseWriter, r *http.Request) {
-	list := make([]map[string]any, len(s.entries))
-	for i, e := range s.entries {
-		list[i] = map[string]any{"slug": e.slug, "name": e.model.Name()}
-	}
-	s.render(w, r, "index.html", map[string]any{
-		"prefix":  s.Prefix,
-		"entries": list,
-	})
+	ctx := s.EachContext(r)
+	ctx["title"] = s.indexTitle()
+	ctx["subtitle"] = ""
+	ctx["app_list"] = ctx["available_apps"]
+	s.render(w, r, "admin/index.html", ctx)
 }
 
-// changelist renders the read-only list of rows for the model named in the URL.
-// It 404s for an unknown model.
-func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request) {
-	e, ok := s.bySlug[r.PathValue("model")]
-	if !ok {
+// appIndex renders the per-app admin index page, or 404 when the user has no
+// visible models in the requested app.
+func (s *AdminSite) appIndex(w http.ResponseWriter, r *http.Request) {
+	appLabel := r.PathValue("app_label")
+	appList := s.GetAppList(r, appLabel)
+	if len(appList) == 0 {
 		http.NotFound(w, r)
+		return
+	}
+	appName, _ := appList[0]["name"].(string)
+	ctx := s.EachContext(r)
+	ctx["title"] = appName + " administration"
+	ctx["subtitle"] = ""
+	ctx["app_label"] = appLabel
+	ctx["app_list"] = appList
+	s.render(w, r, "admin/app_index.html", ctx)
+}
+
+// catchAllView runs for unmatched URLs under the admin prefix after
+// HasPermission passes. If appending a trailing slash matches a real admin
+// route, it redirects permanently; otherwise it responds 404.
+func (s *AdminSite) catchAllView(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	if !strings.HasSuffix(path, "/") {
+		if m, err := s.reverseRouter().Resolve(path + "/"); err == nil {
+			if opt, ok := m.Handler.(urls.SlashOptOut); !ok || opt.ShouldAppendSlash() {
+				target := path + "/"
+				if r.URL.RawQuery != "" {
+					target += "?" + r.URL.RawQuery
+				}
+				http.Redirect(w, r, target, http.StatusMovedPermanently)
+				return
+			}
+		}
+	}
+	http.NotFound(w, r)
+}
+
+// makeChangelistHandler binds e to changelist.
+func (s *AdminSite) makeChangelistHandler(e *entry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { s.changelist(w, r, e) }
+}
+
+// makeAddHandler binds e to add.
+func (s *AdminSite) makeAddHandler(e *entry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { s.add(w, r, e) }
+}
+
+// makeChangeHandler binds e to change.
+func (s *AdminSite) makeChangeHandler(e *entry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { s.change(w, r, e) }
+}
+
+// makeDeleteHandler binds e to delete.
+func (s *AdminSite) makeDeleteHandler(e *entry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { s.delete(w, r, e) }
+}
+
+// makeHistoryHandler binds e to history.
+func (s *AdminSite) makeHistoryHandler(e *entry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { s.history(w, r, e) }
+}
+
+// makeOldChangeRedirect redirects Django's legacy "<pk>/" URL to "<pk>/change/".
+func (s *AdminSite) makeOldChangeRedirect(e *entry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		objectID := r.PathValue("object_id")
+		target := s.reverse(e.urlName("change"), objectID)
+		if target == "" {
+			target = s.prefix() + "/" + e.routePrefix() + objectID + "/change/"
+		}
+		http.Redirect(w, r, target, http.StatusFound)
+	}
+}
+
+// changelist renders the list of rows for e after checking view or change
+// permission.
+func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry) {
+	if !e.hasViewOrChangePermission(s, r, nil) {
+		forbidden(w)
 		return
 	}
 
@@ -152,23 +124,9 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pre-load foreign-key labels: one query per FK column, indexed by primary
-	// key string, so each FK cell shows the related object's label (driven by its
-	// String() method) rather than a raw id.
-	fkLabels := make(map[int]map[string]string)
-	for j, f := range cols {
-		if f.Rel == nil || f.Rel.Target == nil {
-			continue
-		}
-		opts, err := orm.LabeledRows(r.Context(), s.db, f.Rel.Target)
-		if err != nil {
-			continue
-		}
-		labels := make(map[string]string, len(opts))
-		for _, o := range opts {
-			labels[o[0]] = o[1]
-		}
-		fkLabels[j] = labels
-	}
+	// key string, so each FK cell shows the related object's label rather than
+	// a raw id.
+	fkLabels := s.loadFKLabels(r.Context(), cols)
 
 	rows := make([]map[string]any, len(objs))
 	for i, obj := range objs {
@@ -181,20 +139,61 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request) {
 			}
 			cells[j] = formatCell(elem.Field(f.Index))
 		}
+		pk := pkOf(elem, e)
 		rows[i] = map[string]any{
-			"pk":    pkOf(elem, e),
-			"cells": cells,
-			"label": orm.Label(e.model, obj),
+			"pk":         pk,
+			"cells":      cells,
+			"label":      displayLabel(e.model, obj),
+			"change_url": s.changeURL(e, pk),
+			"delete_url": s.deleteURL(e, pk),
 		}
 	}
 
-	s.render(w, r, "changelist.html", map[string]any{
-		"prefix":  s.Prefix,
-		"slug":    e.slug,
-		"model":   e.model.Name(),
-		"columns": columns,
-		"rows":    rows,
-	})
+	singular, plural := modelVerboseNames(e.model)
+	canChange := e.hasChangePermission(s, r, nil)
+	title := "Select " + singular + " to view"
+	if canChange {
+		title = "Select " + singular + " to change"
+	}
+
+	ctx := s.EachContext(r)
+	ctx["title"] = title
+	ctx["subtitle"] = ""
+	ctx["app_label"] = e.app
+	ctx["app_verbose_name"] = s.appVerboseName(e.app)
+	ctx["app_url"] = s.appURLOrEmpty(e.app)
+	ctx["slug"] = e.slug
+	ctx["model"] = e.model.Name()
+	ctx["verbose_name"] = singular
+	ctx["verbose_name_plural"] = capFirst(plural)
+	ctx["columns"] = columns
+	ctx["rows"] = rows
+	ctx["has_add_permission"] = e.hasAddPermission(s, r)
+	ctx["has_change_permission"] = canChange
+	ctx["has_delete_permission"] = e.hasDeletePermission(s, r, nil)
+	ctx["add_url"] = s.addURL(e)
+	s.render(w, r, "admin/change_list.html", ctx)
+}
+
+// loadFKLabels pre-loads related object labels for each foreign-key field in
+// fields, keyed by index into fields.
+func (s *AdminSite) loadFKLabels(ctx context.Context, fields []*orm.Field) map[int]map[string]string {
+	fkLabels := make(map[int]map[string]string)
+	for j, f := range fields {
+		if f.Rel == nil || f.Rel.Target == nil {
+			continue
+		}
+		opts, err := orm.LabeledRows(ctx, s.db, f.Rel.Target)
+		if err != nil {
+			continue
+		}
+		labels := make(map[string]string, len(opts))
+		for _, o := range opts {
+			labels[o[0]] = o[1]
+		}
+		fkLabels[j] = labels
+	}
+	return fkLabels
 }
 
 // formFor builds the editable form for an entry: the model form minus the
@@ -217,11 +216,7 @@ func (s *AdminSite) excluded(e *entry) []string {
 }
 
 // populateChoices fills every foreign-key field's <select> with the related
-// model's (pk, label) rows. A load failure leaves the options empty, so a
-// submitted pk fails ChoiceField validation rather than 500-ing the request.
-// Relations whose field was excluded from the form (ExcludeFields/ReadonlyFields)
-// are skipped, so a full-table LabeledRows query is not run for a select that
-// would never be rendered.
+// model's (pk, label) rows.
 func (s *AdminSite) populateChoices(ctx context.Context, form *forms.Form, e *entry) {
 	present := make(map[string]bool, len(form.Fields()))
 	for _, fld := range form.Fields() {
@@ -239,14 +234,16 @@ func (s *AdminSite) populateChoices(ctx context.Context, form *forms.Form, e *en
 	}
 }
 
-// add handles the add form: GET renders an empty form, POST validates the
-// submission and creates a row before redirecting to the changelist.
-func (s *AdminSite) add(w http.ResponseWriter, r *http.Request) {
-	e, ok := s.bySlug[r.PathValue("model")]
-	if !ok {
-		http.NotFound(w, r)
+// add handles the add form: requires add permission, validates POST data,
+// creates a row, sets a success message, and redirects per Django's
+// response_add rules.
+func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
+	if !e.hasAddPermission(s, r) {
+		forbidden(w)
 		return
 	}
+	singular, _ := modelVerboseNames(e.model)
+	title := "Add " + singular
 
 	if r.Method == http.MethodPost {
 		if err := r.ParseForm(); err != nil {
@@ -264,46 +261,67 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to create row", http.StatusInternalServerError)
 				return
 			}
-			http.Redirect(w, r, s.changelistURL(e), http.StatusFound)
+			objDisplay := displayLabel(e.model, obj)
+			msg := fmt.Sprintf("The %s “%s” was added successfully.", singular, objDisplay)
+			if r.PostForm.Has("_continue") && e.hasViewOrChangePermission(s, r, obj) {
+				if e.hasChangePermission(s, r, obj) {
+					msg += " You may edit it again below."
+				}
+				_ = messages.Success(r, msg)
+				pk := pkOf(reflect.ValueOf(obj).Elem(), e)
+				http.Redirect(w, r, s.changeURL(e, pk), http.StatusFound)
+				return
+			}
+			if r.PostForm.Has("_addanother") {
+				_ = messages.Success(r, fmt.Sprintf("%s You may add another %s below.", msg, singular))
+				http.Redirect(w, r, r.URL.Path, http.StatusFound)
+				return
+			}
+			_ = messages.Success(r, msg)
+			s.redirectPostSave(w, r, e)
 			return
 		}
-		s.renderForm(w, r, e, "Add "+e.model.Name(), form)
+		s.renderChangeForm(w, r, e, title, nil, form, true, true)
 		return
 	}
 
-	s.renderForm(w, r, e, "Add "+e.model.Name(), s.formFor(r.Context(), e))
+	s.renderChangeForm(w, r, e, title, nil, s.formFor(r.Context(), e), true, true)
 }
 
-// change handles the change form: GET renders a form pre-filled from the row,
-// POST validates the submission and updates the row before redirecting.
-func (s *AdminSite) change(w http.ResponseWriter, r *http.Request) {
-	e, ok := s.bySlug[r.PathValue("model")]
-	if !ok {
-		http.NotFound(w, r)
+// change handles the change/view form: checks view or change permission on the
+// loaded object, rejects POST from view-only users with 403, renders a
+// read-only form for view-only users, and updates through orm.Save for users
+// with change permission.
+func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
+	objectID := r.PathValue("object_id")
+	obj, pk, err := s.loadObject(r.Context(), e, objectID)
+	if err != nil {
+		http.Error(w, "failed to load row", http.StatusInternalServerError)
 		return
 	}
-	pk, err := strconv.ParseInt(r.PathValue("pk"), 10, 64)
-	if err != nil {
-		http.NotFound(w, r)
+	if !e.hasViewOrChangePermission(s, r, obj) {
+		forbidden(w)
+		return
+	}
+	if obj == nil {
+		s.objDoesNotExistRedirect(w, r, e, objectID)
 		return
 	}
 
+	canChange := e.hasChangePermission(s, r, obj)
+	singular, _ := modelVerboseNames(e.model)
+
 	if r.Method == http.MethodPost {
+		if !canChange {
+			forbidden(w)
+			return
+		}
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
 		form := s.formFor(r.Context(), e).Bind(r.PostForm)
 		if form.IsValid() {
-			obj, err := e.ops.get(r.Context(), pk)
-			if errors.Is(err, orm.ErrDoesNotExist) {
-				http.NotFound(w, r)
-				return
-			}
-			if err != nil {
-				http.Error(w, "failed to load row", http.StatusInternalServerError)
-				return
-			}
 			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
 				http.Error(w, "failed to populate object", http.StatusInternalServerError)
 				return
@@ -312,95 +330,338 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to update row", http.StatusInternalServerError)
 				return
 			}
-			http.Redirect(w, r, s.changelistURL(e), http.StatusFound)
+			objDisplay := displayLabel(e.model, obj)
+			msg := fmt.Sprintf("The %s “%s” was changed successfully.", singular, objDisplay)
+			if r.PostForm.Has("_continue") {
+				_ = messages.Success(r, msg+" You may edit it again below.")
+				http.Redirect(w, r, r.URL.Path, http.StatusFound)
+				return
+			}
+			if r.PostForm.Has("_addanother") && e.hasAddPermission(s, r) {
+				_ = messages.Success(r, fmt.Sprintf("%s You may add another %s below.", msg, singular))
+				http.Redirect(w, r, s.addURL(e), http.StatusFound)
+				return
+			}
+			_ = messages.Success(r, msg)
+			s.redirectPostSave(w, r, e)
 			return
 		}
-		s.renderForm(w, r, e, "Change "+e.model.Name(), form)
+		s.renderChangeForm(w, r, e, "Change "+singular, obj, form, false, true)
 		return
 	}
 
-	obj, err := e.ops.get(r.Context(), pk)
-	if errors.Is(err, orm.ErrDoesNotExist) {
-		http.NotFound(w, r)
+	if !canChange {
+		s.renderChangeForm(w, r, e, "View "+singular, obj, nil, false, false)
 		return
 	}
+
+	form := forms.FromStruct(e.model, obj, forms.WithExclude(s.excluded(e)...))
+	s.populateChoices(r.Context(), form, e)
+	s.renderChangeForm(w, r, e, "Change "+singular, obj, form, false, true)
+}
+
+// delete handles the delete confirmation: checks delete permission on the
+// loaded object, redirects with a warning if nonexistent, and on POST deletes
+// the row and redirects to changelist (with change perm) or admin index.
+func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
+	objectID := r.PathValue("object_id")
+	obj, pk, err := s.loadObject(r.Context(), e, objectID)
 	if err != nil {
 		http.Error(w, "failed to load row", http.StatusInternalServerError)
 		return
 	}
-	// Pre-fill from the struct over the same field set add uses, so the form
-	// re-displays the existing row's values.
-	form := forms.FromStruct(e.model, obj, forms.WithExclude(s.excluded(e)...))
-	s.populateChoices(r.Context(), form, e)
-	s.renderForm(w, r, e, "Change "+e.model.Name(), form)
-}
+	if !e.hasDeletePermission(s, r, obj) {
+		forbidden(w)
+		return
+	}
+	if obj == nil {
+		s.objDoesNotExistRedirect(w, r, e, objectID)
+		return
+	}
 
-// delete handles the delete confirmation: GET renders the confirmation page,
-// POST removes the row and redirects to the changelist.
-func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request) {
-	e, ok := s.bySlug[r.PathValue("model")]
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	pk, err := strconv.ParseInt(r.PathValue("pk"), 10, 64)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
+	singular, plural := modelVerboseNames(e.model)
+	objDisplay := displayLabel(e.model, obj)
 
 	if r.Method == http.MethodPost {
 		if err := e.ops.del(r.Context(), pk); err != nil {
 			http.Error(w, "failed to delete row", http.StatusInternalServerError)
 			return
 		}
-		http.Redirect(w, r, s.changelistURL(e), http.StatusFound)
+		_ = messages.Success(r, fmt.Sprintf("The %s “%s” was deleted successfully.", singular, objDisplay))
+		if e.hasChangePermission(s, r, nil) {
+			http.Redirect(w, r, s.changelistURL(e), http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, s.indexURL(), http.StatusFound)
 		return
 	}
 
-	obj, err := e.ops.get(r.Context(), pk)
-	if errors.Is(err, orm.ErrDoesNotExist) {
-		http.NotFound(w, r)
-		return
-	} else if err != nil {
+	ctx := s.EachContext(r)
+	ctx["title"] = "Delete"
+	ctx["subtitle"] = ""
+	ctx["object"] = objDisplay
+	ctx["object_name"] = singular
+	ctx["app_label"] = e.app
+	ctx["app_verbose_name"] = s.appVerboseName(e.app)
+	ctx["app_url"] = s.appURLOrEmpty(e.app)
+	ctx["verbose_name_plural"] = capFirst(plural)
+	ctx["has_view_permission"] = e.hasViewOrChangePermission(s, r, nil)
+	ctx["changelist_url"] = s.changelistURL(e)
+	ctx["change_url"] = s.changeURL(e, pk)
+	ctx["action"] = r.URL.Path
+	s.render(w, r, "admin/delete_confirmation.html", ctx)
+}
+
+// history handles the per-object change history view: requires view or change
+// permission on the object and redirects to admin:index when nonexistent.
+func (s *AdminSite) history(w http.ResponseWriter, r *http.Request, e *entry) {
+	objectID := r.PathValue("object_id")
+	obj, pk, err := s.loadObject(r.Context(), e, objectID)
+	if err != nil {
 		http.Error(w, "failed to load row", http.StatusInternalServerError)
 		return
 	}
+	if !e.hasViewOrChangePermission(s, r, obj) {
+		forbidden(w)
+		return
+	}
+	if obj == nil {
+		s.objDoesNotExistRedirect(w, r, e, objectID)
+		return
+	}
 
-	s.render(w, r, "delete_confirm.html", map[string]any{
-		"title":      "Delete " + e.model.Name(),
-		"object":     orm.Label(e.model, obj),
-		"csrf_token": csrf.Token(r.Context()),
-		"action":     r.URL.Path,
-		"prefix":     s.Prefix,
-		"model":      e.slug,
-	})
+	_, plural := modelVerboseNames(e.model)
+	objDisplay := displayLabel(e.model, obj)
+	ctx := s.EachContext(r)
+	ctx["title"] = "Change history: " + objDisplay
+	ctx["subtitle"] = ""
+	ctx["object"] = objDisplay
+	ctx["app_label"] = e.app
+	ctx["app_verbose_name"] = s.appVerboseName(e.app)
+	ctx["app_url"] = s.appURLOrEmpty(e.app)
+	ctx["verbose_name_plural"] = capFirst(plural)
+	ctx["has_view_permission"] = e.hasViewOrChangePermission(s, r, nil)
+	ctx["changelist_url"] = s.changelistURL(e)
+	ctx["change_url"] = s.changeURL(e, pk)
+	s.render(w, r, "admin/object_history.html", ctx)
 }
 
-// renderForm renders the change_form template for an add or change view with the
-// given title and (possibly bound) form.
-func (s *AdminSite) renderForm(w http.ResponseWriter, r *http.Request, e *entry, title string, form *forms.Form) {
-	s.render(w, r, "change_form.html", map[string]any{
-		"title":      title,
-		"form_html":  form.Render(),
-		"csrf_token": csrf.Token(r.Context()),
-		"action":     r.URL.Path,
-		"prefix":     s.Prefix,
-		"model":      e.slug,
-	})
+// renderChangeForm renders admin/change_form.html for add, change, or
+// view-only change requests.
+func (s *AdminSite) renderChangeForm(
+	w http.ResponseWriter,
+	r *http.Request,
+	e *entry,
+	title string,
+	obj any,
+	form *forms.Form,
+	isAdd bool,
+	canChange bool,
+) {
+	singular, plural := modelVerboseNames(e.model)
+	ctx := s.EachContext(r)
+	ctx["title"] = title
+	if obj != nil {
+		ctx["subtitle"] = displayLabel(e.model, obj)
+		ctx["original"] = obj
+	} else {
+		ctx["subtitle"] = ""
+	}
+	ctx["add"] = isAdd
+	ctx["change"] = !isAdd
+	ctx["can_change"] = canChange
+	ctx["app_label"] = e.app
+	ctx["app_verbose_name"] = s.appVerboseName(e.app)
+	ctx["app_url"] = s.appURLOrEmpty(e.app)
+	ctx["model_name"] = e.slug
+	ctx["verbose_name"] = singular
+	ctx["verbose_name_plural"] = capFirst(plural)
+	ctx["changelist_url"] = s.changelistURL(e)
+	ctx["action"] = r.URL.Path
+
+	hasAdd := e.hasAddPermission(s, r)
+	hasModelView := e.hasViewOrChangePermission(s, r, nil)
+	hasObjView := e.hasViewPermission(s, r, obj)
+	hasObjChange := e.hasChangePermission(s, r, obj)
+	hasObjDelete := !isAdd && obj != nil && e.hasDeletePermission(s, r, obj)
+
+	ctx["has_add_permission"] = hasAdd
+	ctx["has_view_permission"] = hasModelView
+	ctx["has_change_permission"] = hasObjChange
+	ctx["has_delete_permission"] = hasObjDelete
+
+	if form != nil {
+		ctx["form"] = form
+		ctx["form_html"] = form.Render()
+		errCount := countFormErrors(form)
+		ctx["error_count"] = errCount
+		ctx["has_errors"] = errCount > 0
+	} else {
+		ctx["form_html"] = ""
+		ctx["error_count"] = 0
+		ctx["has_errors"] = false
+	}
+
+	if obj != nil {
+		ctx["readonly_fields"] = s.readonlyFieldsFor(r.Context(), e, obj, !canChange)
+		if hasObjDelete {
+			pk := pkOf(reflect.ValueOf(obj).Elem(), e)
+			ctx["delete_url"] = s.deleteURL(e, pk)
+		}
+	}
+
+	// Submit-row button visibility mirrors Django's submit_row template tag.
+	showSave := isAdd || canChange
+	ctx["show_save"] = showSave
+	ctx["show_save_and_add_another"] = hasAdd && showSave
+	ctx["show_save_and_continue"] = showSave && (hasObjChange || hasObjView)
+	ctx["show_close"] = !showSave && hasModelView
+	ctx["show_delete_link"] = hasObjDelete
+
+	s.render(w, r, "admin/change_form.html", ctx)
 }
 
-// changelistURL returns the URL of e's changelist.
-func (s *AdminSite) changelistURL(e *entry) string {
-	return s.Prefix + "/" + e.slug + "/"
+// readonlyFieldsFor returns display entries for fields rendered read-only on
+// the change form: every non-excluded non-PK field when allReadonly is true
+// (view-only user), or only e.admin.ReadonlyFields otherwise.
+func (s *AdminSite) readonlyFieldsFor(ctx context.Context, e *entry, obj any, allReadonly bool) []map[string]any {
+	var fields []*orm.Field
+	pkField := e.model.PrimaryKey()
+	for _, f := range e.model.Fields() {
+		if pkField != nil && f.Name == pkField.Name && f.PrimaryKey && !f.Editable {
+			continue
+		}
+		if pkField != nil && f.Name == pkField.Name && f.Kind == orm.KindAuto {
+			continue
+		}
+		if slices.Contains(e.admin.ExcludeFields, f.Name) || slices.Contains(e.admin.ExcludeFields, f.Attr) {
+			continue
+		}
+		if !allReadonly && !slices.Contains(e.admin.ReadonlyFields, f.Name) && !slices.Contains(e.admin.ReadonlyFields, f.Attr) {
+			continue
+		}
+		fields = append(fields, f)
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	fkLabels := s.loadFKLabels(ctx, fields)
+	elem := reflect.ValueOf(obj).Elem()
+	out := make([]map[string]any, len(fields))
+	for i, f := range fields {
+		val := ""
+		if f.Rel != nil {
+			val = fkCellLabel(elem.Field(f.Index), fkLabels[i])
+		} else {
+			val = formatCell(elem.Field(f.Index))
+		}
+		if val == "" {
+			val = emptyValueDisplay
+		}
+		out[i] = map[string]any{
+			"name":     f.Attr,
+			"label":    fieldLabel(f),
+			"contents": val,
+		}
+	}
+	return out
+}
+
+// countFormErrors returns the total number of error entries on a bound form.
+func countFormErrors(form *forms.Form) int {
+	if form == nil || !form.IsBound() {
+		return 0
+	}
+	n := form.NonFieldErrors().Len()
+	for _, fld := range form.Fields() {
+		n += fld.Errors().Len()
+	}
+	return n
+}
+
+// redirectPostSave redirects after a successful add or change save: to the
+// changelist when the user has model-level view or change permission, and to
+// the admin index otherwise (Django's ModelAdmin._response_post_save).
+func (s *AdminSite) redirectPostSave(w http.ResponseWriter, r *http.Request, e *entry) {
+	if e.hasViewOrChangePermission(s, r, nil) {
+		http.Redirect(w, r, s.changelistURL(e), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, s.indexURL(), http.StatusFound)
+}
+
+// parseObjectPK parses objectID as a base-10 int64 primary key.
+func parseObjectPK(objectID string) (int64, bool) {
+	pk, err := strconv.ParseInt(objectID, 10, 64)
+	return pk, err == nil
+}
+
+// loadObject parses objectID as an int64 primary key and loads the matching row
+// of e. It returns (nil, 0, nil) when objectID is non-numeric or no row exists.
+func (s *AdminSite) loadObject(ctx context.Context, e *entry, objectID string) (any, int64, error) {
+	pk, ok := parseObjectPK(objectID)
+	if !ok {
+		return nil, 0, nil
+	}
+	obj, err := e.ops.get(ctx, pk)
+	if errors.Is(err, orm.ErrDoesNotExist) {
+		return nil, pk, nil
+	}
+	if err != nil {
+		return nil, pk, err
+	}
+	return obj, pk, nil
+}
+
+// objDoesNotExistRedirect adds Django's missing-object warning message and
+// redirects to admin:index.
+func (s *AdminSite) objDoesNotExistRedirect(w http.ResponseWriter, r *http.Request, e *entry, objectID string) {
+	singular, _ := modelVerboseNames(e.model)
+	msg := fmt.Sprintf("%s with ID “%s” doesn’t exist. Perhaps it was deleted?", singular, objectID)
+	_ = messages.Warning(r, msg)
+	http.Redirect(w, r, s.indexURL(), http.StatusFound)
+}
+
+// appURLOrEmpty returns the app index URL for appLabel, or "" when empty.
+func (s *AdminSite) appURLOrEmpty(appLabel string) string {
+	if appLabel == "" {
+		return ""
+	}
+	return s.appIndexURL(appLabel)
+}
+
+// displayLabel returns orm.Label(m, obj), or emptyValueDisplay ("-") when the
+// object's label is empty (Django's display_for_value(str(obj), "-")).
+func displayLabel(m *orm.Model, obj any) string {
+	if label := orm.Label(m, obj); label != "" {
+		return label
+	}
+	return emptyValueDisplay
+}
+
+// forbidden writes Django's 403 Forbidden response.
+func forbidden(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte("<h1>403 Forbidden</h1>"))
+}
+
+// neverCache sets response headers that prevent caching of admin pages,
+// matching Django's never_cache decorator.
+func neverCache(w http.ResponseWriter) {
+	h := w.Header()
+	if h.Get("Expires") == "" {
+		h.Set("Expires", time.Now().UTC().Format(http.TimeFormat))
+	}
+	h.Set("Cache-Control", "max-age=0, no-cache, no-store, must-revalidate, private")
 }
 
 // render writes the named template with ctx, reporting a 500 on failure. It
-// renders through the request so context processors apply and the test client
-// can observe the template and context. The output is buffered, so a render
-// error never emits a partially written 200 body.
+// renders through the request with this site's instance namespace as the
+// current app so {% url 'admin:...' %} resolves to this site.
 func (s *AdminSite) render(w http.ResponseWriter, r *http.Request, name string, ctx map[string]any) {
-	out, err := s.engine.RenderRequest(r, name, ctx)
+	req := r.WithContext(templates.WithCurrentApp(r.Context(), s.siteName()))
+	out, err := s.engine.RenderRequest(req, name, ctx)
 	if err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return

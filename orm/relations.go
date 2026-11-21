@@ -16,17 +16,23 @@ const (
 	RelNone RelKind = iota
 	// RelFK indicates a forward foreign key.
 	RelFK
+	// RelO2O indicates a forward one-to-one relation (unique foreign key).
+	RelO2O
 )
 
 // Relation describes a forward relation on a field.
 type Relation struct {
-	// Kind classifies the relation (currently only RelFK).
+	// Kind classifies the relation (RelFK or RelO2O).
 	Kind RelKind
 	// Column is the FK column on this model (e.g. "author_id").
 	Column string
 	// OnDelete is the referential action when the referenced row is deleted. It
 	// defaults to OnDeleteDoNothing (SQL NO ACTION) when on_delete is unset.
 	OnDelete OnDelete
+	// RelatedName is the explicit related_name= tag option, or "" for default.
+	RelatedName string
+	// RelatedQueryName is the explicit related_query_name= tag option, or "" for default.
+	RelatedQueryName string
 	// targetType is the related struct type (e.g. Author).
 	targetType reflect.Type
 	// Target is the resolved related model, set by Registry.Resolve.
@@ -265,7 +271,11 @@ func PKsOf[T any](db *DB, parents []T) ([]int64, error) {
 	}
 	pks := make([]int64, len(parents))
 	for i := range parents {
-		pks[i] = reflect.ValueOf(parents[i]).Field(pk.Index).Int()
+		id, err := extractModelPKInt64(m, reflect.ValueOf(parents[i]))
+		if err != nil {
+			return nil, fmt.Errorf("orm: PKsOf: %w", err)
+		}
+		pks[i] = id
 	}
 	return pks, nil
 }

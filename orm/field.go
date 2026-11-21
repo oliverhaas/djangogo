@@ -144,6 +144,20 @@ type Field struct {
 	AllowUnicode bool
 	// Protocol restricts KindGenericIPAddress to "both", "ipv4", or "ipv6".
 	Protocol string
+	// UnpackIPv4 unpacks IPv4-mapped IPv6 addresses (::ffff:a.b.c.d) to IPv4 on
+	// KindGenericIPAddress fields (Django's unpack_ipv4).
+	UnpackIPv4 bool
+	// HasChoices reports whether choices were explicitly declared on the field
+	// (distinguishing an empty choice set from an unconstrained field).
+	HasChoices bool
+	// ChoicesFunc provides dynamic choices evaluated on demand (Django's
+	// callable choices=).
+	ChoicesFunc func() []Choice
+	// Validators holds custom field-level validators declared via Meta.Validators.
+	Validators []Validator
+	// ErrorMessages holds per-code custom error message templates declared via
+	// Meta.ErrorMessages.
+	ErrorMessages map[string]string
 }
 
 // timeType is the reflect.Type for time.Time, used for KindDateTime inference.
@@ -153,8 +167,8 @@ var timeType = reflect.TypeOf(time.Time{})
 // It returns (field, true, nil) for included fields, (nil, false, nil) for skipped
 // fields, and (nil, false, err) on a tag or type error.
 func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
-	// Step 1: skip unexported fields and fields tagged orm:"-".
-	if sf.PkgPath != "" {
+	// Step 1: skip unexported fields, embedded RelCache, and fields tagged orm:"-".
+	if sf.PkgPath != "" || sf.Type == relCacheType {
 		return nil, false, nil
 	}
 	tag := sf.Tag.Get("orm")
@@ -171,13 +185,16 @@ func parseStructField(sf reflect.StructField, index int) (*Field, bool, error) {
 		Editable: true,
 	}
 
-	// Relation fields (e.g. FK[T]) are detected before the scalar type switch.
+	// Relation fields (e.g. FK[T], O2O[T]) are detected before the scalar type switch.
 	// They map to an integer FK column and carry a *Relation; the column defaults
 	// to "<snake>_id" and may be overridden by a column= tag.
 	if rm, ok := reflect.Zero(sf.Type).Interface().(relationMarker); ok {
 		f.Kind = KindInt
 		f.Column = toSnakeCase(sf.Name) + "_id"
 		f.Rel = &Relation{Kind: rm.relKind(), targetType: rm.relTarget()}
+		if f.Rel.Kind == RelO2O {
+			f.Unique = true
+		}
 		if tag != "" {
 			for _, token := range strings.Split(tag, ";") {
 				token = strings.TrimSpace(token)
@@ -254,8 +271,10 @@ func toSnakeCase(s string) string {
 // relation fields. It reports whether it recognized the token.
 func applyCommonTagOption(f *Field, fieldName, token string) (bool, error) {
 	switch {
-	case token == "null":
+	case token == "null", token == "null=true":
 		f.Null = true
+	case token == "null=false":
+		f.Null = false
 	case token == "unique":
 		f.Unique = true
 	case token == "blank":
@@ -370,8 +389,23 @@ func applyRelationTagOption(f *Field, fieldName, token string) error {
 			return fmt.Errorf("orm: field %s: %w", fieldName, err)
 		}
 		f.Rel.OnDelete = od
+	case strings.HasPrefix(token, "related_name="):
+		rn := token[len("related_name="):]
+		if rn == "" {
+			return fmt.Errorf("orm: field %s: related_name must not be empty", fieldName)
+		}
+		f.Rel.RelatedName = rn
+	case strings.HasPrefix(token, "related_query_name="):
+		rqn := token[len("related_query_name="):]
+		if rqn == "" {
+			return fmt.Errorf("orm: field %s: related_query_name must not be empty", fieldName)
+		}
+		f.Rel.RelatedQueryName = rqn
 	case token == "pk":
-		return fmt.Errorf("orm: field %s: pk is not valid on a relation field", fieldName)
+		if f.Rel.Kind != RelO2O {
+			return fmt.Errorf("orm: field %s: pk is not valid on a relation field", fieldName)
+		}
+		f.PrimaryKey = true
 	case token == "type=text" || strings.HasPrefix(token, "max_length="),
 		token == "auto_now", token == "auto_now_add", strings.HasPrefix(token, "default="):
 		return fmt.Errorf("orm: field %s: %q is not valid on a relation field", fieldName, token)

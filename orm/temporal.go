@@ -60,6 +60,29 @@ func MustDate(s string) Date {
 // IsZero reports whether d is the zero Date.
 func (d Date) IsZero() bool { return d.Year == 0 && d.Month == 0 && d.Day == 0 }
 
+// Compare compares d and other chronologically, returning -1, 0, or +1.
+func (d Date) Compare(other Date) int {
+	if d.Year != other.Year {
+		if d.Year < other.Year {
+			return -1
+		}
+		return 1
+	}
+	if d.Month != other.Month {
+		if d.Month < other.Month {
+			return -1
+		}
+		return 1
+	}
+	if d.Day != other.Day {
+		if d.Day < other.Day {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
 // Time returns d as a time.Time at midnight UTC, or the zero time.Time when d
 // is zero.
 func (d Date) Time() time.Time {
@@ -207,6 +230,20 @@ func MustTime(s string) Time {
 // IsZero reports whether t is midnight (00:00:00).
 func (t Time) IsZero() bool {
 	return t.Hour == 0 && t.Minute == 0 && t.Second == 0 && t.Nanosecond == 0
+}
+
+// Compare compares t and other chronologically within a day, returning -1, 0, or +1.
+func (t Time) Compare(other Time) int {
+	a := int64(t.Hour)*3600_000_000_000 + int64(t.Minute)*60_000_000_000 + int64(t.Second)*1_000_000_000 + int64(t.Nanosecond)
+	b := int64(other.Hour)*3600_000_000_000 + int64(other.Minute)*60_000_000_000 + int64(other.Second)*1_000_000_000 + int64(other.Nanosecond)
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // String formats t as "HH:MM:SS" when Nanosecond is 0, or "HH:MM:SS.ffffff"

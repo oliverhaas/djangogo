@@ -178,5 +178,9 @@ func applyModelMeta(m *Model, model any) error {
 		}
 	}
 
+	if err := applyMetaFieldHooks(m, meta); err != nil {
+		return err
+	}
+
 	return nil
 }

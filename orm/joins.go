@@ -20,22 +20,48 @@ type join struct {
 	read bool
 }
 
-// joinSet is the set of tables a query reads. A relation traversed by several
-// keys (a filter, an ordering, a select_related) is joined once: joins are
-// reused by parent and columns.
+// joinSet is the set of tables a query reads. A single-valued relation
+// traversed by several keys (a filter, an ordering, a select_related) is
+// joined once. A multi-valued relation (reverse FK) is reused only within the
+// same Filter/Exclude call (controlled by canReuse), matching Django's join
+// reuse rules.
 type joinSet struct {
 	base  *join
 	joins []*join // joined tables in creation order, without the base
 	// aliases counts the aliases handed out per table name.
 	aliases map[string]int
+	// aliasPrefix is "T" for main queries and "U" for correlated subqueries.
+	aliasPrefix string
+	// nextSubAlias is the next numeric suffix when aliasPrefix is "U".
+	nextSubAlias int
 }
 
 // newJoinSet returns the join set of a query on model m. The base table is
 // aliased by its own name.
 func newJoinSet(m *Model) *joinSet {
 	return &joinSet{
-		base:    &join{alias: m.Table(), model: m},
-		aliases: map[string]int{m.Table(): 1},
+		base:        &join{alias: m.Table(), model: m},
+		aliases:     map[string]int{m.Table(): 1},
+		aliasPrefix: "T",
+	}
+}
+
+// newSubqueryJoinSet returns a joinSet for a correlated subquery starting at
+// model m with an explicit alias such as "U0" or "U1". Every joined table in
+// the subquery gets a fresh "U<n>" alias so it never collides with outer
+// table names.
+func newSubqueryJoinSet(m *Model, baseAlias string) *joinSet {
+	next := 1
+	if len(baseAlias) > 1 {
+		if n, err := strconv.Atoi(baseAlias[1:]); err == nil {
+			next = n + 1
+		}
+	}
+	return &joinSet{
+		base:         &join{alias: baseAlias, model: m},
+		aliases:      make(map[string]int),
+		aliasPrefix:  "U",
+		nextSubAlias: next,
 	}
 }
 
@@ -43,8 +69,8 @@ func newJoinSet(m *Model) *joinSet {
 // creating the ones that do not exist yet. A new join is LEFT OUTER when its
 // hop is nullable or its parent is LEFT OUTER, and INNER otherwise, as in
 // Django's Query.join.
-func (js *joinSet) setup(hops []hop) []*join {
-	return js.follow(js.base, hops, true)
+func (js *joinSet) setup(hops []hop, canReuse map[*join]bool) []*join {
+	return js.follow(js.base, hops, true, canReuse)
 }
 
 // reserve records the joins of hops from parent without reading from them. A
@@ -52,8 +78,8 @@ func (js *joinSet) setup(hops []hop) []*join {
 // still says something about the relation: the join takes part in the votes
 // on the join types, so that a later key which does read the table finds it
 // with the right type. This is the join Django creates and then trims.
-func (js *joinSet) reserve(parent *join, hops []hop) []*join {
-	return js.follow(parent, hops, false)
+func (js *joinSet) reserve(parent *join, hops []hop, canReuse map[*join]bool) []*join {
+	return js.follow(parent, hops, false, canReuse)
 }
 
 // used returns the number of joins the statement reads from.
@@ -69,10 +95,10 @@ func (js *joinSet) used() int {
 
 // follow returns the join of each hop from parent, creating the missing ones
 // and marking them as read when read is set.
-func (js *joinSet) follow(parent *join, hops []hop, read bool) []*join {
+func (js *joinSet) follow(parent *join, hops []hop, read bool, canReuse map[*join]bool) []*join {
 	out := make([]*join, 0, len(hops))
 	for _, h := range hops {
-		j := js.find(parent, h)
+		j := js.find(parent, h, canReuse)
 		if j == nil {
 			j = &join{
 				alias:      js.newAlias(h.target.Table()),
@@ -85,6 +111,9 @@ func (js *joinSet) follow(parent *join, hops []hop, read bool) []*join {
 			}
 			js.joins = append(js.joins, j)
 		}
+		if h.many && canReuse != nil {
+			canReuse[j] = true
+		}
 		j.read = j.read || read
 		out = append(out, j)
 		parent = j
@@ -92,20 +121,32 @@ func (js *joinSet) follow(parent *join, hops []hop, read bool) []*join {
 	return out
 }
 
-// find returns the existing join for hop h from parent, or nil.
-func (js *joinSet) find(parent *join, h hop) *join {
+// find returns the existing join for hop h from parent, or nil. A multi-valued
+// hop is only reused when canReuse is nil (e.g. OrderBy/Values/Annotate) or
+// contains that join (same Filter call).
+func (js *joinSet) find(parent *join, h hop, canReuse map[*join]bool) *join {
 	for _, j := range js.joins {
 		if j.parent == parent && j.model == h.target && j.fromColumn == h.fromColumn && j.toColumn == h.toColumn {
+			if h.many && canReuse != nil && !canReuse[j] {
+				continue
+			}
 			return j
 		}
 	}
 	return nil
 }
 
-// newAlias returns the alias for a new use of table. The first use is the
-// table name itself; a later one is "T<n>" with n the position of the alias
-// among all aliases of the query, which is Django's naming.
+// newAlias returns the alias for a new use of table. For main queries, the
+// first use is the table name itself and a later one is "T<n>" with n the
+// position among all aliases of the query, matching Django's naming. For
+// correlated subqueries (aliasPrefix == "U"), every table receives a fresh
+// "U<n>" alias.
 func (js *joinSet) newAlias(table string) string {
+	if js.aliasPrefix == "U" {
+		alias := "U" + strconv.Itoa(js.nextSubAlias)
+		js.nextSubAlias++
+		return alias
+	}
 	js.aliases[table]++
 	if js.aliases[table] == 1 {
 		return table

@@ -39,6 +39,9 @@ func (qs *QuerySet[T]) Create(ctx context.Context, obj *T) error {
 func (qs *QuerySet[T]) insertOne(ctx context.Context, obj *T) error {
 	db, m := qs.q.db, qs.q.model
 	v := reflect.ValueOf(obj).Elem()
+	if err := syncLoadedRelations(v, m.fields); err != nil {
+		return err
+	}
 	applyDefaults(v, m.fields)
 	applyAutoNowOnCreate(v, m.fields, db.now())
 	if err := db.insert(ctx, m, []reflect.Value{v}, false); err != nil {
@@ -83,7 +86,10 @@ func (qs *QuerySet[T]) Save(ctx context.Context, obj *T, opts ...SaveOption) err
 	db, m := qs.q.db, qs.q.model
 	pk := m.PrimaryKey()
 	v := reflect.ValueOf(obj).Elem()
-	if pk == nil || v.Field(pk.Index).IsZero() {
+	if err := syncLoadedRelations(v, m.fields); err != nil {
+		return err
+	}
+	if pk == nil || pkFieldIsZero(pk, v.Field(pk.Index)) {
 		if len(cfg.updateFields) > 0 {
 			return fmt.Errorf("orm: save %s: cannot force an update in save() with no primary key", m.Name())
 		}
@@ -102,9 +108,14 @@ func (qs *QuerySet[T]) Save(ctx context.Context, obj *T, opts ...SaveOption) err
 			stampTemporalAuto(v.Field(f.Index), f.Kind, now)
 		}
 	}
-	updated := true
+	var updated bool
 	if len(fields) > 0 {
 		updated, err = db.updateRow(ctx, m, v, fields)
+		if err != nil {
+			return err
+		}
+	} else {
+		updated, err = db.rowExists(ctx, m, v)
 		if err != nil {
 			return err
 		}
@@ -362,6 +373,83 @@ func writeBackAutoPK(pkField reflect.Value, id int64, modelName string) error {
 		pkField.SetUint(uint64(id))
 	default:
 		return fmt.Errorf("orm: insert %s: cannot assign auto pk to %s field", modelName, pkField.Kind())
+	}
+	return nil
+}
+
+// pkFieldIsZero reports whether the primary key field value fv is unset. For
+// an O2O primary key it inspects PK() rather than struct zero-ness, because an
+// O2O with a loaded unsaved object has loaded=true yet PK()==0.
+func pkFieldIsZero(pk *Field, fv reflect.Value) bool {
+	if pk.Rel != nil {
+		if keyed, ok := fv.Interface().(interface{ PK() int64 }); ok {
+			return keyed.PK() == 0
+		}
+	}
+	return fv.IsZero()
+}
+
+// rowExists reports whether a row with v's primary key exists in m's table.
+// Used by Save on models whose only column is the primary key (such as a
+// primary-key O2O model).
+func (db *DB) rowExists(ctx context.Context, m *Model, v reflect.Value) (bool, error) {
+	w := newSQLWriter(db.dialect)
+	w.write("SELECT 1 FROM ")
+	w.ident(m.Table())
+	w.write(" WHERE ")
+	w.ident(m.pk.Column)
+	w.write(" = ")
+	pkArg, err := bindField(db.dialect, m.pk, v.Field(m.pk.Index).Interface())
+	if err != nil {
+		return false, fmt.Errorf("orm: save %s: %w", m.Name(), err)
+	}
+	w.param(pkArg)
+	w.write(" LIMIT 1")
+	rows, err := db.conn(ctx).QueryContext(ctx, w.String(), w.args...)
+	if err != nil {
+		return false, fmt.Errorf("orm: save %s: %w", m.Name(), err)
+	}
+	defer func() { _ = rows.Close() }()
+	exists := rows.Next()
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("orm: save %s: %w", m.Name(), err)
+	}
+	return exists, nil
+}
+
+// syncLoadedRelations checks every relation field of v that holds a loaded
+// object with pk == 0. If the referenced object has since been saved (non-zero
+// PK), its PK is copied back into the relation field; if it is still unsaved,
+// Save/Create is rejected with Django's unsaved-related-object error.
+func syncLoadedRelations(v reflect.Value, fields []*Field) error {
+	for _, f := range fields {
+		if f.Rel == nil || f.Rel.Target == nil {
+			continue
+		}
+		fv := v.Field(f.Index)
+		keyed, ok := fv.Interface().(interface{ PK() int64 })
+		if !ok || keyed.PK() != 0 {
+			continue
+		}
+		objMeth := fv.MethodByName("Object")
+		if !objMeth.IsValid() {
+			continue
+		}
+		res := objMeth.Call(nil)
+		if len(res) != 2 || !res[1].Bool() || res[0].IsNil() {
+			continue
+		}
+		targetPK, err := extractModelPKInt64(f.Rel.Target, res[0].Elem())
+		if err != nil {
+			return err
+		}
+		if targetPK == 0 {
+			return fmt.Errorf(
+				"orm: save() prohibited to prevent data loss due to unsaved related object '%s'",
+				f.Attr,
+			)
+		}
+		setForwardObject(v, f, res[0], targetPK)
 	}
 	return nil
 }

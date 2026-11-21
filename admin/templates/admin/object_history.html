@@ -1,0 +1,17 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<ol class="breadcrumbs">
+  <li><a href="{% url 'admin:index' %}">Home</a></li>
+  {% if app_url %}<li><a href="{{ app_url }}">{{ app_verbose_name }}</a></li>{% endif %}
+  <li>{% if has_view_permission %}<a href="{{ changelist_url }}">{{ verbose_name_plural }}</a>{% else %}{{ verbose_name_plural }}{% endif %}</li>
+  <li><a href="{{ change_url }}">{{ object }}</a></li>
+  <li aria-current="page">History</li>
+</ol>
+{% endblock %}
+{% block content %}
+<div id="content-main">
+  <div class="module" id="change-history">
+    <p>This object doesn’t have a change history. It probably wasn’t added via this admin site.</p>
+  </div>
+</div>
+{% endblock %}
