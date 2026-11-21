@@ -144,6 +144,20 @@ type Field struct {
 	AllowUnicode bool
 	// Protocol restricts KindGenericIPAddress to "both", "ipv4", or "ipv6".
 	Protocol string
+	// UnpackIPv4 unpacks IPv4-mapped IPv6 addresses (::ffff:a.b.c.d) to IPv4 on
+	// KindGenericIPAddress fields (Django's unpack_ipv4).
+	UnpackIPv4 bool
+	// HasChoices reports whether choices were explicitly declared on the field
+	// (distinguishing an empty choice set from an unconstrained field).
+	HasChoices bool
+	// ChoicesFunc provides dynamic choices evaluated on demand (Django's
+	// callable choices=).
+	ChoicesFunc func() []Choice
+	// Validators holds custom field-level validators declared via Meta.Validators.
+	Validators []Validator
+	// ErrorMessages holds per-code custom error message templates declared via
+	// Meta.ErrorMessages.
+	ErrorMessages map[string]string
 }
 
 // timeType is the reflect.Type for time.Time, used for KindDateTime inference.
@@ -254,8 +268,10 @@ func toSnakeCase(s string) string {
 // relation fields. It reports whether it recognized the token.
 func applyCommonTagOption(f *Field, fieldName, token string) (bool, error) {
 	switch {
-	case token == "null":
+	case token == "null", token == "null=true":
 		f.Null = true
+	case token == "null=false":
+		f.Null = false
 	case token == "unique":
 		f.Unique = true
 	case token == "blank":

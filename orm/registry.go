@@ -158,20 +158,9 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 		byColumn[f.Column] = f
 	}
 
-	// Apply model-declared field choices (Django's choices=). Each named field
-	// must exist and be a string field; a typo or unsupported type is an error at
-	// registration, mirroring Django's class-build-time validation.
-	if wc, ok := model.(withChoices); ok {
-		for fieldName, choices := range wc.Choices() {
-			f, found := byName[fieldName]
-			if !found {
-				return nil, fmt.Errorf("orm: model %s: Choices() names unknown field %q", name, fieldName)
-			}
-			if f.Kind != KindChar {
-				return nil, fmt.Errorf("orm: model %s: choices on field %q require a string field", name, fieldName)
-			}
-			f.Choices = choices
-		}
+	// Apply model-declared field choices (legacy Choices() hook).
+	if err := applyWithChoices(name, byName, byAttr, byColumn, model); err != nil {
+		return nil, err
 	}
 
 	// Step 8: construct and store the Model.

@@ -208,7 +208,7 @@ func TestChoicesUnknownFieldRejected(t *testing.T) {
 	}
 }
 
-// choicesOnInt declares choices on a non-string field.
+// choicesOnInt declares choices on an integer field via the legacy Choices hook.
 type choicesOnInt struct {
 	ID    int64
 	Level int
@@ -218,10 +218,10 @@ func (choicesOnInt) Choices() map[string][]Choice {
 	return map[string][]Choice{"Level": {{Value: "1", Label: "One"}}}
 }
 
-func TestChoicesOnNonStringRejected(t *testing.T) {
-	err := registerErr(&choicesOnInt{})
-	if err == nil || !strings.Contains(err.Error(), "string field") {
-		t.Errorf("err = %v, want a string-field error", err)
+func TestChoicesOnIntAccepted(t *testing.T) {
+	f := fieldOf(t, &choicesOnInt{}, "Level")
+	if !f.HasChoices || len(f.Choices) != 1 || f.Choices[0].Value != "1" || f.Choices[0].Label != "One" {
+		t.Errorf("Choices = %+v (HasChoices=%v), want [{1 One}]", f.Choices, f.HasChoices)
 	}
 }
 
