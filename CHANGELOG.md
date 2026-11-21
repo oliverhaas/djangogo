@@ -265,6 +265,9 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   inline.
 - Admin: `ModelAdmin.GetExclude` and `InlineModelAdmin.GetExclude` choose the
   excluded fields per request, as Django's `get_exclude` does.
+- Forms: `forms.FromInstance` derives a form from a model for an instance and
+  validates the bound form against the model, as `NewModelForm` does, while
+  the caller sets the options of the foreign key fields.
 - Forms: `forms.WithClean` adds a form-level clean function to the options of
   a model form, so a formset or the admin that builds the form from the
   options runs it too. `forms.ModelFormLabels` returns the labels and help
@@ -405,6 +408,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 
 ### Fixed
 
+- Admin: a duplicate value of a unique field on the add or change page gave a
+  500 error; the field now shows the error. The admin form runs the model
+  validation as Django's `ModelForm` does, so an inline's clean also sees the
+  posted values of the parent row.
 - `is_active` is now enforced across authentication, mirroring Django's
   `ModelBackend`: an inactive user is rejected at admin login, holds no
   permissions (even a superuser), and is treated as anonymous when resolved from

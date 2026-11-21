@@ -9,6 +9,7 @@ import (
 
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/djangotest"
+	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -125,5 +126,136 @@ func TestJSI18nFormatFallback(t *testing.T) {
 		resp := env.client.Get(mustReverse(t, env.router, "admin:jsi18n"))
 		djangotest.AssertNotContains(t, resp, "%d.%m.%Y %H:%M:%S")
 		djangotest.AssertContains(t, resp, "%Y-%m-%d %H:%M:%S")
+	})
+}
+
+// ParentWithDependentChildren stands in for
+// tests/admin_views/models.py::ParentWithDependentChildren: the validation of
+// its children depends on the validation of the parent.
+type ParentWithDependentChildren struct {
+	ID               int64
+	SomeRequiredInfo uint32
+	FamilyName       string `orm:"max_length=255"`
+}
+
+// DependentChild stands in for tests/admin_views/models.py::DependentChild.
+type DependentChild struct {
+	ID         int64
+	Parent     orm.FK[ParentWithDependentChildren]
+	FamilyName string `orm:"max_length=255"`
+}
+
+// dependentChildrenModels returns the models of the admin_views tests with
+// ParentWithDependentChildren and DependentChild.
+func dependentChildrenModels() []any {
+	return append(adminViewsModels(), djangotest.App("admin_views", &ParentWithDependentChildren{}, &DependentChild{}))
+}
+
+// dependentChildrenEnv registers ParentWithDependentChildrenAdmin, whose
+// inline uses DependentChildAdminForm, and logs a superuser in.
+func dependentChildrenEnv(t *testing.T, db *orm.DB) *adminTestEnv {
+	t.Helper()
+	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[ParentWithDependentChildren](site, admin.ModelAdmin{Inlines: []admin.Inline{
+			admin.TabularInline[ParentWithDependentChildren, DependentChild](admin.InlineModelAdmin{
+				FormOptions: []forms.ModelFormOption{forms.WithClean(func(form *forms.Form) error {
+					data := form.CleanedData()
+					parent, _ := data["parent"].(*ParentWithDependentChildren)
+					if parent != nil && parent.FamilyName != "" && parent.FamilyName != data["family_name"] {
+						return forms.NewValidationError("Children must share a family name with their parents in this contrived test case", "")
+					}
+					return nil
+				})},
+			}),
+		}})
+	})
+	env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+	return env
+}
+
+// assertDependentChildrenErrors checks the errors that both tests expect: the
+// parent form misses some_required_info and the child form has the non-field
+// error of its clean.
+func assertDependentChildrenErrors(t *testing.T, resp *djangotest.Response) {
+	t.Helper()
+	djangotest.AssertStatus(t, resp, http.StatusOK)
+	djangotest.AssertFormError(t, ctxVal(t, resp, "form"), "some_required_info", []string{"This field is required."})
+	djangotest.AssertFormError(t, ctxVal(t, resp, "form"), "", nil)
+	child := inlineFormSet(t, resp, 0)["forms"].([]any)[0]
+	djangotest.AssertFormError(t, child, "", []string{"Children must share a family name with their parents in this contrived test case"})
+	djangotest.AssertEqual(t, len(nonFormErrors(t, resp)), 0)
+}
+
+// Django's response.context["adminform"] and ["inline_admin_formset"] are the
+// form and the first inline formset here.
+//
+// Ported from Django: tests/admin_views/tests.py::AdminViewOnSiteTests.test_add_view_form_and_formsets_run_validation
+func TestAddViewFormAndFormsetsRunValidation(t *testing.T) {
+	djangotest.EachDB(t, dependentChildrenModels(), func(t *testing.T, db *orm.DB) {
+		env := dependentChildrenEnv(t, db)
+		// The form validation should fail because 'some_required_info' is
+		// not included on the parent form, and the family_name of the parent
+		// does not match that of the child
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_views_parentwithdependentchildren_add"), url.Values{
+			"family_name":                      {"Test1"},
+			"dependentchild_set-TOTAL_FORMS":   {"1"},
+			"dependentchild_set-INITIAL_FORMS": {"0"},
+			"dependentchild_set-MAX_NUM_FORMS": {"1"},
+			"dependentchild_set-0-id":          {""},
+			"dependentchild_set-0-parent":      {""},
+			"dependentchild_set-0-family_name": {"Test2"},
+		})
+		assertDependentChildrenErrors(t, resp)
+	})
+}
+
+// Ported from Django: tests/admin_views/tests.py::AdminViewOnSiteTests.test_change_view_form_and_formsets_run_validation
+func TestChangeViewFormAndFormsetsRunValidation(t *testing.T) {
+	djangotest.EachDB(t, dependentChildrenModels(), func(t *testing.T, db *orm.DB) {
+		env := dependentChildrenEnv(t, db)
+		pwdc := create(t, db, &ParentWithDependentChildren{SomeRequiredInfo: 6, FamilyName: "Test1"})
+		// The form validation should fail because 'some_required_info' is
+		// not included on the parent form, and the family_name of the parent
+		// does not match that of the child
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_views_parentwithdependentchildren_change", pwdc.ID), url.Values{
+			"family_name":                      {"Test2"},
+			"dependentchild_set-TOTAL_FORMS":   {"1"},
+			"dependentchild_set-INITIAL_FORMS": {"0"},
+			"dependentchild_set-MAX_NUM_FORMS": {"1"},
+			"dependentchild_set-0-id":          {""},
+			"dependentchild_set-0-parent":      {fmt.Sprint(pwdc.ID)},
+			"dependentchild_set-0-family_name": {"Test1"},
+		})
+		assertDependentChildrenErrors(t, resp)
+	})
+}
+
+// No Django test exists: Django's admin form is a ModelForm, whose unique
+// checks the forms tests cover. The test checks that the add and change views
+// show a duplicate value of a unique field as a form error.
+func TestChangeFormValidatesUnique(t *testing.T) {
+	djangotest.EachDB(t, adminFilterModels(), func(t *testing.T, db *orm.DB) {
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[AFDepartment](site, admin.ModelAdmin{})
+		})
+		env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+		create(t, db, &AFDepartment{Code: "DEV", Description: "Development"})
+		design := create(t, db, &AFDepartment{Code: "DSGN", Description: "Design"})
+		want := []string{"Af department with this Code already exists."}
+
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_filters_afdepartment_add"),
+			url.Values{"code": {"DEV"}, "description": {"Other"}})
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		djangotest.AssertFormError(t, ctxVal(t, resp, "form"), "code", want)
+
+		resp = env.client.Post(mustReverse(t, env.router, "admin:admin_filters_afdepartment_change", design.ID),
+			url.Values{"code": {"DEV"}, "description": {"Design"}})
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		djangotest.AssertFormError(t, ctxVal(t, resp, "form"), "code", want)
+		n, err := orm.Query[AFDepartment](db).Filter("code", "DEV").Count(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		djangotest.AssertEqual(t, n, int64(1))
 	})
 }

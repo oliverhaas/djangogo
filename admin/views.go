@@ -108,11 +108,14 @@ func (s *AdminSite) makeOldChangeRedirect(e *entry) http.HandlerFunc {
 // obj, Django's ModelAdmin.get_form and helpers.AdminForm: the fieldsets, the
 // read-only fields, and the model form of the other fields of the layout with
 // the widgets and help texts of formfield_for_manytomany and the options of
-// its relations. obj is nil on the add page; the read-only fields then show a
-// new object with the field defaults. A user who cannot change obj sees every
-// field of the layout read-only. An unknown or non-editable name in the
-// layout is the Err of the form.
-func (s *AdminSite) changeForm(r *http.Request, e *entry, obj any, canChange bool) *adminForm {
+// its relations. obj is nil on the add page. instance is the object the form
+// edits: obj on the change page, a new object with the field defaults on the
+// add page. The validation of the bound form fills it and runs the model
+// validation and the unique checks, as Django's ModelForm does, and the
+// read-only fields show it. A user who cannot change obj sees every field of
+// the layout read-only. An unknown or non-editable name in the layout is the
+// Err of the form.
+func (s *AdminSite) changeForm(r *http.Request, e *entry, obj, instance any, canChange bool) *adminForm {
 	sets := s.fieldsets(r, e, obj)
 	fields := formNames(e.model, flattenFieldsets(sets))
 	readonly := e.readonlyFields(r, obj)
@@ -131,16 +134,11 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj any, canChange boo
 		forms.WithExclude(exclude...),
 		forms.WithFormFieldCallback(callback),
 	}, s.relationWidgets(r, e), e.admin.FormOptions)
-	form := forms.FromModel(e.model, opts...)
+	form := forms.FromInstance(s.db, e.model, instance, opts...)
 	syncAutocompleteRequired(form)
 	s.wrapRelatedWidgets(r, e, form, built)
 	s.populateChoices(r, form, e)
-	shown := obj
-	if shown == nil {
-		shown = e.ops.newPtr()
-		e.model.ApplyDefaults(shown)
-	}
-	return &adminForm{form: form, sets: sets, readonly: readonly, obj: shown}
+	return &adminForm{form: form, sets: sets, readonly: readonly, obj: instance}
 }
 
 // multipleSelectHint is the help text Django's admin adds to a <select
@@ -281,7 +279,11 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 	}
 	singular, _ := modelVerboseNames(e.model)
 	title := "Add " + singular
-	af := s.changeForm(r, e, nil, true)
+	// The form fills the new row and the inlines point at it; the save gives
+	// it its primary key before the rows of the inlines are saved.
+	obj := e.ops.newPtr()
+	e.model.ApplyDefaults(obj)
+	af := s.changeForm(r, e, nil, obj, true)
 	if err := af.form.Err(); err != nil {
 		http.Error(w, "invalid admin form: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -290,9 +292,6 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 	if !ok {
 		return
 	}
-	// The inlines point at the new row, which the form fills and the save
-	// gives its primary key before the rows of the inlines are saved.
-	obj := e.ops.newPtr()
 	inlines, err := s.inlineFormSets(r, e, obj, nil, data)
 	if err != nil {
 		http.Error(w, "invalid admin inline: "+err.Error(), http.StatusInternalServerError)
@@ -306,9 +305,9 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 			http.Error(w, "failed to load related rows", http.StatusInternalServerError)
 			return
 		}
-		valid, err := validChangeForm(e, form, obj, inlines)
+		valid, err := validChangeForm(form, inlines)
 		if err != nil {
-			http.Error(w, "failed to populate object", http.StatusInternalServerError)
+			http.Error(w, "failed to validate the form", http.StatusInternalServerError)
 			return
 		}
 		if valid {
@@ -371,14 +370,14 @@ func postData(w http.ResponseWriter, r *http.Request) (url.Values, bool) {
 
 // validChangeForm validates the bound form and the formsets of the inlines,
 // all of them as Django's _changeform_view does, and reports whether all are
-// valid. A valid form fills obj first, as Django's ModelForm._post_clean
-// fills its instance before the formsets validate.
-func validChangeForm(e *entry, form *forms.Form, obj any, inlines []*inlineFormSet) (bool, error) {
+// valid. The form validates first: it fills its instance, valid or not, as
+// Django's ModelForm._post_clean does, and the formsets of the inlines see
+// the parent with the posted values. The error is a failure of the form
+// validation that is not a validation error.
+func validChangeForm(form *forms.Form, inlines []*inlineFormSet) (bool, error) {
 	formValid := form.IsValid()
-	if formValid {
-		if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
-			return false, err
-		}
+	if err := form.Err(); err != nil {
+		return false, err
 	}
 	return inlinesValid(inlines) && formValid, nil
 }
@@ -412,7 +411,7 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 		forbidden(w)
 		return
 	}
-	af := s.changeForm(r, e, obj, canChange)
+	af := s.changeForm(r, e, obj, obj, canChange)
 	if err := af.form.Err(); err != nil {
 		http.Error(w, "invalid admin form: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -434,9 +433,9 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 			http.Error(w, "failed to load related rows", http.StatusInternalServerError)
 			return
 		}
-		valid, err := validChangeForm(e, form, obj, inlines)
+		valid, err := validChangeForm(form, inlines)
 		if err != nil {
-			http.Error(w, "failed to populate object", http.StatusInternalServerError)
+			http.Error(w, "failed to validate the form", http.StatusInternalServerError)
 			return
 		}
 		if valid {

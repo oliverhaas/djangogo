@@ -176,6 +176,30 @@ func relationPK(fv reflect.Value) int64 {
 	return out[0].Int()
 }
 
+// FromInstance derives an unbound form from a model for obj, a pointer to an
+// instance of it, and validates the bound form against the model as a
+// ModelForm does: validation fills obj from the cleaned data, also when the
+// form is invalid, and runs the model validation and the unique checks of
+// orm.Model.FullClean and orm.ValidateUnique with db. Unlike FromStruct, it
+// leaves the initial values to the caller, and unlike NewModelForm, the
+// foreign key fields get their options from the caller, through
+// Form.SetChoices. It accepts the options of FromModel.
+//
+//	form := forms.FromInstance(db, model, post, forms.WithFields("title")).Bind(r.PostForm)
+//	if form.IsValid() {
+//		// post holds the cleaned data.
+//	}
+func FromInstance(db *orm.DB, m *orm.Model, obj any, opts ...ModelFormOption) *Form {
+	cfg := newModelFormConfig(opts)
+	form, included := buildModelForm(nil, m, cfg)
+	side := newModelSide(db, m, cfg, included)
+	adding := !hasPK(m, obj)
+	form.postCleaners = []func(*Form){func(f *Form) {
+		side.postClean(f, obj, func() bool { return adding })
+	}}
+	return form
+}
+
 // InitialFromStruct returns the initial values of a model form for obj, an
 // instance of the model or a pointer to one, Django's model_to_dict. Only the
 // named fields are included; without names, all are.
@@ -302,14 +326,31 @@ func relatedPK(mf *orm.Field, val any) (int64, error) {
 // BaseModelForm._post_clean does.
 type ModelForm[T any] struct {
 	*Form
+	modelSide
 
+	instance *T
+	own      bool   // the caller supplied the instance
+	pkWidget Widget // the WithWidget of the primary key, for a model formset
+}
+
+// modelSide is the part of a model form that does not depend on the Go type
+// of the instance: what the model validation of FromInstance and ModelForm
+// needs.
+type modelSide struct {
 	db                    *orm.DB
 	model                 *orm.Model
-	instance              *T
-	own                   bool // the caller supplied the instance
 	includedFields        map[string]bool
 	nonFieldErrorMessages map[string]string
-	pkWidget              Widget // the WithWidget of the primary key, for a model formset
+}
+
+// newModelSide returns the model side of a form built from cfg, with the
+// model fields the form includes.
+func newModelSide(db *orm.DB, m *orm.Model, cfg *modelFormConfig, included map[string]bool) modelSide {
+	side := modelSide{db: db, model: m, includedFields: included}
+	if msgs, ok := cfg.errorMessages[NonFieldErrors]; ok && len(msgs) > 0 {
+		side.nonFieldErrorMessages = maps.Clone(msgs)
+	}
+	return side
 }
 
 // NewModelForm returns an unbound form for a new instance of T. A foreign key
@@ -317,7 +358,7 @@ type ModelForm[T any] struct {
 // validates. T must be registered with the database's registry; otherwise the
 // form has no fields and Err reports the mistake.
 func NewModelForm[T any](db *orm.DB, opts ...ModelFormOption) *ModelForm[T] {
-	mf := &ModelForm[T]{db: db, instance: new(T)}
+	mf := &ModelForm[T]{modelSide: modelSide{db: db}, instance: new(T)}
 	model, ok := db.Registry().ModelOf(mf.instance)
 	if !ok {
 		mf.Form = New()
@@ -327,12 +368,10 @@ func NewModelForm[T any](db *orm.DB, opts ...ModelFormOption) *ModelForm[T] {
 	cfg := newModelFormConfig(opts)
 	mf.model = model
 	mf.instance = mf.newInstance()
-	mf.Form, mf.includedFields = buildModelForm(db, model, cfg)
+	form, included := buildModelForm(db, model, cfg)
+	mf.Form, mf.modelSide = form, newModelSide(db, model, cfg, included)
 	if pk := model.PrimaryKey(); pk != nil {
 		mf.pkWidget = cfg.widgets[pk.Attr]
-	}
-	if msgs, ok := cfg.errorMessages[NonFieldErrors]; ok && len(msgs) > 0 {
-		mf.nonFieldErrorMessages = maps.Clone(msgs)
 	}
 	mf.install()
 	return mf
@@ -457,7 +496,7 @@ func (mf *ModelForm[T]) adding() bool {
 // construct_instance: model fields omitted by WithFields/WithExclude are
 // skipped, and a field with a model default keeps that default when the data
 // has no value for it and its cleaned value is empty.
-func (mf *ModelForm[T]) constructData(f *Form) map[string]any {
+func (mf *modelSide) constructData(f *Form) map[string]any {
 	data, cloned := f.cleaned, false
 	cloneIfNeeded := func() {
 		if !cloned {
@@ -490,7 +529,7 @@ func (mf *ModelForm[T]) constructData(f *Form) map[string]any {
 // validationExclusions returns the model field attribute names excluded from
 // model validation and uniqueness checks, matching Django's
 // BaseModelForm._get_validation_exclusions.
-func (mf *ModelForm[T]) validationExclusions(f *Form) []string {
+func (mf *modelSide) validationExclusions(f *Form) []string {
 	var exclude []string
 	for _, field := range mf.model.Fields() {
 		name := field.Attr
@@ -513,7 +552,7 @@ func (mf *ModelForm[T]) validationExclusions(f *Form) []string {
 // message templates by code from the matching form field (or
 // WithErrorMessages(NonFieldErrors, ...)) as Django's
 // BaseModelForm._update_errors does.
-func (mf *ModelForm[T]) updateErrors(f *Form, ve *ValidationError) {
+func (mf *modelSide) updateErrors(f *Form, ve *ValidationError) {
 	errorDict := ve.Fields
 	if !ve.IsDict() {
 		errorDict = map[string][]*ValidationError{NonFieldErrors: ve.ErrorList()}
@@ -543,15 +582,21 @@ func (mf *ModelForm[T]) updateErrors(f *Form, ve *ValidationError) {
 	f.AddError("", &ValidationError{Fields: patched})
 }
 
-// postClean is the model part of validation, Django's BaseModelForm._post_clean:
-// it fills the instance from the cleaned data, runs instance.FullClean with
-// validate_unique disabled, and then runs orm.ValidateUnique with recomputed
-// exclusions.
+// postClean runs the model validation of the form for its instance.
 func (mf *ModelForm[T]) postClean(f *Form) {
 	if mf.model == nil || mf.instance == nil {
 		return
 	}
-	if err := PopulateStruct(mf.model, mf.constructData(f), mf.instance); err != nil {
+	mf.modelSide.postClean(f, mf.instance, mf.adding)
+}
+
+// postClean is the model part of validation, Django's BaseModelForm._post_clean:
+// it fills instance, a pointer to an instance of the model, from the cleaned
+// data, runs instance.FullClean with validate_unique disabled, and then runs
+// orm.ValidateUnique with recomputed exclusions. adding reports whether the
+// instance is a new row, Django's instance._state.adding.
+func (mf *modelSide) postClean(f *Form, instance any, adding func() bool) {
+	if err := PopulateStruct(mf.model, mf.constructData(f), instance); err != nil {
 		var ve *ValidationError
 		if errors.As(err, &ve) {
 			mf.updateErrors(f, ve)
@@ -569,7 +614,7 @@ func (mf *ModelForm[T]) postClean(f *Form) {
 			exclude = append(exclude, name)
 		}
 	}
-	if err := mf.model.FullClean(f.context(), mf.db, mf.instance,
+	if err := mf.model.FullClean(f.context(), mf.db, instance,
 		orm.WithExclude(exclude...),
 		orm.WithValidateUnique(false),
 	); err != nil {
@@ -583,9 +628,9 @@ func (mf *ModelForm[T]) postClean(f *Form) {
 
 	if mf.db != nil {
 		uniqueExclude := mf.validationExclusions(f)
-		if err := orm.ValidateUnique(f.context(), mf.db, mf.instance,
+		if err := orm.ValidateUnique(f.context(), mf.db, instance,
 			orm.WithExclude(uniqueExclude...),
-			orm.WithAdding(mf.adding()),
+			orm.WithAdding(adding()),
 		); err != nil {
 			var ve *ValidationError
 			if errors.As(err, &ve) {
