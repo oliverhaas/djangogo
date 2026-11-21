@@ -274,13 +274,18 @@ type nowTagNode struct {
 // timeNow returns the current time; a test replaces it.
 var timeNow = time.Now
 
+// TimeZone is the current time zone of the templates, Django's TIME_ZONE: the
+// {% now %} tag prints the time in it. It is UTC unless the application sets
+// it from Settings.TimeZone.
+var TimeZone = time.UTC
+
 // Execute prints or stores the current time in the given format.
 func (n *nowTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter) *pongo2.Error {
 	format, err := n.format.Evaluate(ctx)
 	if err != nil {
 		return err
 	}
-	out := formatDate(timeNow(), format.String())
+	out := formatDate(timeNow().In(TimeZone), format.String())
 	if n.asVar != "" {
 		ctx.Private[n.asVar] = out
 		return nil

@@ -197,6 +197,31 @@ func TestNewBuildsWiredHandler(t *testing.T) {
 	}
 }
 
+// No Django test exists: Django finds the admin's static files through the
+// app directories finder, as django.contrib.admin is an installed app.
+func TestAdminStaticFiles(t *testing.T) {
+	app, err := New(conf.Settings{
+		SecretKey: "k",
+		Database:  conf.Database{Driver: "sqlite", DSN: "file:adminstatic?mode=memory&cache=shared"},
+	}, wiredApp{}, auth.App{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m, ok := app.Static.Find("admin/css/base.css")
+	if !ok || m.Source.Name != "admin" {
+		t.Errorf("Find(admin/css/base.css) = %+v, %v, want a file of the admin source", m, ok)
+	}
+
+	// Without an app that registers with the admin there are no admin files.
+	app, err = New(conf.Settings{SecretKey: "k"}, testApp{name: "blog"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if m, ok := app.Static.Find("admin/css/base.css"); ok {
+		t.Errorf("Find(admin/css/base.css) = %+v, want no file without the admin", m)
+	}
+}
+
 func TestNewWithoutURLProviderUsesLivenessHandler(t *testing.T) {
 	// testApp provides models but neither URLs nor an admin registration, so the
 	// handler falls back to the liveness stub.

@@ -1,5 +1,17 @@
 {% extends "admin/base_site.html" %}
 {% block title %}{% if errors %}Error: {% endif %}{{ block.super }}{% endblock %}
+{% block extrahead %}{{ block.super }}
+<script src="{{ jsi18n_url }}"></script>
+{{ media }}
+{% endblock %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static "admin/css/widgets.css" %}">
+  <link rel="stylesheet" href="{% static "admin/css/forms.css" %}">
+{% endblock %}
+
+{% block coltype %}colM{% endblock %}
 {% block bodyclass %}app-{{ app_label }} model-{{ model_name }} change-form{% endblock %}
 {% block breadcrumbs %}
 <ol class="breadcrumbs">

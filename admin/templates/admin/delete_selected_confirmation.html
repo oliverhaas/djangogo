@@ -1,4 +1,9 @@
 {% extends "admin/base_site.html" %}
+{% block extrahead %}
+    {{ block.super }}
+    {{ media }}
+    <script src="{% static 'admin/js/cancel.js' %}" async></script>
+{% endblock %}
 {% block bodyclass %}app-{{ app_label }} model-{{ model_name }} delete-confirmation delete-selected-confirmation{% endblock %}
 {% block breadcrumbs %}
 <ol class="breadcrumbs">

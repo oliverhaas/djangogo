@@ -1,8 +1,17 @@
 {% extends "admin/base_site.html" %}
-{% block bodyclass %}dashboard{% endblock %}
+
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static "admin/css/dashboard.css" %}">{% endblock %}
+
+{% block coltype %}colMS{% endblock %}
+
+{% block bodyclass %}{{ block.super }} dashboard{% endblock %}
+
 {% block nav_breadcrumbs %}{% endblock %}
+
+{% block nav_sidebar %}{% endblock %}
+
 {% block content %}
 <div id="content-main" class="app-list">
-  {% include "admin/app_list.html" %}
+  {% include "admin/app_list.html" with app_list=app_list show_changelinks=true %}
 </div>
 {% endblock %}

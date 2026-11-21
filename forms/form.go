@@ -62,6 +62,9 @@ type Form struct {
 	// RequiredCSSClass and ErrorCSSClass are added to the rows of required
 	// fields and of fields with errors.
 	RequiredCSSClass, ErrorCSSClass string
+	// ExtraMedia is the form's own stylesheets and scripts, Django's class
+	// Media of a form. Media adds it after the media of the widgets.
+	ExtraMedia Media
 
 	names  []string
 	fields map[string]Field

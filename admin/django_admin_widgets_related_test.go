@@ -409,12 +409,13 @@ func autocompleteSelectHTML(name, class, allowClear, field, multiple string) str
 // Ported from Django: tests/admin_widgets/test_autocomplete_widget.py::AutocompleteMixinTests.test_get_url
 // Ported from Django: tests/admin_widgets/test_autocomplete_widget.py::AutocompleteMixinTests.test_render_options_required_field
 // Ported from Django: tests/admin_widgets/test_autocomplete_widget.py::AutocompleteMixinTests.test_render_options_not_required_field
+// Ported from Django: tests/admin_widgets/test_autocomplete_widget.py::AutocompleteMixinTests.test_media
 func TestAutocompleteMixin(t *testing.T) {
 	djangotest.EachDB(t, widgetRelatedModels(), func(t *testing.T, db *orm.DB) {
 		// FIXME-PORT: test_render_options_fk_as_pk needs a foreign key as
-		// the primary key, which the Go ORM does not have. test_media needs
-		// the select2 files and their translations, which the Go admin does
-		// not ship.
+		// the primary key, which the Go ORM does not have. test_media checks
+		// English only: the Go admin has no translations, so it always loads
+		// Select2's English messages.
 		env := widgetEnv(t, db, admin.ModelAdmin{})
 		album, band := modelField(t, db, "admin_widgets.WidgetAlbum", "Band")
 		_, featuring := modelField(t, db, "admin_widgets.WidgetAlbum", "featuring")
@@ -458,6 +459,17 @@ func TestAutocompleteMixin(t *testing.T) {
 			if out := w.Render("band", nil, nil); !strings.Contains(out, emptyOption) {
 				t.Errorf("Render() = %s, want the empty option", out)
 			}
+		})
+
+		t.Run("test_media", func(t *testing.T) {
+			w := admin.NewAutocompleteSelect(env.site, album, band, nil)
+			djangotest.AssertEqual(t, w.Media().JS(), []string{
+				"admin/js/vendor/jquery/jquery.min.js",
+				"admin/js/vendor/select2/select2.full.min.js",
+				"admin/js/vendor/select2/i18n/en.js",
+				"admin/js/jquery.init.js",
+				"admin/js/autocomplete.js",
+			})
 		})
 
 		t.Run("test_render_options_not_required_field", func(t *testing.T) {

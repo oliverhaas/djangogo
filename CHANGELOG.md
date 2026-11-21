@@ -232,6 +232,21 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `AutocompleteJsonView` does. Both kinds of field load only the related rows
   they show or receive. The `check` command reports Django's errors for them
   (`admin.E002`, `E003` and `E037` to `E040`).
+- Admin: the pages load Django's admin stylesheets and scripts, which the
+  admin serves as static files (`admin.StaticFS`) when an app registers with
+  the admin. A project's or an app's file of the same name replaces the
+  admin's file. This brings Django's look, the light and dark themes, the
+  navigation sidebar (`AdminSite.EnableNavSidebar`), the two filtered lists
+  of `FilterHorizontal` and `FilterVertical`, the search box of
+  `AutocompleteFields`, the lookup popup of `RawIDFields` and the selection
+  counter of the bulk actions. The `jsi18n/` view serves the English
+  catalog of the scripts. `AdminSite.Debug`, set from `Settings.Debug`, loads
+  the unminified jQuery and Select2.
+- Forms: `forms.Media` holds the stylesheets and scripts of a widget or a form,
+  as Django's `Media` does: a widget declares them with a `Media` method,
+  `Form.Media` adds up the media of its widgets and `Form.ExtraMedia`, and a
+  template prints `{{ form.media }}`. `templates.Static` returns the URL of a
+  static file.
 - `templates.Localize` formats a `time.Time`, `orm.Date` or `orm.Time` as a
   template prints it, and `orm.Model.ApplyDefaults` sets the field defaults on
   a new object.
@@ -314,6 +329,14 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   error note counts the fields with errors as Django does. Templates that
   override `admin/change_form.html` and read `form_html`, `error_count`,
   `has_errors` or `readonly_fields` must use `adminform` and `errors`.
+- Admin: the templates follow Django's `admin/base.html`. Templates that
+  override admin pages can use the blocks `extrastyle`, `extrahead`,
+  `coltype`, `nav_sidebar`, `nav_global`, `welcome_msg`, `pretitle`,
+  `sidebar` and `extrabody`. The app list of the index hides its table head
+  visually, and a link in a popup changelist carries `data-popup-opener`.
+- `{% now %}` printed the time in the server's local time zone. It now prints
+  it in `Settings.TimeZone` (`templates.TimeZone`, UTC by default), as Django
+  prints it in `TIME_ZONE`.
 - A command error prints as `CommandError: ...` without a stack trace. Exit
   code 1 is a command error and 2 a usage error. The hints of `migrate` and
   `makemigrations` name the program that runs. `startproject` and `startapp`
@@ -356,6 +379,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 
 ### Security
 
+- The admin answers 400 Bad Request when the `_to_field` parameter of a
+  changelist, add, change or delete page names a field other than the primary
+  key, as Django's `DisallowedModelAdminToField` does. Such a field is never
+  shown.
 - A value printed in a template through its `String` method was not
   HTML-escaped. Model instances, the post titles of the example and any other
   type with a `String` method are now escaped. Mark trusted HTML with

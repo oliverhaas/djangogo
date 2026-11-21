@@ -688,7 +688,12 @@ func (cl *changeList) buildRows() ([]map[string]any, []int64) {
 					tag = "th"
 					firstLink = false
 				}
-				linkHTML := fmt.Sprintf(`<a href="%s">%s</a>`, html.EscapeString(changeURL), valHTML)
+				// A popup's link carries the value the opener's field takes.
+				opener := ""
+				if cl.isPopup {
+					opener = fmt.Sprintf(` data-popup-opener="%d"`, pk)
+				}
+				linkHTML := fmt.Sprintf(`<a href="%s"%s>%s</a>`, html.EscapeString(changeURL), opener, valHTML)
 				cellsHTML = append(cellsHTML, fmt.Sprintf(`<%s class="%s">%s</%s>`, tag, classAttr, linkHTML, tag))
 			} else {
 				cellsHTML = append(cellsHTML, fmt.Sprintf(`<td class="%s">%s</td>`, classAttr, valHTML))
@@ -750,10 +755,34 @@ func (cl *changeList) resetSearchURL() string {
 	return "?" + strings.Join(parts, "&")
 }
 
+// toFieldAllowed reports whether a page may reference the field called name
+// through the _to_field parameter, Django's ModelAdmin.to_field_allowed. A
+// relation always targets a primary key here, so the primary key is the only
+// field a page may reference.
+func (e *entry) toFieldAllowed(name string) bool {
+	f, ok := e.model.FieldByAttr(name)
+	return ok && f.PrimaryKey
+}
+
+// rejectToField answers 400 Bad Request and reports true when name is a
+// _to_field value that toFieldAllowed refuses, Django's
+// DisallowedModelAdminToField. Without this check a popup would show the
+// values of any field.
+func (e *entry) rejectToField(w http.ResponseWriter, name string) bool {
+	if name == "" || e.toFieldAllowed(name) {
+		return false
+	}
+	http.Error(w, "Bad Request", http.StatusBadRequest)
+	return true
+}
+
 // changelist renders the model changelist view and dispatches bulk actions on POST.
 func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry) {
 	if !e.hasViewOrChangePermission(s, r, nil) {
 		forbidden(w)
+		return
+	}
+	if e.rejectToField(w, r.URL.Query().Get(toFieldVar)) {
 		return
 	}
 
@@ -906,6 +935,8 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	ctx["selection_note"] = fmt.Sprintf("0 of %d selected", len(cl.objects))
 	ctx["selection_note_all"] = selectionNoteAll
 	ctx["show_select_across"] = cl.resultCount != len(cl.objects)
+	ctx["media"] = e.media(s)
+	ctx["jsi18n_url"] = s.jsi18nURL()
 
 	// Results & pagination context.
 	ctx["result_headers"] = headers

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/oliverhaas/djangogo/templates"
 )
 
 // TestNowTag ports Django's NowTagTests.
@@ -17,8 +19,9 @@ import (
 // Ported from Django: tests/template_tests/syntax_tests/test_now.py::NowTagTests.test_now_variable
 // Ported from Django: tests/template_tests/syntax_tests/test_now.py::NowTagTests.test_now_variable_as
 func TestNowTag(t *testing.T) {
-	// Django builds the expected value from the current date, as here.
-	now := time.Now()
+	// Django builds the expected value from the current date, as here, in
+	// the current time zone.
+	now := time.Now().In(templates.TimeZone)
 	day, month, year := now.Day(), int(now.Month()), now.Year()
 	today := fmt.Sprintf("%d %d %d", day, month, year)
 	runRenderCases(t, []renderCase{

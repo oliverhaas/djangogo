@@ -246,6 +246,9 @@ func (s *AdminSite) saveManyToMany(ctx context.Context, e *entry, form *forms.Fo
 // creates a row, sets a success message, and redirects per Django's
 // response_add rules.
 func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
+	if e.rejectToField(w, r.FormValue(toFieldVar)) {
+		return
+	}
 	if !e.hasAddPermission(s, r) {
 		forbidden(w)
 		return
@@ -314,6 +317,9 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 // read-only form for view-only users, and updates through orm.Save for users
 // with change permission.
 func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
+	if e.rejectToField(w, r.FormValue(toFieldVar)) {
+		return
+	}
 	objectID := r.PathValue("object_id")
 	obj, pk, err := s.loadObject(r.Context(), e, objectID)
 	if err != nil {
@@ -407,6 +413,9 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 // loaded object, redirects with a warning if nonexistent, and on POST deletes
 // the row and redirects to changelist (with change perm) or admin index.
 func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
+	if e.rejectToField(w, r.FormValue(toFieldVar)) {
+		return
+	}
 	objectID := r.PathValue("object_id")
 	obj, pk, err := s.loadObject(r.Context(), e, objectID)
 	if err != nil {
@@ -452,6 +461,7 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 	ctx["changelist_url"] = s.changelistURL(e)
 	ctx["change_url"] = s.changeURL(e, pk)
 	ctx["action"] = r.URL.Path
+	ctx["media"] = e.media(s)
 	s.render(w, r, "admin/delete_confirmation.html", ctx)
 }
 
@@ -537,6 +547,8 @@ func (s *AdminSite) renderChangeForm(
 
 	ctx["form"] = af.form
 	ctx["adminform"] = s.fieldsetContext(r.Context(), e, af)
+	ctx["media"] = e.media(s).Add(af.form.Media())
+	ctx["jsi18n_url"] = s.jsi18nURL()
 	ctx["errors"] = 0
 	if af.form.IsBound() {
 		ctx["errors"] = af.form.Errors().Len()

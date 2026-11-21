@@ -247,6 +247,7 @@ func (f *Form) TemplateValue() any {
 		"is_multipart":     false,
 		"prefix":           f.Prefix,
 		"cleaned_data":     f.CleanedData,
+		"media":            f.Media().TemplateValue(),
 	}
 	for _, tf := range all {
 		name, _ := tf["name"].(string)

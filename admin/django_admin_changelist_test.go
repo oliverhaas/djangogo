@@ -1181,7 +1181,7 @@ func TestPaginationElidedPageRange(t *testing.T) {
 		// Page 8 of 15 elides both sides: [1, 2, …, 5..11, …, 14, 15].
 		resp := env.client.Get(grpURL, djangotest.Query(url.Values{"p": {"8"}}))
 		djangotest.AssertStatus(t, resp, http.StatusOK)
-		djangotest.AssertContains(t, resp, "…", djangotest.Count(2))
+		djangotest.AssertContains(t, resp, "<li>… </li>", djangotest.Count(2))
 		djangotest.AssertContains(t, resp, `<a role="button" href="" aria-current="page">8</a>`, djangotest.HTML())
 		djangotest.AssertContains(t, resp, `<a role="button" href="?p=1">1</a>`, djangotest.HTML())
 		djangotest.AssertContains(t, resp, `<a role="button" href="?p=15">15</a>`, djangotest.HTML())

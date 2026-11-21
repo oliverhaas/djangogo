@@ -199,11 +199,10 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `label_from_instance`, and they load their options once per form, where
   Django loads them on each render.
 - **Admin:** no inlines, `list_editable`, `date_hierarchy` or facets, no
-  history (`LogEntry`) and no admin for users and groups. The admin ships no
-  JavaScript: a field in `FilterHorizontal` or `FilterVertical` stays a plain
-  `<select multiple>`, the lookup link of a `RawIDFields` field opens the
-  changelist without the popup, and an `AutocompleteFields` field lists only
-  its selected rows, without the search box. There is no custom form class:
+  history (`LogEntry`) and no admin for users and groups. A foreign key has no
+  add, change or delete link next to it, and a date or time field has no
+  calendar or clock: the form fields keep the widgets of the model form, not
+  the admin's. The scripts and pages are in English only. There is no custom form class:
   `FormOptions` adds fields and options to the model form, and its exclusions
   add to `ExcludeFields` instead of being overridden by it. A read-only field
   shows a model field or a `DisplayColumns` value, not a model method. The

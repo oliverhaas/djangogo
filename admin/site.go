@@ -117,6 +117,14 @@ type AdminSite struct {
 	// slashes before 404ing (Django's AdminSite.final_catch_all_view, default
 	// true).
 	FinalCatchAllView bool
+	// EnableNavSidebar shows the list of the apps and models beside the
+	// content of every page but the index (Django's
+	// AdminSite.enable_nav_sidebar, default true).
+	EnableNavSidebar bool
+	// Debug loads the unminified versions of the vendored scripts (jQuery,
+	// Select2, XRegExp), as Django does under settings.DEBUG. The application
+	// sets it from its Debug setting.
+	Debug bool
 	// HasPermissionFunc overrides AdminSite.HasPermission when non-nil.
 	HasPermissionFunc func(r *http.Request) bool
 	// LoginConfirmAllowed overrides the staff/active check during login POST
@@ -160,6 +168,7 @@ func NewAdminSite(db *orm.DB) (*AdminSite, error) {
 		SiteURL:           defaultSiteURL,
 		EmptyValueDisplay: emptyValueDisplay,
 		FinalCatchAllView: true,
+		EnableNavSidebar:  true,
 		actions:           []Action{defaultDeleteSelectedAction()},
 	}
 	engine.SetResolver(site.resolveURL)
@@ -299,6 +308,7 @@ func (s *AdminSite) buildRoutes() []urls.Route {
 		urls.Path("password_change/", s.adminView(s.passwordChange, true), "password_change"),
 		urls.Path("password_change/done/", s.adminView(s.passwordChangeDone, true), "password_change_done"),
 		urls.Path("autocomplete/", s.adminView(s.autocompleteView, false), "autocomplete"),
+		urls.Path("jsi18n/", s.adminView(s.jsi18nView, true), "jsi18n"),
 	}
 
 	var validApps []string
@@ -392,6 +402,7 @@ func (s *AdminSite) EachContext(r *http.Request) map[string]any {
 		"has_permission":           s.HasPermission(r),
 		"available_apps":           s.GetAppList(r),
 		"is_popup":                 false,
+		"is_nav_sidebar_enabled":   s.EnableNavSidebar,
 		"prefix":                   s.prefix(),
 		"user_has_usable_password": u != nil && u.IsAuthenticated() && u.HasUsablePassword(),
 	}

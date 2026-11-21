@@ -5,6 +5,12 @@ its source in a comment of the form
 
     Ported from Django: tests/<file>.py::<Class>.<test>
 
+The files under admin/static/admin are copied from Django's main branch at
+commit 5b122da (django/contrib/admin/static/admin), the version the admin
+templates follow. The jQuery, Select2 and XRegExp files under
+admin/static/admin/js/vendor and admin/static/admin/css/vendor keep the
+licenses in their folders.
+
 Django is distributed under the following license, which applies to those
 derived parts.
 

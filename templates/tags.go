@@ -118,12 +118,19 @@ func (n *staticTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateW
 	if err != nil {
 		return err
 	}
-	url := joinStatic(StaticBase, percentEncode(val.String(), "/"))
+	url := Static(val.String())
 	if n.asVar != "" {
 		ctx.Private[n.asVar] = url
 		return nil
 	}
 	return writeOutput(ctx, w, pongo2.AsValue(url))
+}
+
+// Static returns the URL of the static file at path, what {% static path %}
+// writes: StaticBase joined with the percent-encoded path, Django's
+// django.templatetags.static.static.
+func Static(path string) string {
+	return joinStatic(StaticBase, percentEncode(path, "/"))
 }
 
 // joinStatic joins a static URL base and a path with exactly one slash between them.

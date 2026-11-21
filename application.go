@@ -253,11 +253,17 @@ func (a *Application) templateEngine() (*templates.Engine, error) {
 	if s.StaticURL != "" && templates.StaticBase != s.StaticURL {
 		templates.StaticBase = s.StaticURL
 	}
+	// {% now %} prints the time in TIME_ZONE, global to the package as well.
+	if loc, err := s.Location(); err == nil && templates.TimeZone.String() != loc.String() {
+		templates.TimeZone = loc
+	}
 	return engine, nil
 }
 
-// staticFinder builds the finder over Settings.StaticFilesDirs and the static
-// trees of the apps.
+// staticFinder builds the finder over Settings.StaticFilesDirs, the static
+// trees of the apps and, when an app registers models with the admin, the
+// admin's static files, searched in this order, so a project or an app can
+// replace an admin file.
 func (a *Application) staticFinder() *staticfiles.Finder {
 	trees := a.Apps.StaticFS()
 	sources := make([]staticfiles.Source, 0, len(a.Settings.StaticFilesDirs)+len(trees))
@@ -266,6 +272,9 @@ func (a *Application) staticFinder() *staticfiles.Finder {
 	}
 	for _, tree := range trees {
 		sources = append(sources, staticfiles.Source{Name: tree.App, FS: tree.FS})
+	}
+	if len(adminRegistrars(a.Apps.Configs())) > 0 {
+		sources = append(sources, staticfiles.Source{Name: "admin", FS: admin.StaticFS()})
 	}
 	return staticfiles.NewFinder(sources...)
 }
@@ -437,15 +446,7 @@ func (a *Application) Close() error {
 // site (and nil error) when no app opts in, so the admin is mounted only when at
 // least one app registers a model -- mirroring Django's contrib.admin opt-in.
 func (a *Application) adminSite(appConfigs []apps.Config) (*admin.AdminSite, error) {
-	type adminRegistrar interface {
-		RegisterAdmin(*admin.AdminSite)
-	}
-	var registrars []adminRegistrar
-	for _, c := range appConfigs {
-		if ar, ok := c.(adminRegistrar); ok {
-			registrars = append(registrars, ar)
-		}
-	}
+	registrars := adminRegistrars(appConfigs)
 	if len(registrars) == 0 {
 		return nil, nil
 	}
@@ -454,10 +455,28 @@ func (a *Application) adminSite(appConfigs []apps.Config) (*admin.AdminSite, err
 		return nil, fmt.Errorf("djangogo: build admin site: %w", err)
 	}
 	site.Apps = a.Apps
+	site.Debug = a.Settings.Debug
 	for _, ar := range registrars {
 		ar.RegisterAdmin(site)
 	}
 	return site, nil
+}
+
+// adminRegistrar is an app that registers models with the admin.
+type adminRegistrar interface {
+	RegisterAdmin(*admin.AdminSite)
+}
+
+// adminRegistrars returns the apps of appConfigs that register models with
+// the admin.
+func adminRegistrars(appConfigs []apps.Config) []adminRegistrar {
+	var out []adminRegistrar
+	for _, c := range appConfigs {
+		if ar, ok := c.(adminRegistrar); ok {
+			out = append(out, ar)
+		}
+	}
+	return out
 }
 
 // Execute dispatches the given CLI arguments (typically os.Args[1:]) and

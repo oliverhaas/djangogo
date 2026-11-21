@@ -19,8 +19,7 @@ import (
 // ModelAdmin.FilterHorizontal or FilterVertical, Django's
 // admin.widgets.FilteredSelectMultiple: a <select multiple> with the class and
 // data attributes that Django's SelectFilter2.js reads to build its two
-// filtered lists. The Go admin ships no JavaScript, so the browser shows a
-// plain list.
+// filtered lists.
 type FilteredSelectMultiple struct {
 	forms.SelectMultiple
 	// VerboseName is the name of the field the script shows above the lists.
@@ -190,8 +189,6 @@ func rawIDHTML(name, input, relatedURL, label, link string) string {
 // <select> with the data attributes of Django's autocomplete.js, which loads
 // the options from the site's autocomplete view as the user types. It
 // renders only the selected options and, unless IsRequired, an empty one.
-// The Go admin ships no JavaScript, so the browser shows a plain list of
-// them.
 type AutocompleteSelect struct {
 	forms.Select
 	autocomplete
@@ -218,6 +215,9 @@ type autocomplete struct {
 	// widget.is_required): a required field has no empty option and the
 	// script offers no clear button. The admin sets it from the field.
 	IsRequired bool
+	// Debug loads the unminified jQuery and Select2, Django's settings.DEBUG.
+	// The admin sets it from AdminSite.Debug.
+	Debug bool
 }
 
 // NewAutocompleteSelect returns the widget of the foreign key f of model m on
@@ -244,6 +244,7 @@ func newAutocomplete(site *AdminSite, m *orm.Model, f *orm.Field) autocomplete {
 		AppLabel:  m.App(),
 		ModelName: strings.ToLower(m.Name()),
 		FieldName: f.Attr,
+		Debug:     site.Debug,
 	}
 }
 
