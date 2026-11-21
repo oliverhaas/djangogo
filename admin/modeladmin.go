@@ -4,26 +4,277 @@
 // delete, and history views from embedded pongo2 templates.
 package admin
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+
+	"github.com/oliverhaas/djangogo/orm"
+)
+
+// ActionCheckboxName is the HTML input name of the per-row selection checkbox
+// on the changelist (Django's helpers.ACTION_CHECKBOX_NAME).
+const ActionCheckboxName = "_selected_action"
+
+// DisplayColumn defines a custom computed column referenced by name in
+// ModelAdmin.ListDisplay (the Go analog of a ModelAdmin method decorated with
+// @admin.display).
+type DisplayColumn struct {
+	// Description is the column header text (Django's short_description).
+	// When empty, derived from the column name.
+	Description string
+	// OrderField is the ORM field path used when sorting by this column
+	// (Django's admin_order_field). Empty means the column is not sortable.
+	OrderField string
+	// Boolean renders the returned value as a Django boolean indicator
+	// (Django's @display(boolean=True)).
+	Boolean bool
+	// EmptyValue overrides the empty-value placeholder for this column.
+	EmptyValue string
+	// Value computes the display value for obj (a *T).
+	Value func(obj any) any
+}
+
+// FilterLookup is one selectable choice returned by SimpleListFilter.Lookups.
+type FilterLookup struct {
+	// Value is the query-string value submitted when this choice is clicked.
+	Value string
+	// Display is the human-readable label rendered in the filter sidebar.
+	Display string
+}
+
+// SimpleListFilter is a custom changelist sidebar filter that does not map
+// directly to a single model field (Django's SimpleListFilter).
+type SimpleListFilter struct {
+	// Title is the human-readable heading rendered after "By " in the sidebar.
+	Title string
+	// ParameterName is the URL query parameter controlled by this filter.
+	ParameterName string
+	// Lookups returns the selectable (value, display) pairs for r.
+	Lookups func(r *http.Request) []FilterLookup
+	// Filter returns the orm.Cond applied to the changelist queryset for the
+	// active parameter value (selected is false when the parameter is absent).
+	// Return ok=false to leave the queryset unchanged.
+	Filter func(r *http.Request, value string, selected bool) (orm.Cond, bool)
+}
+
+// FieldFilterKind selects a specific built-in FieldListFilter class for a
+// model field or relation path.
+type FieldFilterKind uint8
+
+const (
+	// FilterAuto picks the filter class from field metadata, matching Django's
+	// FieldListFilter.create registration order.
+	FilterAuto FieldFilterKind = iota
+	// FilterRelated filters by all instances of a related model.
+	FilterRelated
+	// FilterRelatedOnly filters by related instances referenced by the model's
+	// current queryset (Django's RelatedOnlyFieldListFilter).
+	FilterRelatedOnly
+	// FilterBoolean filters a boolean field with Yes/No[/Unknown].
+	FilterBoolean
+	// FilterChoices filters a field with declared choices.
+	FilterChoices
+	// FilterDate filters a Date/DateTime field with Today/Past 7 days/This month/This year.
+	FilterDate
+	// FilterAllValues filters by every distinct value present in the queryset.
+	FilterAllValues
+	// FilterEmpty filters by empty string or NULL (Django's EmptyFieldListFilter).
+	FilterEmpty
+)
+
+// FieldFilter binds a field name or "__"-spanning relation path to a specific
+// FieldFilterKind (the Go analog of Django's (field, FilterClass) tuple in
+// list_filter).
+type FieldFilter struct {
+	// Field is a model field name, attribute name, or "__"-spanning path.
+	Field string
+	// Kind selects which built-in FieldListFilter implementation to use.
+	Kind FieldFilterKind
+	// Title optionally overrides the sidebar heading for this filter.
+	Title string
+}
+
+// RelatedOnlyFilter constructs a FieldFilter using RelatedOnlyFieldListFilter.
+func RelatedOnlyFilter(field string) FieldFilter {
+	return FieldFilter{Field: field, Kind: FilterRelatedOnly}
+}
+
+// EmptyFilter constructs a FieldFilter using EmptyFieldListFilter.
+func EmptyFilter(field string) FieldFilter {
+	return FieldFilter{Field: field, Kind: FilterEmpty}
+}
+
+// AllValuesFilter constructs a FieldFilter using AllValuesFieldListFilter.
+func AllValuesFilter(field string) FieldFilter {
+	return FieldFilter{Field: field, Kind: FilterAllValues}
+}
+
+// BooleanFilter constructs a FieldFilter using BooleanFieldListFilter.
+func BooleanFilter(field string) FieldFilter {
+	return FieldFilter{Field: field, Kind: FilterBoolean}
+}
+
+// ChoicesFilter constructs a FieldFilter using ChoicesFieldListFilter.
+func ChoicesFilter(field string) FieldFilter {
+	return FieldFilter{Field: field, Kind: FilterChoices}
+}
+
+// DateFilter constructs a FieldFilter using DateFieldListFilter.
+func DateFilter(field string) FieldFilter {
+	return FieldFilter{Field: field, Kind: FilterDate}
+}
+
+// ActionContext provides an admin bulk action with access to the site, database,
+// model metadata, and the selected queryset (either the checked rows or every
+// row matching the active changelist filters when SelectAcross is true).
+type ActionContext struct {
+	// Site is the AdminSite handling the request.
+	Site *AdminSite
+	// DB is the ORM database handle.
+	DB *orm.DB
+	// Model is the registered model descriptor.
+	Model *orm.Model
+	// SelectAcross reports whether the user selected all rows across pages.
+	SelectAcross bool
+	// Objects loads all selected model instances (each element is *T).
+	Objects func(ctx context.Context) ([]any, error)
+	// Count returns the number of selected rows.
+	Count func(ctx context.Context) (int64, error)
+	// PKs returns the primary keys of all selected rows.
+	PKs func(ctx context.Context) ([]any, error)
+	// Delete deletes all selected rows through the ORM and returns the deleted count.
+	Delete func(ctx context.Context) (int64, error)
+}
+
+// Action is a bulk action selectable from the changelist action bar (Django's
+// ModelAdmin.actions entry).
+type Action struct {
+	// Name is the internal identifier submitted in the "action" form field.
+	Name string
+	// Description is the option label shown in the dropdown. Supports Django's
+	// "%(verbose_name)s" and "%(verbose_name_plural)s" placeholders. When empty,
+	// derived by capitalizing Name with underscores replaced by spaces.
+	Description string
+	// Permissions lists permission names ("add", "change", "delete", "view", or
+	// a custom permission name). When non-empty, the user must hold at least one
+	// listed permission to see or execute the action.
+	Permissions []string
+	// Handler executes the action. Return handled=true if the handler wrote the
+	// HTTP response itself (e.g. a confirmation page, redirect, or download).
+	// Return handled=false to redirect back to the changelist URL preserving
+	// the query string.
+	Handler func(w http.ResponseWriter, r *http.Request, act *ActionContext) (handled bool, err error)
+}
+
+// DeletedObjects holds the summary and display items rendered on the
+// delete_selected confirmation page (returned by ModelAdmin.GetDeletedObjects).
+type DeletedObjects struct {
+	// Items holds pre-formatted HTML or plain-text labels of objects to delete.
+	Items []string
+	// ModelCount maps each affected model's plural verbose name to its count.
+	ModelCount []DeletedModelCount
+	// PermsNeeded lists verbose names of models the user lacks permission to delete.
+	PermsNeeded []string
+	// Protected lists pre-formatted HTML or plain-text labels of protected objects.
+	Protected []string
+}
+
+// DeletedModelCount is one entry in the delete confirmation Summary list.
+type DeletedModelCount struct {
+	// Name is the model's plural verbose name (capitalized in the template).
+	Name string
+	// Count is the number of rows of that model that would be deleted.
+	Count int
+}
 
 // ModelAdmin is the per-model admin customization surface. A zero value is a
-// valid configuration that displays every field with no default ordering and
-// checks Django's default auth permissions (<app>.add_<model>, etc.).
+// valid configuration that displays every field, orders by Meta.Ordering or
+// -pk, enables delete_selected, and checks Django's default auth permissions
+// (<app>.add_<model>, etc.).
 type ModelAdmin struct {
-	// ListDisplay names the Field.Name columns shown on the changelist;
-	// an empty slice means show every field.
+	// ListDisplay names the columns shown on the changelist (model struct field
+	// names, snake_case attribute names, "__str__", "__"-spanning relation paths,
+	// or keys in DisplayColumns). An empty slice shows every concrete field.
 	ListDisplay []string
+	// ListDisplayLinks names the columns in ListDisplay that link to each row's
+	// change page. nil defaults to the first column; a non-nil empty slice
+	// ([]string{}) disables links on all columns (Django's list_display_links=None).
+	ListDisplayLinks []string
+	// DisplayColumns defines custom computed columns referenced by name in
+	// ListDisplay.
+	DisplayColumns map[string]DisplayColumn
+	// ListFilter configures the right-hand filter sidebar. Each element may be
+	// a string (field name or "__" relation path), a FieldFilter, or a
+	// SimpleListFilter (or *SimpleListFilter).
+	ListFilter []any
+	// ListPerPage is the maximum number of items per changelist page (default 100).
+	ListPerPage int
+	// ListMaxShowAll is the maximum number of items shown when "Show all" is
+	// clicked (default 200).
+	ListMaxShowAll int
+	// ShowFullResultCount controls whether the total unfiltered count is
+	// queried and displayed in the search bar (default true when nil).
+	ShowFullResultCount *bool
+	// SortableBy restricts which ListDisplay columns are sortable. nil allows
+	// sorting on every sortable column; a non-nil empty slice disables sorting.
+	SortableBy []string
 	// Ordering is the default OrderBy applied to the changelist
-	// (e.g. "-id"); an empty slice means no ordering.
+	// (e.g. "-id"); an empty slice falls back to Meta.Ordering, then -pk.
 	Ordering []string
-	// SearchFields names the fields searched by the changelist search box.
-	// Search execution may be added later; the value is stored for now.
+	// SearchFields names the fields searched by the changelist search box,
+	// supporting Django's prefixes ("^" istartswith, "=" iexact, "@" search),
+	// explicit lookups ("__exact", "__iexact"), and "__"-spanning relations.
 	SearchFields []string
+	// SearchHelpText is displayed below the changelist search input when non-empty.
+	SearchHelpText string
+	// EmptyValueDisplay overrides AdminSite.EmptyValueDisplay for this model.
+	EmptyValueDisplay string
+	// PreserveFilters preserves changelist query parameters across edits when
+	// true (default true when nil).
+	PreserveFilters *bool
 	// ReadonlyFields names fields the change form displays as read-only values
 	// and omits from editable inputs (preserving their stored values on save).
 	ReadonlyFields []string
 	// ExcludeFields names fields omitted from the add and change forms.
 	ExcludeFields []string
+
+	// Actions registers custom bulk actions on this ModelAdmin (appended after
+	// site-wide actions such as delete_selected; an action with the same Name
+	// overrides the site-wide action).
+	Actions []Action
+	// DisableActions disables all actions (including site-wide delete_selected)
+	// on this ModelAdmin (Django's actions = None).
+	DisableActions bool
+	// ActionsOnTop renders the action bar above the result table (default true when nil).
+	ActionsOnTop *bool
+	// ActionsOnBottom renders the action bar below the result table (default false).
+	ActionsOnBottom bool
+	// ActionsSelectionCounter shows the "0 of N selected" counter (default true when nil).
+	ActionsSelectionCounter *bool
+	// DeleteConfirmationMaxDisplay caps the number of items listed on the
+	// delete_selected confirmation page (nil means unlimited; 0 hides the list).
+	DeleteConfirmationMaxDisplay *int
+
+	// GetListDisplay dynamically returns the changelist columns for r.
+	GetListDisplay func(r *http.Request) []string
+	// GetListDisplayLinks dynamically returns the linked columns for r.
+	GetListDisplayLinks func(r *http.Request, listDisplay []string) []string
+	// GetListFilter dynamically returns the list_filter entries for r.
+	GetListFilter func(r *http.Request) []any
+	// GetSearchFields dynamically returns the search_fields for r.
+	GetSearchFields func(r *http.Request) []string
+	// GetOrdering dynamically returns the default ordering for r.
+	GetOrdering func(r *http.Request) []string
+	// GetQuerysetFilter returns an extra orm.Cond applied to the base
+	// changelist queryset for r (the Go analog of overriding ModelAdmin.get_queryset).
+	GetQuerysetFilter func(r *http.Request) orm.Cond
+	// GetActions filters or customizes the resolved action list for r.
+	GetActions func(r *http.Request, actions []Action) []Action
+	// DeleteQueryset overrides how delete_selected deletes the selected rows.
+	DeleteQueryset func(r *http.Request, act *ActionContext) error
+	// GetDeletedObjects overrides how delete_selected computes the confirmation
+	// summary, deletable list, missing permissions, and protected objects.
+	GetDeletedObjects func(r *http.Request, objs []any) (*DeletedObjects, error)
 
 	// HasAddPermission overrides the default "<app>.add_<model>" check
 	// (Django's ModelAdmin.has_add_permission).
@@ -43,4 +294,7 @@ type ModelAdmin struct {
 	// HasModulePermission overrides the default app-level module permission
 	// check (Django's ModelAdmin.has_module_permission).
 	HasModulePermission func(r *http.Request) bool
+	// CustomPermissions maps custom action permission names (used in
+	// Action.Permissions) to request permission predicates.
+	CustomPermissions map[string]func(r *http.Request) bool
 }

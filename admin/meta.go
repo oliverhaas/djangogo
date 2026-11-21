@@ -15,6 +15,16 @@ func modelVerboseNames(m *orm.Model) (singular, plural string) {
 	return m.VerboseName(), m.VerboseNamePlural()
 }
 
+// modelNgettext returns m's singular verbose name when n == 1 and its plural
+// verbose name otherwise, matching django.contrib.admin.utils.model_ngettext.
+func modelNgettext(m *orm.Model, n int) string {
+	singular, plural := modelVerboseNames(m)
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
+
 // capFirst uppercases the first rune of s without altering the rest, matching
 // django.utils.text.capfirst.
 func capFirst(s string) string {
@@ -49,10 +59,35 @@ func titleCase(s string) string {
 }
 
 // fieldLabel returns the display label of a model field, preferring its
-// VerboseName and otherwise deriving it from Attr as Django does.
+// VerboseName, using "ID" for an auto/primary-key "id" field (matching Django's
+// AutoField verbose_name), and otherwise deriving it from Attr.
 func fieldLabel(f *orm.Field) string {
 	if f.VerboseName != "" {
 		return capFirst(f.VerboseName)
 	}
+	if f.PrimaryKey && f.Attr == "id" {
+		return "ID"
+	}
 	return capFirst(strings.ReplaceAll(f.Attr, "_", " "))
+}
+
+// fieldVerboseName returns the uncapitalized verbose name of f for sidebar
+// filter titles ("By <title>"), matching Django's Field.verbose_name.
+func fieldVerboseName(f *orm.Field) string {
+	if f.VerboseName != "" {
+		return f.VerboseName
+	}
+	if f.PrimaryKey && f.Attr == "id" {
+		return "ID"
+	}
+	return strings.ReplaceAll(f.Attr, "_", " ")
+}
+
+// prettyName turns a snake_case or "__"-separated name into a human-readable
+// label, matching django.forms.utils.pretty_name.
+func prettyName(name string) string {
+	if name == "" {
+		return ""
+	}
+	return capFirst(strings.ReplaceAll(name, "_", " "))
 }

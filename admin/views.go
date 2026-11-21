@@ -103,78 +103,6 @@ func (s *AdminSite) makeOldChangeRedirect(e *entry) http.HandlerFunc {
 	}
 }
 
-// changelist renders the list of rows for e after checking view or change
-// permission.
-func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry) {
-	if !e.hasViewOrChangePermission(s, r, nil) {
-		forbidden(w)
-		return
-	}
-
-	objs, err := e.ops.all(r.Context(), e.admin.Ordering)
-	if err != nil {
-		http.Error(w, "failed to load rows", http.StatusInternalServerError)
-		return
-	}
-
-	cols := displayColumns(e)
-	columns := make([]string, len(cols))
-	for i, f := range cols {
-		columns[i] = f.Name
-	}
-
-	// Pre-load foreign-key labels: one query per FK column, indexed by primary
-	// key string, so each FK cell shows the related object's label rather than
-	// a raw id.
-	fkLabels := s.loadFKLabels(r.Context(), cols)
-
-	rows := make([]map[string]any, len(objs))
-	for i, obj := range objs {
-		elem := reflect.ValueOf(obj).Elem()
-		cells := make([]string, len(cols))
-		for j, f := range cols {
-			if f.Rel != nil {
-				cells[j] = fkCellLabel(elem.Field(f.Index), fkLabels[j])
-				continue
-			}
-			cells[j] = formatCell(elem.Field(f.Index))
-		}
-		pk := pkOf(elem, e)
-		rows[i] = map[string]any{
-			"pk":         pk,
-			"cells":      cells,
-			"label":      displayLabel(e.model, obj),
-			"change_url": s.changeURL(e, pk),
-			"delete_url": s.deleteURL(e, pk),
-		}
-	}
-
-	singular, plural := modelVerboseNames(e.model)
-	canChange := e.hasChangePermission(s, r, nil)
-	title := "Select " + singular + " to view"
-	if canChange {
-		title = "Select " + singular + " to change"
-	}
-
-	ctx := s.EachContext(r)
-	ctx["title"] = title
-	ctx["subtitle"] = ""
-	ctx["app_label"] = e.app
-	ctx["app_verbose_name"] = s.appVerboseName(e.app)
-	ctx["app_url"] = s.appURLOrEmpty(e.app)
-	ctx["slug"] = e.slug
-	ctx["model"] = e.model.Name()
-	ctx["verbose_name"] = singular
-	ctx["verbose_name_plural"] = capFirst(plural)
-	ctx["columns"] = columns
-	ctx["rows"] = rows
-	ctx["has_add_permission"] = e.hasAddPermission(s, r)
-	ctx["has_change_permission"] = canChange
-	ctx["has_delete_permission"] = e.hasDeletePermission(s, r, nil)
-	ctx["add_url"] = s.addURL(e)
-	s.render(w, r, "admin/change_list.html", ctx)
-}
-
 // loadFKLabels pre-loads related object labels for each foreign-key field in
 // fields, keyed by index into fields.
 func (s *AdminSite) loadFKLabels(ctx context.Context, fields []*orm.Field) map[int]map[string]string {
@@ -183,7 +111,7 @@ func (s *AdminSite) loadFKLabels(ctx context.Context, fields []*orm.Field) map[i
 		if f.Rel == nil || f.Rel.Target == nil {
 			continue
 		}
-		opts, err := orm.LabeledRows(ctx, s.db, f.Rel.Target)
+		opts, err := orm.LabeledRowsOrdered(ctx, s.db, f.Rel.Target, nil, nil)
 		if err != nil {
 			continue
 		}

@@ -1,0 +1,1128 @@
+package admin
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/oliverhaas/djangogo/orm"
+)
+
+// Sentinel errors returned while resolving changelist filters and pagination.
+var (
+	// errDisallowedLookup corresponds to Django's DisallowedModelAdminLookup
+	// (SuspiciousOperation -> HTTP 400).
+	errDisallowedLookup = errors.New("admin: disallowed model admin lookup")
+	// errIncorrectLookup corresponds to Django's IncorrectLookupParameters
+	// (redirects changelist to ?e=1).
+	errIncorrectLookup = errors.New("admin: incorrect lookup parameters")
+)
+
+// filterChoice is one clickable link rendered inside a sidebar filter <details>.
+type filterChoice struct {
+	Selected    bool
+	QueryString string
+	Display     string
+}
+
+// filterSpec is one evaluated sidebar filter section ready to filter the
+// queryset and render choices in the template.
+type filterSpec interface {
+	Title() string
+	HasOutput() bool
+	Choices(cl *changeList) []filterChoice
+	Apply() (orm.Cond, bool, error)
+}
+
+// lookupAllowed checks whether filtering by lookup (a query parameter key) is
+// permitted on e, matching Django's ModelAdmin.lookup_allowed.
+func lookupAllowed(e *entry, lookup string, listFilter []any) bool {
+	if lookup == "" {
+		return true
+	}
+
+	// Build set of valid relational paths and SimpleListFilter parameter names.
+	validLookups := make(map[string]bool, len(listFilter))
+	for _, item := range listFilter {
+		switch v := item.(type) {
+		case string:
+			validLookups[normalizeFieldPath(e.model, v)] = true
+		case FieldFilter:
+			validLookups[normalizeFieldPath(e.model, v.Field)] = true
+		case SimpleListFilter:
+			if v.ParameterName != "" {
+				validLookups[v.ParameterName] = true
+			}
+		case *SimpleListFilter:
+			if v != nil && v.ParameterName != "" {
+				validLookups[v.ParameterName] = true
+			}
+		}
+	}
+	if validLookups[lookup] {
+		return true
+	}
+
+	// Strip custom filter suffixes such as "__isempty" before checking relation depth.
+	checkPath := strings.TrimSuffix(lookup, "__isempty")
+	parts := strings.Split(checkPath, "__")
+	var relationParts []string
+	cur := e.model
+	var prevField *orm.Field
+	var prevRel bool
+	var lastPart string
+	for _, part := range parts {
+		lastPart = part
+		if cur == nil {
+			break
+		}
+		if part == "pk" {
+			if !prevRel {
+				relationParts = append(relationParts, part)
+			}
+			break
+		}
+		f, ok := resolveModelField(cur, part)
+		if ok {
+			isRel := f.Rel != nil
+			if !prevRel || (isRel || !f.PrimaryKey) {
+				relationParts = append(relationParts, f.Attr)
+			}
+			if !isRel || f.Rel.Target == nil {
+				break
+			}
+			prevField = f
+			prevRel = true
+			cur = f.Rel.Target
+			continue
+		}
+		if mf, ok := cur.ManyToManyField(part); ok && mf.Rel != nil && mf.Rel.Target != nil {
+			relationParts = append(relationParts, mf.Attr)
+			prevField = mf
+			prevRel = true
+			cur = mf.Rel.Target
+			continue
+		}
+		if info, ok := orm.ResolveLookupPath(cur, part); ok && info.Reverse != nil && info.TargetModel != nil {
+			relationParts = append(relationParts, info.Reverse.QueryName)
+			prevField = nil
+			prevRel = true
+			cur = info.TargetModel
+			continue
+		}
+		// Non-field trailing lookup (e.g. exact, isnull, startswith).
+		break
+	}
+	_ = prevField
+
+	if len(relationParts) <= 1 {
+		return true
+	}
+	joined := strings.Join(relationParts, "__")
+	if validLookups[joined] {
+		return true
+	}
+	withLast := joined + "__" + lastPart
+	return validLookups[withLast]
+}
+
+// buildFilters constructs all active filterSpecs for cl, consumes their query
+// parameters from a copy of filterParams, validates any remaining lookup
+// parameters, and returns the filter conditions, duplicate flag, remaining
+// lookup params, and whether any declared filter is active.
+func (s *AdminSite) buildFilters(
+	ctx context.Context,
+	r *http.Request,
+	e *entry,
+	cl *changeList,
+	listFilter []any,
+	baseSpec querySpec,
+) ([]filterSpec, []orm.Cond, url.Values, bool, bool, error) {
+	lookupParams := cl.getFiltersParams()
+
+	// Security check: reject disallowed relational lookups with 400.
+	for key := range lookupParams {
+		if !lookupAllowed(e, key, listFilter) {
+			return nil, nil, nil, false, false, fmt.Errorf("%w: %s", errDisallowedLookup, key)
+		}
+	}
+
+	var specs []filterSpec
+	mayHaveDuplicates := false
+	hasActiveFilters := false
+
+	for _, item := range listFilter {
+		before := len(lookupParams)
+		var (
+			spec      filterSpec
+			fieldPath string
+			err       error
+		)
+		switch v := item.(type) {
+		case SimpleListFilter:
+			sf := v
+			spec = newSimpleFilterSpec(r, &sf, lookupParams)
+		case *SimpleListFilter:
+			if v != nil {
+				spec = newSimpleFilterSpec(r, v, lookupParams)
+			}
+		case string:
+			fieldPath = normalizeFieldPath(e.model, v)
+			spec, err = s.newFieldFilterSpec(ctx, r, e, fieldPath, FilterAuto, "", lookupParams, baseSpec)
+		case FieldFilter:
+			fieldPath = normalizeFieldPath(e.model, v.Field)
+			spec, err = s.newFieldFilterSpec(ctx, r, e, fieldPath, v.Kind, v.Title, lookupParams, baseSpec)
+		default:
+			continue
+		}
+		if err != nil {
+			return nil, nil, nil, false, false, err
+		}
+		if fieldPath != "" && len(lookupParams) < before {
+			if orm.LookupSpawnsDuplicates(e.model, fieldPath) {
+				mayHaveDuplicates = true
+			}
+		}
+		if spec != nil && spec.HasOutput() {
+			specs = append(specs, spec)
+			if len(lookupParams) < before {
+				hasActiveFilters = true
+			}
+		}
+	}
+
+	var conds []orm.Cond
+	for _, spec := range specs {
+		c, ok, err := spec.Apply()
+		if err != nil {
+			return nil, nil, nil, false, false, err
+		}
+		if ok {
+			conds = append(conds, c)
+		}
+	}
+
+	// Validate and apply any remaining lookup parameters not consumed by a filter.
+	remainingCopy := cloneValues(lookupParams)
+	for key, vals := range lookupParams {
+		if len(vals) == 0 {
+			continue
+		}
+		info, ok := orm.ResolveLookupPath(e.model, key)
+		if !ok {
+			return nil, nil, nil, false, false, fmt.Errorf("%w: unknown lookup %q", errIncorrectLookup, key)
+		}
+		if info.SpawnsDuplicates {
+			mayHaveDuplicates = true
+		}
+		c, err := buildRemainingParamCond(key, vals, info)
+		if err != nil {
+			return nil, nil, nil, false, false, err
+		}
+		conds = append(conds, c)
+	}
+
+	return specs, conds, remainingCopy, mayHaveDuplicates, hasActiveFilters, nil
+}
+
+// buildRemainingParamCond builds an OR-combined orm.Cond for one remaining
+// query parameter key and its value list.
+func buildRemainingParamCond(key string, vals []string, info orm.LookupPathInfo) (orm.Cond, error) {
+	var combined orm.Cond
+	has := false
+	for _, raw := range vals {
+		val, err := prepareLookupValue(key, raw, info)
+		if err != nil {
+			return orm.Cond{}, err
+		}
+		leaf := orm.Q(key, val)
+		if !has {
+			combined = leaf
+			has = true
+		} else {
+			combined = combined.Or(leaf)
+		}
+	}
+	return combined, nil
+}
+
+// prepareLookupValue converts raw into the Go value expected by key under info,
+// returning errIncorrectLookup when conversion fails.
+func prepareLookupValue(key, raw string, info orm.LookupPathInfo) (any, error) {
+	if strings.HasSuffix(key, "__isnull") {
+		return parseIsNullParam(raw), nil
+	}
+	if strings.HasSuffix(key, "__in") {
+		parts := strings.Split(raw, ",")
+		out := make([]any, 0, len(parts))
+		for _, p := range parts {
+			v, ok := parseFieldValue(info.Field, p, false)
+			if !ok {
+				return nil, fmt.Errorf("%w: invalid value %q for %s", errIncorrectLookup, raw, key)
+			}
+			out = append(out, v)
+		}
+		return out, nil
+	}
+	// Pattern lookups always accept strings.
+	switch info.Lookup {
+	case "contains", "icontains", "startswith", "istartswith", "endswith", "iendswith", "iexact", "regex", "iregex":
+		return raw, nil
+	}
+	f := info.Field
+	if info.TargetModel != nil && info.TargetModel.PrimaryKey() != nil && (info.IsRelation || info.Lookup == "exact" || info.Lookup == "") {
+		f = info.TargetModel.PrimaryKey()
+	}
+	v, ok := parseFieldValue(f, raw, false)
+	if !ok {
+		return nil, fmt.Errorf("%w: invalid value %q for %s", errIncorrectLookup, raw, key)
+	}
+	return v, nil
+}
+
+// parseIsNullParam matches Django's prepare_lookup_value for __isnull: "",
+// "false", and "0" (case-insensitive) mean false; everything else means true.
+func parseIsNullParam(raw string) bool {
+	switch strings.ToLower(raw) {
+	case "", "false", "0":
+		return false
+	default:
+		return true
+	}
+}
+
+// newFieldFilterSpec creates the appropriate built-in FieldListFilter for
+// fieldPath on e.
+func (s *AdminSite) newFieldFilterSpec(
+	ctx context.Context,
+	r *http.Request,
+	e *entry,
+	fieldPath string,
+	kind FieldFilterKind,
+	titleOverride string,
+	params url.Values,
+	baseSpec querySpec,
+) (filterSpec, error) {
+	info, ok := orm.ResolveLookupPath(e.model, fieldPath)
+	if !ok {
+		return nil, nil
+	}
+
+	if kind == FilterAuto {
+		switch {
+		case info.IsRelation:
+			kind = FilterRelated
+		case info.Field != nil && info.Field.Kind == orm.KindBool:
+			kind = FilterBoolean
+		case info.Field != nil && info.Field.HasChoices && len(info.Field.FlatChoices()) > 0:
+			kind = FilterChoices
+		case info.Field != nil && (info.Field.Kind == orm.KindDate || info.Field.Kind == orm.KindDateTime):
+			kind = FilterDate
+		default:
+			kind = FilterAllValues
+		}
+	}
+
+	title := titleOverride
+	if title == "" {
+		switch {
+		case info.Reverse != nil && info.TargetModel != nil:
+			title = info.TargetModel.VerboseName()
+		case info.Field != nil:
+			title = fieldVerboseName(info.Field)
+		default:
+			title = strings.ReplaceAll(fieldPath, "_", " ")
+		}
+	}
+
+	emptyVal := e.emptyValue(s)
+
+	switch kind {
+	case FilterRelated, FilterRelatedOnly:
+		return s.newRelatedFilterSpec(ctx, r, e, fieldPath, title, info, kind == FilterRelatedOnly, emptyVal, params, baseSpec)
+	case FilterBoolean:
+		return newBooleanFilterSpec(fieldPath, title, info.Field, params), nil
+	case FilterChoices:
+		return newChoicesFilterSpec(fieldPath, title, info.Field, params), nil
+	case FilterDate:
+		return newDateFilterSpec(fieldPath, title, info.Field, params), nil
+	case FilterEmpty:
+		return newEmptyFilterSpec(fieldPath, title, info.Field, params), nil
+	default:
+		return newAllValuesFilterSpec(ctx, e, fieldPath, title, info, emptyVal, params, baseSpec)
+	}
+}
+
+// --- SimpleListFilter ---
+
+type simpleFilterSpec struct {
+	def      *SimpleListFilter
+	r        *http.Request
+	lookups  []FilterLookup
+	val      string
+	selected bool
+}
+
+func newSimpleFilterSpec(r *http.Request, def *SimpleListFilter, params url.Values) *simpleFilterSpec {
+	var val string
+	selected := false
+	if vals, ok := params[def.ParameterName]; ok && len(vals) > 0 {
+		val = vals[len(vals)-1]
+		selected = true
+		delete(params, def.ParameterName)
+	}
+	var lookups []FilterLookup
+	if def.Lookups != nil {
+		lookups = def.Lookups(r)
+	}
+	return &simpleFilterSpec{
+		def:      def,
+		r:        r,
+		lookups:  lookups,
+		val:      val,
+		selected: selected,
+	}
+}
+
+func (f *simpleFilterSpec) Title() string   { return f.def.Title }
+func (f *simpleFilterSpec) HasOutput() bool { return len(f.lookups) > 0 }
+
+func (f *simpleFilterSpec) Apply() (orm.Cond, bool, error) {
+	if f.def.Filter == nil {
+		return orm.Cond{}, false, nil
+	}
+	c, ok := f.def.Filter(f.r, f.val, f.selected)
+	return c, ok, nil
+}
+
+func (f *simpleFilterSpec) Choices(cl *changeList) []filterChoice {
+	out := make([]filterChoice, 0, len(f.lookups)+1)
+	out = append(out, filterChoice{
+		Selected:    !f.selected,
+		QueryString: cl.getQueryString(nil, []string{f.def.ParameterName}),
+		Display:     "All",
+	})
+	for _, lk := range f.lookups {
+		out = append(out, filterChoice{
+			Selected:    f.selected && f.val == lk.Value,
+			QueryString: cl.getQueryString(map[string]any{f.def.ParameterName: lk.Value}, nil),
+			Display:     lk.Display,
+		})
+	}
+	return out
+}
+
+// --- BooleanFieldListFilter ---
+
+type booleanFilterSpec struct {
+	fieldPath   string
+	title       string
+	field       *orm.Field
+	lookupKwarg string
+	lookupNull  string
+	val         string
+	hasVal      bool
+	valNull     string
+	hasNull     bool
+}
+
+func newBooleanFilterSpec(fieldPath, title string, field *orm.Field, params url.Values) *booleanFilterSpec {
+	kwarg := fieldPath + "__exact"
+	kwargNull := fieldPath + "__isnull"
+	spec := &booleanFilterSpec{
+		fieldPath:   fieldPath,
+		title:       title,
+		field:       field,
+		lookupKwarg: kwarg,
+		lookupNull:  kwargNull,
+	}
+	if vals, ok := params[kwarg]; ok && len(vals) > 0 {
+		spec.val = vals[len(vals)-1]
+		spec.hasVal = true
+		delete(params, kwarg)
+	}
+	if vals, ok := params[kwargNull]; ok && len(vals) > 0 {
+		spec.valNull = vals[len(vals)-1]
+		spec.hasNull = true
+		delete(params, kwargNull)
+	}
+	return spec
+}
+
+func (f *booleanFilterSpec) Title() string   { return f.title }
+func (f *booleanFilterSpec) HasOutput() bool { return true }
+
+func (f *booleanFilterSpec) Apply() (orm.Cond, bool, error) {
+	var cond orm.Cond
+	has := false
+	if f.hasVal {
+		b, ok := parseFieldValue(f.field, f.val, false)
+		if !ok {
+			return orm.Cond{}, false, fmt.Errorf("%w: invalid boolean value %q", errIncorrectLookup, f.val)
+		}
+		cond = orm.Q(f.lookupKwarg, b)
+		has = true
+	}
+	if f.hasNull {
+		nc := orm.Q(f.lookupNull, parseIsNullParam(f.valNull))
+		if !has {
+			cond = nc
+			has = true
+		} else {
+			cond = cond.And(nc)
+		}
+	}
+	return cond, has, nil
+}
+
+func (f *booleanFilterSpec) Choices(cl *changeList) []filterChoice {
+	yesLabel, noLabel, unknownLabel := "Yes", "No", "Unknown"
+	if f.field != nil && f.field.HasChoices {
+		for _, ch := range f.field.FlatChoices() {
+			switch raw := ch.Raw.(type) {
+			case bool:
+				if raw {
+					yesLabel = ch.Label
+				} else {
+					noLabel = ch.Label
+				}
+			case nil:
+				if ch.Value == "" {
+					unknownLabel = ch.Label
+				}
+			}
+		}
+	}
+	out := []filterChoice{
+		{
+			Selected:    !f.hasVal && !f.hasNull,
+			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: nil}, []string{f.lookupNull}),
+			Display:     "All",
+		},
+		{
+			Selected:    f.hasVal && f.val == "1" && !f.hasNull,
+			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: "1"}, []string{f.lookupNull}),
+			Display:     yesLabel,
+		},
+		{
+			Selected:    f.hasVal && f.val == "0" && !f.hasNull,
+			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: "0"}, []string{f.lookupNull}),
+			Display:     noLabel,
+		},
+	}
+	if f.field != nil && f.field.Null {
+		out = append(out, filterChoice{
+			Selected:    f.hasNull && f.valNull == "True",
+			QueryString: cl.getQueryString(map[string]any{f.lookupNull: "True"}, []string{f.lookupKwarg}),
+			Display:     unknownLabel,
+		})
+	}
+	return out
+}
+
+// --- ChoicesFieldListFilter ---
+
+type choicesFilterSpec struct {
+	fieldPath   string
+	title       string
+	field       *orm.Field
+	lookupKwarg string
+	lookupNull  string
+	vals        []string
+	valNull     string
+	hasNull     bool
+}
+
+func newChoicesFilterSpec(fieldPath, title string, field *orm.Field, params url.Values) *choicesFilterSpec {
+	kwarg := fieldPath + "__exact"
+	kwargNull := fieldPath + "__isnull"
+	spec := &choicesFilterSpec{
+		fieldPath:   fieldPath,
+		title:       title,
+		field:       field,
+		lookupKwarg: kwarg,
+		lookupNull:  kwargNull,
+	}
+	if vals, ok := params[kwarg]; ok && len(vals) > 0 {
+		spec.vals = slices.Clone(vals)
+		delete(params, kwarg)
+	}
+	if vals, ok := params[kwargNull]; ok && len(vals) > 0 {
+		spec.valNull = vals[len(vals)-1]
+		spec.hasNull = true
+		delete(params, kwargNull)
+	}
+	return spec
+}
+
+func (f *choicesFilterSpec) Title() string   { return f.title }
+func (f *choicesFilterSpec) HasOutput() bool { return true }
+
+func (f *choicesFilterSpec) Apply() (orm.Cond, bool, error) {
+	var cond orm.Cond
+	has := false
+	if len(f.vals) > 0 {
+		var orCond orm.Cond
+		for i, raw := range f.vals {
+			v, ok := parseFieldValue(f.field, raw, false)
+			if !ok {
+				return orm.Cond{}, false, fmt.Errorf("%w: invalid choice %q", errIncorrectLookup, raw)
+			}
+			leaf := orm.Q(f.lookupKwarg, v)
+			if i == 0 {
+				orCond = leaf
+			} else {
+				orCond = orCond.Or(leaf)
+			}
+		}
+		cond = orCond
+		has = true
+	}
+	if f.hasNull {
+		nc := orm.Q(f.lookupNull, parseIsNullParam(f.valNull))
+		if !has {
+			cond = nc
+			has = true
+		} else {
+			cond = cond.And(nc)
+		}
+	}
+	return cond, has, nil
+}
+
+func (f *choicesFilterSpec) Choices(cl *changeList) []filterChoice {
+	flat := f.field.FlatChoices()
+	out := make([]filterChoice, 0, len(flat)+1)
+	out = append(out, filterChoice{
+		Selected:    len(f.vals) == 0 && !f.hasNull,
+		QueryString: cl.getQueryString(nil, []string{f.lookupKwarg, f.lookupNull}),
+		Display:     "All",
+	})
+	noneTitle := ""
+	for _, ch := range flat {
+		if ch.Raw == nil && ch.Value == "" {
+			noneTitle = ch.Label
+			continue
+		}
+		out = append(out, filterChoice{
+			Selected:    slices.Contains(f.vals, ch.Value),
+			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: ch.Value}, []string{f.lookupNull}),
+			Display:     ch.Label,
+		})
+	}
+	if noneTitle != "" {
+		out = append(out, filterChoice{
+			Selected:    f.hasNull && parseIsNullParam(f.valNull),
+			QueryString: cl.getQueryString(map[string]any{f.lookupNull: "True"}, []string{f.lookupKwarg}),
+			Display:     noneTitle,
+		})
+	}
+	return out
+}
+
+// --- RelatedFieldListFilter & RelatedOnlyFieldListFilter ---
+
+type relatedFilterSpec struct {
+	fieldPath    string
+	title        string
+	targetModel  *orm.Model
+	lookupKwarg  string
+	lookupNull   string
+	vals         []string
+	valNull      string
+	hasNull      bool
+	choices      [][2]string
+	includeEmpty bool
+	emptyDisplay string
+}
+
+func (s *AdminSite) newRelatedFilterSpec(
+	ctx context.Context,
+	r *http.Request,
+	e *entry,
+	fieldPath, title string,
+	info orm.LookupPathInfo,
+	onlyUsed bool,
+	emptyDisplay string,
+	params url.Values,
+	baseSpec querySpec,
+) (*relatedFilterSpec, error) {
+	target := info.TargetModel
+	if target == nil || target.PrimaryKey() == nil {
+		return nil, nil
+	}
+	pkAttr := target.PrimaryKey().Attr
+	kwarg := fieldPath + "__" + pkAttr + "__exact"
+	kwargNull := fieldPath + "__isnull"
+
+	spec := &relatedFilterSpec{
+		fieldPath:    fieldPath,
+		title:        title,
+		targetModel:  target,
+		lookupKwarg:  kwarg,
+		lookupNull:   kwargNull,
+		includeEmpty: info.IsM2M || info.Reverse != nil || (info.Field != nil && info.Field.Null),
+		emptyDisplay: emptyDisplay,
+	}
+	if vals, ok := params[kwarg]; ok && len(vals) > 0 {
+		spec.vals = slices.Clone(vals)
+		delete(params, kwarg)
+	}
+	if vals, ok := params[kwargNull]; ok && len(vals) > 0 {
+		spec.valNull = vals[len(vals)-1]
+		spec.hasNull = true
+		delete(params, kwargNull)
+	}
+
+	// Determine ordering from the related model's ModelAdmin (if registered),
+	// falling back to related Model.Ordering(), then PK.
+	var ordering []string
+	if relEntry := s.entryByModel(target); relEntry != nil {
+		if relEntry.admin.GetOrdering != nil {
+			ordering = relEntry.admin.GetOrdering(r)
+		} else {
+			ordering = relEntry.admin.Ordering
+		}
+		if len(ordering) > 0 {
+			norm := make([]string, len(ordering))
+			for i, o := range ordering {
+				norm[i] = normalizeFieldPath(target, o)
+			}
+			ordering = norm
+		}
+	}
+
+	var limitPKs []any
+	if onlyUsed {
+		rawPKs, err := e.ops.distinctValues(ctx, baseSpec, fieldPath+"__pk")
+		if err != nil {
+			return nil, err
+		}
+		limitPKs = make([]any, 0, len(rawPKs))
+		for _, v := range rawPKs {
+			if v != nil {
+				limitPKs = append(limitPKs, v)
+			}
+		}
+	}
+
+	rows, err := orm.LabeledRowsOrdered(ctx, s.db, target, ordering, limitPKs)
+	if err != nil {
+		return nil, err
+	}
+	spec.choices = rows
+	return spec, nil
+}
+
+func (f *relatedFilterSpec) Title() string { return f.title }
+
+func (f *relatedFilterSpec) HasOutput() bool {
+	extra := 0
+	if f.includeEmpty {
+		extra = 1
+	}
+	return len(f.choices)+extra > 1
+}
+
+func (f *relatedFilterSpec) Apply() (orm.Cond, bool, error) {
+	var cond orm.Cond
+	has := false
+	pkField := f.targetModel.PrimaryKey()
+	if len(f.vals) > 0 {
+		var orCond orm.Cond
+		for i, raw := range f.vals {
+			v, ok := parseFieldValue(pkField, raw, false)
+			if !ok {
+				return orm.Cond{}, false, fmt.Errorf("%w: invalid related pk %q", errIncorrectLookup, raw)
+			}
+			leaf := orm.Q(f.lookupKwarg, v)
+			if i == 0 {
+				orCond = leaf
+			} else {
+				orCond = orCond.Or(leaf)
+			}
+		}
+		cond = orCond
+		has = true
+	}
+	if f.hasNull {
+		nc := orm.Q(f.lookupNull, parseIsNullParam(f.valNull))
+		if !has {
+			cond = nc
+			has = true
+		} else {
+			cond = cond.And(nc)
+		}
+	}
+	return cond, has, nil
+}
+
+func (f *relatedFilterSpec) Choices(cl *changeList) []filterChoice {
+	out := make([]filterChoice, 0, len(f.choices)+2)
+	out = append(out, filterChoice{
+		Selected:    len(f.vals) == 0 && !f.hasNull,
+		QueryString: cl.getQueryString(nil, []string{f.lookupKwarg, f.lookupNull}),
+		Display:     "All",
+	})
+	for _, pair := range f.choices {
+		pkStr, label := pair[0], pair[1]
+		out = append(out, filterChoice{
+			Selected:    slices.Contains(f.vals, pkStr),
+			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: pkStr}, []string{f.lookupNull}),
+			Display:     label,
+		})
+	}
+	if f.includeEmpty {
+		out = append(out, filterChoice{
+			Selected:    f.hasNull && parseIsNullParam(f.valNull),
+			QueryString: cl.getQueryString(map[string]any{f.lookupNull: "True"}, []string{f.lookupKwarg}),
+			Display:     f.emptyDisplay,
+		})
+	}
+	return out
+}
+
+// --- DateFieldListFilter ---
+
+type dateFilterLink struct {
+	title  string
+	params map[string]string
+}
+
+type dateFilterSpec struct {
+	fieldPath    string
+	fieldGeneric string
+	title        string
+	field        *orm.Field
+	sinceKwarg   string
+	untilKwarg   string
+	nullKwarg    string
+	dateParams   map[string]string
+	links        []dateFilterLink
+}
+
+func newDateFilterSpec(fieldPath, title string, field *orm.Field, params url.Values) *dateFilterSpec {
+	generic := fieldPath + "__"
+	sinceKwarg := fieldPath + "__gte"
+	untilKwarg := fieldPath + "__lt"
+	nullKwarg := fieldPath + "__isnull"
+
+	dateParams := make(map[string]string)
+	for k, vals := range params {
+		if strings.HasPrefix(k, generic) && len(vals) > 0 {
+			dateParams[k] = vals[len(vals)-1]
+		}
+	}
+	delete(params, sinceKwarg)
+	delete(params, untilKwarg)
+	if field != nil && field.Null {
+		delete(params, nullKwarg)
+	}
+
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	tomorrow := today.AddDate(0, 0, 1)
+	past7 := today.AddDate(0, 0, -7)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	nextMonth := monthStart.AddDate(0, 1, 0)
+	yearStart := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	nextYear := yearStart.AddDate(1, 0, 0)
+
+	fmtVal := func(t time.Time) string {
+		if field != nil && field.Kind == orm.KindDateTime {
+			return t.Format(time.RFC3339)
+		}
+		return t.Format("2006-01-02")
+	}
+
+	links := []dateFilterLink{
+		{title: "Any date", params: map[string]string{}},
+		{title: "Today", params: map[string]string{sinceKwarg: fmtVal(today), untilKwarg: fmtVal(tomorrow)}},
+		{title: "Past 7 days", params: map[string]string{sinceKwarg: fmtVal(past7), untilKwarg: fmtVal(tomorrow)}},
+		{title: "This month", params: map[string]string{sinceKwarg: fmtVal(monthStart), untilKwarg: fmtVal(nextMonth)}},
+		{title: "This year", params: map[string]string{sinceKwarg: fmtVal(yearStart), untilKwarg: fmtVal(nextYear)}},
+	}
+	if field != nil && field.Null {
+		links = append(links,
+			dateFilterLink{title: "No date", params: map[string]string{nullKwarg: "True"}},
+			dateFilterLink{title: "Has date", params: map[string]string{nullKwarg: "False"}},
+		)
+	}
+
+	return &dateFilterSpec{
+		fieldPath:    fieldPath,
+		fieldGeneric: generic,
+		title:        title,
+		field:        field,
+		sinceKwarg:   sinceKwarg,
+		untilKwarg:   untilKwarg,
+		nullKwarg:    nullKwarg,
+		dateParams:   dateParams,
+		links:        links,
+	}
+}
+
+func (f *dateFilterSpec) Title() string   { return f.title }
+func (f *dateFilterSpec) HasOutput() bool { return true }
+
+func (f *dateFilterSpec) Apply() (orm.Cond, bool, error) {
+	var cond orm.Cond
+	has := false
+	for _, key := range []string{f.sinceKwarg, f.untilKwarg} {
+		raw, ok := f.dateParams[key]
+		if !ok {
+			continue
+		}
+		v, valid := parseFieldValue(f.field, raw, false)
+		if !valid {
+			return orm.Cond{}, false, fmt.Errorf("%w: invalid date %q", errIncorrectLookup, raw)
+		}
+		leaf := orm.Q(key, v)
+		if !has {
+			cond = leaf
+			has = true
+		} else {
+			cond = cond.And(leaf)
+		}
+	}
+	if raw, ok := f.dateParams[f.nullKwarg]; ok && f.field != nil && f.field.Null {
+		leaf := orm.Q(f.nullKwarg, parseIsNullParam(raw))
+		if !has {
+			cond = leaf
+			has = true
+		} else {
+			cond = cond.And(leaf)
+		}
+	}
+	return cond, has, nil
+}
+
+func (f *dateFilterSpec) Choices(cl *changeList) []filterChoice {
+	out := make([]filterChoice, 0, len(f.links))
+	for _, lk := range f.links {
+		newParams := make(map[string]any, len(lk.params))
+		for k, v := range lk.params {
+			newParams[k] = v
+		}
+		out = append(out, filterChoice{
+			Selected:    mapsEqualString(f.dateParams, lk.params),
+			QueryString: cl.getQueryString(newParams, []string{f.fieldGeneric}),
+			Display:     lk.title,
+		})
+	}
+	return out
+}
+
+func mapsEqualString(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
+}
+
+// --- AllValuesFieldListFilter ---
+
+type allValuesFilterSpec struct {
+	fieldPath    string
+	title        string
+	field        *orm.Field
+	lookupKwarg  string
+	lookupNull   string
+	vals         []string
+	valNull      string
+	hasNull      bool
+	distinctVals []any
+	emptyDisplay string
+}
+
+func newAllValuesFilterSpec(
+	ctx context.Context,
+	e *entry,
+	fieldPath, title string,
+	info orm.LookupPathInfo,
+	emptyDisplay string,
+	params url.Values,
+	baseSpec querySpec,
+) (*allValuesFilterSpec, error) {
+	kwarg := fieldPath
+	kwargNull := fieldPath + "__isnull"
+	spec := &allValuesFilterSpec{
+		fieldPath:    fieldPath,
+		title:        title,
+		field:        info.Field,
+		lookupKwarg:  kwarg,
+		lookupNull:   kwargNull,
+		emptyDisplay: emptyDisplay,
+	}
+	if vals, ok := params[kwarg]; ok && len(vals) > 0 {
+		spec.vals = slices.Clone(vals)
+		delete(params, kwarg)
+	}
+	if vals, ok := params[kwargNull]; ok && len(vals) > 0 {
+		spec.valNull = vals[len(vals)-1]
+		spec.hasNull = true
+		delete(params, kwargNull)
+	}
+	distinctVals, err := e.ops.distinctValues(ctx, baseSpec, fieldPath)
+	if err != nil {
+		return nil, err
+	}
+	spec.distinctVals = distinctVals
+	return spec, nil
+}
+
+func (f *allValuesFilterSpec) Title() string   { return f.title }
+func (f *allValuesFilterSpec) HasOutput() bool { return true }
+
+func (f *allValuesFilterSpec) Apply() (orm.Cond, bool, error) {
+	var cond orm.Cond
+	has := false
+	if len(f.vals) > 0 {
+		var orCond orm.Cond
+		for i, raw := range f.vals {
+			v, ok := parseFieldValue(f.field, raw, false)
+			if !ok {
+				return orm.Cond{}, false, fmt.Errorf("%w: invalid value %q for %s", errIncorrectLookup, raw, f.lookupKwarg)
+			}
+			leaf := orm.Q(f.lookupKwarg, v)
+			if i == 0 {
+				orCond = leaf
+			} else {
+				orCond = orCond.Or(leaf)
+			}
+		}
+		cond = orCond
+		has = true
+	}
+	if f.hasNull {
+		nc := orm.Q(f.lookupNull, parseIsNullParam(f.valNull))
+		if !has {
+			cond = nc
+			has = true
+		} else {
+			cond = cond.And(nc)
+		}
+	}
+	return cond, has, nil
+}
+
+func (f *allValuesFilterSpec) Choices(cl *changeList) []filterChoice {
+	out := make([]filterChoice, 0, len(f.distinctVals)+2)
+	out = append(out, filterChoice{
+		Selected:    len(f.vals) == 0 && !f.hasNull,
+		QueryString: cl.getQueryString(nil, []string{f.lookupKwarg, f.lookupNull}),
+		Display:     "All",
+	})
+	includeNone := false
+	for _, val := range f.distinctVals {
+		if val == nil {
+			includeNone = true
+			continue
+		}
+		s := fmt.Sprint(val)
+		out = append(out, filterChoice{
+			Selected:    slices.Contains(f.vals, s),
+			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: s}, []string{f.lookupNull}),
+			Display:     s,
+		})
+	}
+	if includeNone {
+		out = append(out, filterChoice{
+			Selected:    f.hasNull && parseIsNullParam(f.valNull),
+			QueryString: cl.getQueryString(map[string]any{f.lookupNull: "True"}, []string{f.lookupKwarg}),
+			Display:     f.emptyDisplay,
+		})
+	}
+	return out
+}
+
+// --- EmptyFieldListFilter ---
+
+type emptyFilterSpec struct {
+	fieldPath   string
+	title       string
+	field       *orm.Field
+	lookupKwarg string
+	val         string
+	hasVal      bool
+}
+
+func newEmptyFilterSpec(fieldPath, title string, field *orm.Field, params url.Values) *emptyFilterSpec {
+	kwarg := fieldPath + "__isempty"
+	spec := &emptyFilterSpec{
+		fieldPath:   fieldPath,
+		title:       title,
+		field:       field,
+		lookupKwarg: kwarg,
+	}
+	if vals, ok := params[kwarg]; ok && len(vals) > 0 {
+		spec.val = vals[len(vals)-1]
+		spec.hasVal = true
+		delete(params, kwarg)
+	}
+	return spec
+}
+
+func (f *emptyFilterSpec) Title() string   { return f.title }
+func (f *emptyFilterSpec) HasOutput() bool { return true }
+
+func (f *emptyFilterSpec) Apply() (orm.Cond, bool, error) {
+	if !f.hasVal {
+		return orm.Cond{}, false, nil
+	}
+	if f.val != "0" && f.val != "1" {
+		return orm.Cond{}, false, fmt.Errorf("%w: invalid isempty value %q", errIncorrectLookup, f.val)
+	}
+	var emptyCond orm.Cond
+	hasEmpty := false
+	if f.field != nil && isTextKind(f.field.Kind) {
+		emptyCond = orm.Q(f.fieldPath, "")
+		hasEmpty = true
+	}
+	if f.field != nil && (f.field.Null || f.field.Rel != nil) {
+		nc := orm.Q(f.fieldPath+"__isnull", true)
+		if !hasEmpty {
+			emptyCond = nc
+			hasEmpty = true
+		} else {
+			emptyCond = emptyCond.Or(nc)
+		}
+	}
+	if !hasEmpty {
+		emptyCond = orm.Q(f.fieldPath+"__isnull", true)
+	}
+	if f.val == "1" {
+		return emptyCond, true, nil
+	}
+	return orm.Not(emptyCond), true, nil
+}
+
+func (f *emptyFilterSpec) Choices(cl *changeList) []filterChoice {
+	return []filterChoice{
+		{
+			Selected:    !f.hasVal,
+			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: nil}, nil),
+			Display:     "All",
+		},
+		{
+			Selected:    f.hasVal && f.val == "1",
+			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: "1"}, nil),
+			Display:     "Empty",
+		},
+		{
+			Selected:    f.hasVal && f.val == "0",
+			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: "0"}, nil),
+			Display:     "Not empty",
+		},
+	}
+}

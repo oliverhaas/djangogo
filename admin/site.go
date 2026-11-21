@@ -106,6 +106,9 @@ type AdminSite struct {
 	IndexTitle string
 	// SiteURL is the target of the "View site" link (default "/").
 	SiteURL string
+	// EmptyValueDisplay is the placeholder rendered for empty field values
+	// across the site (Django's AdminSite.empty_value_display, default "-").
+	EmptyValueDisplay string
 	// Apps supplies app verbose names when set. When nil, app labels are
 	// title-cased as Django does by default.
 	Apps *apps.Registry
@@ -121,6 +124,7 @@ type AdminSite struct {
 	// message.
 	LoginConfirmAllowed func(r *http.Request, u *auth.User) error
 
+	actions   []Action
 	revMu     sync.RWMutex
 	revRouter *urls.Router
 }
@@ -154,10 +158,53 @@ func NewAdminSite(db *orm.DB) (*AdminSite, error) {
 		SiteHeader:        defaultSiteHeader,
 		IndexTitle:        defaultIndexTitle,
 		SiteURL:           defaultSiteURL,
+		EmptyValueDisplay: emptyValueDisplay,
 		FinalCatchAllView: true,
+		actions:           []Action{defaultDeleteSelectedAction()},
 	}
 	engine.SetResolver(site.resolveURL)
 	return site, nil
+}
+
+// AddAction registers a site-wide bulk action available on every registered
+// ModelAdmin unless disabled (Django's AdminSite.add_action). If an action
+// with the same Name is already registered, it is replaced in place.
+func (s *AdminSite) AddAction(a Action) {
+	for i, existing := range s.actions {
+		if existing.Name == a.Name {
+			s.actions[i] = a
+			return
+		}
+	}
+	s.actions = append(s.actions, a)
+}
+
+// DisableAction removes a site-wide bulk action by name (Django's
+// AdminSite.disable_action), for example site.DisableAction("delete_selected").
+func (s *AdminSite) DisableAction(name string) {
+	for i, existing := range s.actions {
+		if existing.Name == name {
+			s.actions = append(s.actions[:i], s.actions[i+1:]...)
+			return
+		}
+	}
+}
+
+// entryByModel returns the registered entry for ORM model m, or nil if m is
+// not registered on s.
+func (s *AdminSite) entryByModel(m *orm.Model) *entry {
+	if m == nil {
+		return nil
+	}
+	return s.byKey[entryKey{app: m.App(), slug: strings.ToLower(m.Name())}]
+}
+
+// emptyValue returns the site-wide empty-value display string, defaulting to "-".
+func (s *AdminSite) emptyValue() string {
+	if s.EmptyValueDisplay != "" {
+		return s.EmptyValueDisplay
+	}
+	return emptyValueDisplay
 }
 
 // Register adds model T (which must already be registered in db's ORM registry)

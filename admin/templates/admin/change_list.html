@@ -1,43 +1,148 @@
 {% extends "admin/base_site.html" %}
 {% block bodyclass %}app-{{ app_label }} model-{{ slug }} change-list{% endblock %}
 {% block breadcrumbs %}
+{% if not is_popup %}
 <ol class="breadcrumbs">
   <li><a href="{% url 'admin:index' %}">Home</a></li>
   {% if app_url %}<li><a href="{{ app_url }}">{{ app_verbose_name }}</a></li>{% endif %}
   <li aria-current="page">{{ verbose_name_plural }}</li>
 </ol>
+{% endif %}
 {% endblock %}
 {% block object_tools %}
-{% if has_add_permission %}
 <ul class="object-tools">
+  {% if has_add_permission %}
   <li><a href="{{ add_url }}" class="addlink">Add {{ verbose_name }}</a></li>
+  {% endif %}
 </ul>
-{% endif %}
 {% endblock %}
 {% block content %}
 <div id="content-main">
-  <div class="module" id="changelist">
-    <div class="results">
-      <table id="result_list">
-        <thead>
-          <tr>
-            <th scope="col">{{ model }}</th>
-            {% for column in columns %}<th scope="col">{{ column }}</th>{% endfor %}
-            {% if has_delete_permission %}<th scope="col">Actions</th>{% endif %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in rows %}
-          <tr>
-            <th scope="row"><a href="{{ row.change_url }}">{{ row.label }}</a></th>
-            {% for cell in row.cells %}<td>{{ cell }}</td>{% endfor %}
-            {% if has_delete_permission %}
-            <td><a href="{{ row.delete_url }}">Delete</a></td>
+  <div class="module{% if has_filters %} filtered{% endif %}" id="changelist">
+    <div class="changelist-form-container">
+      {% if has_filters %}
+      <search id="changelist-filter" aria-labelledby="changelist-filter-header">
+        <h2 id="changelist-filter-header">Filter</h2>
+        {% if has_active_filters %}
+        <div id="changelist-filter-extra-actions">
+          <h3><a href="{{ clear_all_filters_qs }}">&#10006; Clear all filters</a></h3>
+        </div>
+        {% endif %}
+        {% for spec in filter_specs %}
+        <details data-filter-title="{{ spec.title }}" open>
+          <summary> By {{ spec.title }} </summary>
+          <ul>
+            {% for choice in spec.choices %}
+            <li{% if choice.selected %} class="selected"{% endif %}><a href="{{ choice.query_string }}">{{ choice.display }}</a></li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% endfor %}
+      </search>
+      {% endif %}
+      <div>
+        {% if has_search %}
+        <div id="toolbar">
+          <h2 id="changelist-search-form" class="visually-hidden">Search {{ verbose_name_plural_raw }}</h2>
+          <form id="changelist-search" method="get" role="search" aria-labelledby="changelist-search-form">
+            <div>
+              <label for="searchbar">Search</label>
+              <input type="text" size="40" name="{{ search_var }}" value="{{ search_query }}" id="searchbar"{% if search_help_text %} aria-describedby="searchbar_helptext"{% endif %}>
+              <input type="submit" value="Search">
+              {% if show_result_count %}
+              <span class="small quiet">{{ result_count }} {% if result_count == 1 %}result{% else %}results{% endif %} (<a href="{{ reset_search_url }}">{% if show_full_result_count %}{{ full_result_count }} total{% else %}Show all{% endif %}</a>)</span>
+              {% endif %}
+              {% for hp in search_hidden_params %}
+              <input type="hidden" name="{{ hp.name }}" value="{{ hp.value }}">
+              {% endfor %}
+            </div>
+            {% if search_help_text %}
+            <br class="clear">
+            <div class="help" id="searchbar_helptext">{{ search_help_text }}</div>
             {% endif %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </form>
+        </div>
+        {% endif %}
+
+        <form id="changelist-form" method="post" novalidate>
+          {% csrf_token %}
+          {% if show_admin_actions and actions_on_top %}
+          <div class="actions">
+            <label>Action: <select name="action" required>{% for opt in action_choices %}<option value="{{ opt.value }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>{% endfor %}</select></label>
+            <input type="hidden" name="select_across" value="0" class="select-across">
+            <button type="submit" class="button" name="index" value="0">Run</button>
+            {% if actions_selection_counter %}
+            <span class="action-counter" data-actions-icnt="{{ page_count }}" aria-live="polite" aria-atomic="true">{{ selection_note }}</span>
+            {% if show_select_across %}
+            <span class="all hidden">{{ selection_note_all }}</span>
+            <span class="question hidden"><a role="button" href="#">Select all {{ result_count }} {{ module_name }}</a></span>
+            <span class="clear hidden"><a role="button" href="#">Clear selection</a></span>
+            {% endif %}
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {% if rows %}
+          <div class="results">
+            <table id="result_list">
+              <thead>
+                <tr>
+                  {% for header in result_headers %}
+                  <th scope="col"{{ header.class_attrib|safe }}>
+                    {% if header.sortable and header.sort_priority > 0 %}
+                    <div class="sortoptions">
+                      <a class="sortremove" href="{{ header.url_remove }}" title="Remove from sorting"></a>
+                      {% if num_sorted_fields > 1 %}<span class="sortpriority" title="Sorting priority: {{ header.sort_priority }}">{{ header.sort_priority }}</span>{% endif %}
+                      <a href="{{ header.url_toggle }}" class="toggle {% if header.ascending %}ascending{% else %}descending{% endif %}" title="Toggle sorting"></a>
+                    </div>
+                    {% endif %}
+                    <div class="text">{% if header.is_action_checkbox %}<span>{{ header.text|safe }}</span>{% elif header.sortable %}<a role="button" href="{{ header.url_primary }}">{{ header.text }}</a>{% else %}<span>{{ header.text }}</span>{% endif %}</div>
+                    <div class="clear"></div>
+                  </th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in rows %}
+                <tr>{% for cell in row.cells_html %}{{ cell|safe }}{% endfor %}</tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+
+          {% if show_admin_actions and actions_on_bottom %}
+          <div class="actions">
+            <label>Action: <select name="action" required>{% for opt in action_choices %}<option value="{{ opt.value }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>{% endfor %}</select></label>
+            <input type="hidden" name="select_across" value="0" class="select-across">
+            <button type="submit" class="button" name="index" value="{% if actions_on_top %}1{% else %}0{% endif %}">Run</button>
+            {% if actions_selection_counter %}
+            <span class="action-counter" data-actions-icnt="{{ page_count }}" aria-live="polite" aria-atomic="true">{{ selection_note }}</span>
+            {% if show_select_across %}
+            <span class="all hidden">{{ selection_note_all }}</span>
+            <span class="question hidden"><a role="button" href="#">Select all {{ result_count }} {{ module_name }}</a></span>
+            <span class="clear hidden"><a role="button" href="#">Clear selection</a></span>
+            {% endif %}
+            {% endif %}
+          </div>
+          {% endif %}
+
+          <div class="changelist-footer">
+            <nav class="paginator" aria-labelledby="pagination">
+              <h2 id="pagination" class="visually-hidden">Pagination {{ verbose_name_plural_raw }}</h2>
+              {% if pagination_required %}
+              <ul>
+                {% for pl in page_links %}
+                <li>{% if pl.is_ellipsis %}{{ pl.text }} {% elif pl.is_current %}<a role="button" href="" aria-current="page">{{ pl.text }}</a> {% else %}<a role="button" href="{{ pl.href }}">{{ pl.text }}</a> {% endif %}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+              {{ result_count }} {{ result_count_label }}
+              {% if show_all_url %}<a href="{{ show_all_url }}" class="showall">Show all</a>{% endif %}
+            </nav>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 </div>
