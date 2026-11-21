@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/oliverhaas/djangogo/admin"
@@ -313,6 +314,42 @@ func saveAsModels() []any {
 	return append(adminViewsModels(), djangotest.App("admin_views", &Person{}, &Parent{}, &Child{}))
 }
 
+// parentAdmin returns ParentAdmin of tests/admin_views/admin.py. Its
+// list_editable has no Go counterpart.
+func parentAdmin() admin.ModelAdmin {
+	return admin.ModelAdmin{
+		SaveAs:           true,
+		Inlines:          []admin.Inline{admin.StackedInline[Parent, Child](admin.InlineModelAdmin{})},
+		ListDisplay:      []string{"id", "name"},
+		ListDisplayLinks: []string{"id"},
+		// Give each child with one name the last name of the parent.
+		SaveRelated: func(r *http.Request, sc *admin.SaveContext) error {
+			ctx := r.Context()
+			if err := sc.SaveRelated(ctx); err != nil {
+				return err
+			}
+			parent := sc.Obj.(*Parent)
+			names := strings.Fields(parent.Name)
+			if len(names) != 2 {
+				return fmt.Errorf("the name %q is not a first and a last name", parent.Name)
+			}
+			children, err := orm.Query[Child](sc.DB).Filter("parent", parent.ID).All(ctx)
+			if err != nil {
+				return err
+			}
+			for i := range children {
+				if len(strings.Fields(children[i].Name)) < 2 {
+					children[i].Name += " " + names[1]
+					if err := orm.Query[Child](sc.DB).Save(ctx, &children[i]); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		},
+	}
+}
+
 // saveAsEnv registers PersonAdmin and ParentAdmin of tests/admin_views/admin.py
 // on the site "admin" and Person with save_as_continue=False on the site
 // "namespaced_admin", Django's site2, creates per1 and logs in the
@@ -321,10 +358,7 @@ func saveAsEnv(t *testing.T, db *orm.DB) (env, env2 *adminTestEnv, per1 *Person)
 	t.Helper()
 	env = newAdminTestEnv(t, db, func(site *admin.AdminSite) {
 		admin.Register[Person](site, admin.ModelAdmin{SaveAs: true})
-		admin.Register[Parent](site, admin.ModelAdmin{
-			SaveAs:  true,
-			Inlines: []admin.Inline{admin.StackedInline[Parent, Child](admin.InlineModelAdmin{})},
-		})
+		admin.Register[Parent](site, parentAdmin())
 	})
 	continueFalse := false
 	env2 = newAdminTestEnv(t, db, func(site *admin.AdminSite) {
@@ -442,6 +476,85 @@ func TestSaveAsNewWithInlinesWithValidationErrors(t *testing.T) {
 		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_as_new"), any(true))
 	})
 }
+
+// saveRelatedEnv registers ParentAdmin and logs in the superuser, as
+// AdminCustomSaveRelatedTests.setUpTestData and setUp do.
+func saveRelatedEnv(t *testing.T, db *orm.DB) *adminTestEnv {
+	t.Helper()
+	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[Parent](site, parentAdmin())
+	})
+	env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+	return env
+}
+
+// assertParentAndChildren asserts that the latest parent is named name and
+// that the names of the children, in order, are children.
+func assertParentAndChildren(t *testing.T, db *orm.DB, name string, children []string) {
+	t.Helper()
+	ctx := context.Background()
+	parent, err := orm.Query[Parent](db).OrderBy("-id").First(ctx)
+	if err != nil {
+		t.Fatalf("latest parent: %v", err)
+	}
+	djangotest.AssertEqual(t, parent.Name, name)
+	rows, err := orm.Query[Child](db).OrderBy("name").All(ctx)
+	if err != nil {
+		t.Fatalf("children: %v", err)
+	}
+	names := make([]string, len(rows))
+	for i, c := range rows {
+		names[i] = c.Name
+	}
+	djangotest.AssertEqual(t, names, children)
+}
+
+// Ported from Django: tests/admin_views/tests.py::AdminCustomSaveRelatedTests.test_should_be_able_to_edit_related_objects_on_add_view
+func TestShouldBeAbleToEditRelatedObjectsOnAddView(t *testing.T) {
+	djangotest.EachDB(t, saveAsModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		env := saveRelatedEnv(t, db)
+		env.client.Post(mustReverse(t, env.router, "admin:admin_views_parent_add"), url.Values{
+			"child_set-TOTAL_FORMS":   {"3"},
+			"child_set-INITIAL_FORMS": {"0"},
+			"name":                    {"Josh Stone"},
+			"child_set-0-name":        {"Paul"},
+			"child_set-1-name":        {"Catherine"},
+		})
+		n, _ := orm.Query[Parent](db).Count(ctx)
+		djangotest.AssertEqual(t, n, int64(1))
+		n, _ = orm.Query[Child](db).Count(ctx)
+		djangotest.AssertEqual(t, n, int64(2))
+		assertParentAndChildren(t, db, "Josh Stone", []string{"Catherine Stone", "Paul Stone"})
+	})
+}
+
+// Ported from Django: tests/admin_views/tests.py::AdminCustomSaveRelatedTests.test_should_be_able_to_edit_related_objects_on_change_view
+func TestShouldBeAbleToEditRelatedObjectsOnChangeView(t *testing.T) {
+	djangotest.EachDB(t, saveAsModels(), func(t *testing.T, db *orm.DB) {
+		env := saveRelatedEnv(t, db)
+		parent := mustCreate(t, db, &Parent{Name: "Josh Stone"})
+		paul := &Child{Name: "Paul"}
+		paul.Parent.SetPK(parent.ID)
+		mustCreate(t, db, paul)
+		catherine := &Child{Name: "Catherine"}
+		catherine.Parent.SetPK(parent.ID)
+		mustCreate(t, db, catherine)
+		env.client.Post(mustReverse(t, env.router, "admin:admin_views_parent_change", parent.ID), url.Values{
+			"child_set-TOTAL_FORMS":   {"5"},
+			"child_set-INITIAL_FORMS": {"2"},
+			"name":                    {"Josh Stone"},
+			"child_set-0-name":        {"Paul"},
+			"child_set-0-id":          {fmt.Sprint(paul.ID)},
+			"child_set-1-name":        {"Catherine"},
+			"child_set-1-id":          {fmt.Sprint(catherine.ID)},
+		})
+		assertParentAndChildren(t, db, "Josh Stone", []string{"Catherine Stone", "Paul Stone"})
+	})
+}
+
+// FIXME-PORT: tests/admin_views/tests.py::AdminCustomSaveRelatedTests.test_should_be_able_to_edit_related_objects_on_changelist_view
+// needs list_editable.
 
 // The Go Article has no section, so SectionedPost stands in for Article in
 // the inline of Section.

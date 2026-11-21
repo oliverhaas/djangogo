@@ -438,6 +438,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   column shows its label, not its primary key. Without the option the query
   joins the foreign keys that the columns show, as before. Django's `True`,
   which Django 6.1 deprecates, has no counterpart.
+- Admin: the hooks `ModelAdmin.SaveModel`, `SaveRelated` and `DeleteModel`
+  replace how the add, change and delete pages save or delete the object,
+  Django's `save_model`, `save_related` and `delete_model`. A hook gets a
+  `SaveContext` or `DeleteContext` whose `Save`, `SaveRelated` and `Delete`
+  run the default, the counterpart of calling `super()`. The hooks run in
+  the transaction of the page, and `r.Context()` carries it.
 
 ### Changed
 

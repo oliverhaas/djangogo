@@ -282,6 +282,36 @@ func (s *AdminSite) saveManyToMany(ctx context.Context, e *entry, form *forms.Fo
 	return nil
 }
 
+// saveObject saves obj with save, then the many-to-many fields of form and
+// the inlines, through the SaveModel and SaveRelated hooks of e. r carries
+// the transaction of the save. change is false for a new object.
+func (s *AdminSite) saveObject(r *http.Request, e *entry, obj any, form *forms.Form, inlines []*inlineFormSet, change bool, save func(ctx context.Context) error) error {
+	sc := &SaveContext{
+		Site: s, DB: s.db, Model: e.model, Obj: obj, Form: form, Change: change,
+		Save: save,
+		SaveRelated: func(ctx context.Context) error {
+			if err := s.saveManyToMany(ctx, e, form, obj); err != nil {
+				return err
+			}
+			return saveInlines(ctx, inlines)
+		},
+	}
+	ctx := r.Context()
+	var err error
+	if e.admin.SaveModel != nil {
+		err = e.admin.SaveModel(r, sc)
+	} else {
+		err = sc.Save(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	if e.admin.SaveRelated != nil {
+		return e.admin.SaveRelated(r, sc)
+	}
+	return sc.SaveRelated(ctx)
+}
+
 // add handles the add form: requires add permission, validates POST data,
 // creates a row, sets a success message, and redirects per Django's
 // response_add rules.
@@ -359,13 +389,8 @@ func (s *AdminSite) addForm(w http.ResponseWriter, r *http.Request, e *entry) {
 						return err
 					}
 				}
-				if err := e.ops.create(ctx, obj); err != nil {
-					return err
-				}
-				if err := s.saveManyToMany(ctx, e, form, obj); err != nil {
-					return err
-				}
-				if err := saveInlines(ctx, inlines); err != nil {
+				create := func(ctx context.Context) error { return e.ops.create(ctx, obj) }
+				if err := s.saveObject(r.WithContext(ctx), e, obj, form, inlines, false, create); err != nil {
 					return err
 				}
 				return s.logFormChange(ctx, r, obj, form, inlines, true)
@@ -532,13 +557,8 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 		}
 		if valid {
 			err := s.db.Atomic(r.Context(), func(ctx context.Context) error {
-				if err := e.ops.update(ctx, pk, obj); err != nil {
-					return err
-				}
-				if err := s.saveManyToMany(ctx, e, form, obj); err != nil {
-					return err
-				}
-				if err := saveInlines(ctx, inlines); err != nil {
+				update := func(ctx context.Context) error { return e.ops.update(ctx, pk, obj) }
+				if err := s.saveObject(r.WithContext(ctx), e, obj, form, inlines, true, update); err != nil {
 					return err
 				}
 				return s.logFormChange(ctx, r, obj, form, inlines, false)
@@ -632,7 +652,14 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 			if err := s.logActions(ctx, r, []any{obj}, Deletion, ""); err != nil {
 				return err
 			}
-			return e.ops.del(ctx, pk)
+			dc := &DeleteContext{
+				Site: s, DB: s.db, Model: e.model, Obj: obj,
+				Delete: func(ctx context.Context) error { return e.ops.del(ctx, pk) },
+			}
+			if e.admin.DeleteModel != nil {
+				return e.admin.DeleteModel(r.WithContext(ctx), dc)
+			}
+			return dc.Delete(ctx)
 		})
 		if err != nil {
 			http.Error(w, "failed to delete row", http.StatusInternalServerError)

@@ -91,15 +91,36 @@ func setupPermFixture(t *testing.T, db *orm.DB, env *adminTestEnv) *permUsers {
 }
 
 // registerPermModels registers the models used by AdminViewPermissionsTest,
-// including RowLevelChangePermissionModel with per-object permission hooks.
+// including RowLevelChangePermissionModel with per-object permission hooks,
+// and drops the mails of ArticleAdmin.
 func registerPermModels(site *admin.AdminSite) {
+	registerPermModelsMail(site, new([]string))
+}
+
+// registerPermModelsMail is registerPermModels with the mails of ArticleAdmin
+// going to outbox.
+//
+// No Go counterpart: Django's EmailMessage. The save_model and delete_model
+// of ArticleAdmin send a mail, and these hooks append its subject to outbox,
+// the Go stand-in for mail.outbox.
+func registerPermModelsMail(site *admin.AdminSite, outbox *[]string) {
 	// The fieldsets of ArticleAdmin in tests/admin_views/admin.py over the
 	// fields of the Go Article.
-	admin.Register[Article](site, admin.ModelAdmin{Fieldsets: []admin.Fieldset{
-		{Name: "Some fields", Classes: []string{"collapse"}, Fields: []any{"title"}},
-		{Name: "Some other fields", Classes: []string{"wide"}, Fields: []any{"views"}},
-		{Name: "이름", Fields: []any{"published"}},
-	}})
+	admin.Register[Article](site, admin.ModelAdmin{
+		Fieldsets: []admin.Fieldset{
+			{Name: "Some fields", Classes: []string{"collapse"}, Fields: []any{"title"}},
+			{Name: "Some other fields", Classes: []string{"wide"}, Fields: []any{"views"}},
+			{Name: "이름", Fields: []any{"published"}},
+		},
+		SaveModel: func(r *http.Request, sc *admin.SaveContext) error {
+			*outbox = append(*outbox, "Greetings from a created object")
+			return sc.Save(r.Context())
+		},
+		DeleteModel: func(r *http.Request, dc *admin.DeleteContext) error {
+			*outbox = append(*outbox, "Greetings from a deleted object")
+			return dc.Delete(r.Context())
+		},
+	})
 	admin.Register[Section](site, admin.ModelAdmin{})
 	admin.Register[RowLevelChangePermissionModel](site, admin.ModelAdmin{
 		ReadonlyFields: []string{"CanChange", "CanView"},
@@ -347,7 +368,8 @@ func TestLoginPageNoticeForNonStaffUsers(t *testing.T) {
 // Ported from Django: tests/admin_views/tests.py::AdminViewPermissionsTest.test_add_view
 func TestAddViewPermissions(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
-		env := newAdminTestEnv(t, db, registerPermModels)
+		var outbox []string
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) { registerPermModelsMail(site, &outbox) })
 		u := setupPermFixture(t, db, env)
 		ctx := context.Background()
 
@@ -409,6 +431,8 @@ func TestAddViewPermissions(t *testing.T) {
 		djangotest.AssertRedirects(t, post, indexURL)
 		count, _ = orm.Query[Article](db).Count(ctx)
 		djangotest.AssertEqual(t, count, int64(4))
+		djangotest.AssertEqual(t, len(outbox), 2)
+		djangotest.AssertEqual(t, outbox[0], "Greetings from a created object")
 		env.client.Post(logoutURL, nil)
 
 		// The addition was logged correctly.
@@ -600,7 +624,8 @@ func TestChangeViewWithoutObjectChangePermission(t *testing.T) {
 // Ported from Django: tests/admin_views/tests.py::AdminViewPermissionsTest.test_delete_view
 func TestDeleteViewPermissions(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
-		env := newAdminTestEnv(t, db, registerPermModels)
+		var outbox []string
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) { registerPermModelsMail(site, &outbox) })
 		u := setupPermFixture(t, db, env)
 		ctx := context.Background()
 
@@ -633,6 +658,8 @@ func TestDeleteViewPermissions(t *testing.T) {
 		djangotest.AssertRedirects(t, post, indexURL)
 		count, _ = orm.Query[Article](db).Count(ctx)
 		djangotest.AssertEqual(t, count, int64(2))
+		djangotest.AssertEqual(t, len(outbox), 1)
+		djangotest.AssertEqual(t, outbox[0], "Greetings from a deleted object")
 		articleCT := contentTypeOf(t, db, &Article{})
 		logged, err := orm.Query[admin.LogEntry](db).Get(ctx, "content_type", articleCT.ID, "action_flag", admin.Deletion)
 		if err != nil {

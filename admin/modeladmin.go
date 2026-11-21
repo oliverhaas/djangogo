@@ -147,6 +147,47 @@ type ActionContext struct {
 	Delete func(ctx context.Context) (int64, error)
 }
 
+// SaveContext gives the SaveModel and SaveRelated hooks the object that a
+// valid add or change form filled, and the default saves.
+type SaveContext struct {
+	// Site is the AdminSite handling the request.
+	Site *AdminSite
+	// DB is the ORM database handle.
+	DB *orm.DB
+	// Model is the registered model descriptor.
+	Model *orm.Model
+	// Obj is the *T that the form filled. After Save it holds its primary
+	// key.
+	Obj any
+	// Form is the valid model form.
+	Form *forms.Form
+	// Change is false for a new object, from the add page or "Save as new",
+	// and true when the change page saves it (Django's change argument).
+	Change bool
+	// Save writes Obj to the database: an INSERT when Change is false and
+	// an UPDATE otherwise (Django's ModelAdmin.save_model).
+	Save func(ctx context.Context) error
+	// SaveRelated saves the many-to-many fields of the form and the inline
+	// formsets (Django's ModelAdmin.save_related).
+	SaveRelated func(ctx context.Context) error
+}
+
+// DeleteContext gives the DeleteModel hook the object that the delete page
+// deletes, and the default deletion.
+type DeleteContext struct {
+	// Site is the AdminSite handling the request.
+	Site *AdminSite
+	// DB is the ORM database handle.
+	DB *orm.DB
+	// Model is the registered model descriptor.
+	Model *orm.Model
+	// Obj is the *T to delete.
+	Obj any
+	// Delete deletes Obj and the rows that cascade from it (Django's
+	// ModelAdmin.delete_model).
+	Delete func(ctx context.Context) error
+}
+
 // Action is a bulk action selectable from the changelist action bar (Django's
 // ModelAdmin.actions entry).
 type Action struct {
@@ -420,6 +461,19 @@ type ModelAdmin struct {
 	GetQuerysetFilter func(r *http.Request) orm.Cond
 	// GetActions filters or customizes the resolved action list for r.
 	GetActions func(r *http.Request, actions []Action) []Action
+	// SaveModel replaces how the add and change pages save the object
+	// (Django's save_model). Call sc.Save to keep the default save. The hook
+	// runs in the transaction of the save, which r.Context() carries.
+	SaveModel func(r *http.Request, sc *SaveContext) error
+	// SaveRelated replaces how the add and change pages save the
+	// many-to-many fields and the inlines after the object (Django's
+	// save_related). Call sc.SaveRelated to keep the default. The hook runs
+	// in the transaction of the save, which r.Context() carries.
+	SaveRelated func(r *http.Request, sc *SaveContext) error
+	// DeleteModel replaces how the delete page deletes the object (Django's
+	// delete_model). Call dc.Delete to keep the default deletion. The hook
+	// runs in the transaction of the deletion, which r.Context() carries.
+	DeleteModel func(r *http.Request, dc *DeleteContext) error
 	// DeleteQueryset overrides how delete_selected deletes the selected rows.
 	DeleteQueryset func(r *http.Request, act *ActionContext) error
 	// GetDeletedObjects overrides how the delete page and delete_selected
