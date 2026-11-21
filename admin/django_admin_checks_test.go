@@ -53,6 +53,27 @@ type CheckAuthorsBooks struct {
 	Featured bool
 }
 
+// CheckTwoAlbumFKAndAnE stands in for
+// tests/admin_checks/models.py::TwoAlbumFKAndAnE.
+type CheckTwoAlbumFKAndAnE struct {
+	ID     int64
+	Album1 orm.FK[CheckAlbum] `orm:"on_delete=cascade;related_name=album1_set"`
+	Album2 orm.FK[CheckAlbum] `orm:"on_delete=cascade;related_name=album2_set"`
+	E      string             `orm:"max_length=1"`
+}
+
+// CheckState stands in for tests/admin_checks/models.py::State.
+type CheckState struct {
+	ID   int64
+	Name string `orm:"max_length=15"`
+}
+
+// CheckCity stands in for tests/admin_checks/models.py::City.
+type CheckCity struct {
+	ID    int64
+	State orm.FK[CheckState] `orm:"on_delete=cascade"`
+}
+
 // adminChecksModels returns the model set of the ported
 // tests/admin_checks/tests.py tests.
 func adminChecksModels() []any {
@@ -61,6 +82,7 @@ func adminChecksModels() []any {
 		contenttypes.App{},
 		djangotest.App("admin_checks",
 			&CheckAlbum{}, &CheckSong{}, &CheckAuthor{}, &CheckBook{}, &CheckAuthorsBooks{},
+			&CheckTwoAlbumFKAndAnE{}, &CheckState{}, &CheckCity{},
 		),
 	}
 }
@@ -215,6 +237,72 @@ func TestAdminChecksFieldLayout(t *testing.T) {
 				"admin.E012", "Remove duplicates of 'album'.")
 			assertCheckError(t, got[1], song, "There are duplicate field(s) in 'fieldsets[2][1]'.",
 				"admin.E012", "Remove duplicates of 'title', 'name'.")
+		})
+	})
+}
+
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_exclude_inline_model_admin
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_fk_exclusion
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_inline_self_check
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_inline_with_specified
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_inlines_property
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_nonexistent_field_on_inline
+func TestAdminChecksInlines(t *testing.T) {
+	// No Go counterpart: test_exclude_in_inline checks the type of exclude,
+	// which Go fixes at compile time. test_explicit_through_override and the
+	// generic inline tests need an inline of a many-to-many through model and
+	// generic inlines, which the Go admin does not have.
+	twoFK := admin.TabularInline[CheckAlbum, CheckTwoAlbumFKAndAnE]
+	albumSite := func(t *testing.T, db *orm.DB, inline admin.Inline) *admin.AdminSite {
+		t.Helper()
+		return checkSite(t, db, func(site *admin.AdminSite) {
+			admin.Register[CheckAlbum](site, admin.ModelAdmin{Inlines: []admin.Inline{inline}})
+		})
+	}
+	djangotest.EachDB(t, adminChecksModels(), func(t *testing.T, db *orm.DB) {
+		t.Run("test_exclude_inline_model_admin", func(t *testing.T) {
+			site := albumSite(t, db, admin.StackedInline[CheckAlbum, CheckSong](admin.InlineModelAdmin{
+				ExcludeFields: []string{"album"},
+			}))
+			assertInlineIsInvalid(t, site, "admin_checks.CheckSong",
+				"Cannot exclude the field 'album', because it is the foreign key to the parent model "+
+					"'admin_checks.CheckAlbum'.", "admin.E201")
+		})
+
+		t.Run("test_fk_exclusion", func(t *testing.T) {
+			assertIsValid(t, albumSite(t, db, twoFK(admin.InlineModelAdmin{ExcludeFields: []string{"e"}, FKName: "album1"})))
+		})
+
+		t.Run("test_inline_self_check", func(t *testing.T) {
+			assertInlineIsInvalid(t, albumSite(t, db, twoFK(admin.InlineModelAdmin{})), "admin_checks.CheckTwoAlbumFKAndAnE",
+				"'admin_checks.CheckTwoAlbumFKAndAnE' has more than one ForeignKey to 'admin_checks.CheckAlbum'. "+
+					"You must specify a 'fk_name' attribute.", "admin.E202")
+		})
+
+		t.Run("test_inline_with_specified", func(t *testing.T) {
+			assertIsValid(t, albumSite(t, db, twoFK(admin.InlineModelAdmin{FKName: "album1"})))
+		})
+
+		t.Run("test_inlines_property", func(t *testing.T) {
+			// Django returns the inlines from a property; the checks read
+			// Inlines, since GetInlines needs a request.
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[CheckState](site, admin.ModelAdmin{Inlines: []admin.Inline{
+					admin.TabularInline[CheckState, CheckCity](admin.InlineModelAdmin{}),
+				}})
+			})
+			assertIsValid(t, site)
+		})
+
+		t.Run("test_nonexistent_field_on_inline", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[CheckState](site, admin.ModelAdmin{Inlines: []admin.Inline{
+					admin.TabularInline[CheckState, CheckCity](admin.InlineModelAdmin{ReadonlyFields: []string{"i_dont_exist"}}),
+				}})
+			})
+			assertInlineIsInvalid(t, site, "admin_checks.CheckCity",
+				"The value of 'readonly_fields[0]' refers to 'i_dont_exist', which is not a callable, "+
+					"an attribute of 'InlineModelAdmin', or an attribute of 'admin_checks.CheckCity'.", "admin.E035")
 		})
 	})
 }

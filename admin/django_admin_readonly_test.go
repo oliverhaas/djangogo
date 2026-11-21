@@ -29,6 +29,18 @@ type ROPost struct {
 	Public          *bool    `orm:"null;blank"`
 }
 
+// ROLink stands in for tests/admin_views/models.py::Link. Django's posted
+// defaults to a week before today; a week before the fixed default of
+// ROPost.Posted stands in for it. The related name keeps Django's inline
+// prefix "link_set".
+type ROLink struct {
+	ID                  int64
+	Posted              orm.Date       `orm:"default=1999-12-25"`
+	URL                 string         `orm:"type=url"`
+	Post                orm.FK[ROPost] `orm:"on_delete=cascade;related_name=link_set"`
+	ReadonlyLinkContent string         `orm:"type=text"`
+}
+
 // ROChoice stands in for tests/admin_views/models.py::Choice.
 type ROChoice struct {
 	ID     int64
@@ -93,15 +105,23 @@ type LVEmptyModelMixin struct {
 // readonlyModels returns the model set of the ported ReadonlyTest tests.
 func readonlyModels() []any {
 	return []any{auth.App{}, contenttypes.App{}, djangotest.App("admin_views",
-		&Section{}, &ROPost{}, &ROChoice{}, &ROBook{}, &ROChapter{}, &ROReadOnlyRelatedField{},
+		&Section{}, &ROPost{}, &ROLink{}, &ROChoice{}, &ROBook{}, &ROChapter{}, &ROReadOnlyRelatedField{},
 		&LVEmptyModelVisible{}, &LVEmptyModelHidden{}, &LVEmptyModelMixin{},
 	)}
 }
 
-// roPostAdmin is PostAdmin of tests/admin_views/admin.py without its inline
-// and its lambda, which has no name a Go map key could hold.
+// roPostAdmin is PostAdmin of tests/admin_views/admin.py without its lambda,
+// which has no name a Go map key could hold. Its inline is LinkInline.
 func roPostAdmin() admin.ModelAdmin {
 	return admin.ModelAdmin{
+		Inlines: []admin.Inline{admin.TabularInline[ROPost, ROLink](admin.InlineModelAdmin{
+			Extra:          new(1),
+			ReadonlyFields: []string{"posted", "multiline", "readonly_link_content"},
+			DisplayColumns: map[string]admin.DisplayColumn{
+				// A method of the inline in Django.
+				"multiline": {Value: func(any) any { return "InlineMultiline\ntest\nstring" }},
+			},
+		})},
 		ListDisplay: []string{"title", "public"},
 		ReadonlyFields: []string{
 			"posted", "awesomeness_level", "coolness", "value", "multiline", "multiline_html", "readonly_content",
@@ -173,9 +193,8 @@ func readonlyEnv(t *testing.T, db *orm.DB, siteName string) (*adminTestEnv, *aut
 	return env, super
 }
 
-// The add page has no inline and no lambda column, so the Django assertions
-// on those (the <input> count, "foo", "InlineMultiline", the Link default and
-// the form row without a field class) are left out.
+// The add page has no lambda column, so the Django assertions on it ("foo"
+// and the form row without a field class) are left out.
 //
 // Ported from Django: tests/admin_views/tests.py::ReadonlyTest.test_readonly_get
 func TestReadonlyGet(t *testing.T) {
@@ -183,6 +202,10 @@ func TestReadonlyGet(t *testing.T) {
 		env, _ := readonlyEnv(t, db, "admin")
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_ropost_add"))
 		djangotest.AssertNotContains(t, resp, `name="posted"`)
+		// 3 fields + 2 submit buttons + 5 inline management form fields, + 2
+		// hidden fields for inlines + 1 field for the inline + 2 empty form
+		// + 1 logout form.
+		djangotest.AssertContains(t, resp, "<input", djangotest.Count(17))
 		djangotest.AssertContains(t, resp, "Jan. 1, 2000")
 		djangotest.AssertContains(t, resp, "<label>Awesomeness level:</label>")
 		djangotest.AssertContains(t, resp, "Very awesome.")
@@ -191,6 +214,9 @@ func TestReadonlyGet(t *testing.T) {
 		// Multiline text in a readonly field gets <br> tags.
 		djangotest.AssertContains(t, resp, "Multiline<br>test<br>string")
 		djangotest.AssertContains(t, resp, `<div class="readonly">Multiline<br>html<br>content</div>`, djangotest.HTML())
+		djangotest.AssertContains(t, resp, "InlineMultiline<br>test<br>string")
+
+		djangotest.AssertContains(t, resp, "Dec. 25, 1999")
 
 		djangotest.AssertContains(t, resp, `<div class="form-row field-coolness">`)
 		djangotest.AssertContains(t, resp, `<div class="form-row field-awesomeness_level">`)
@@ -216,9 +242,6 @@ func TestReadonlyGet(t *testing.T) {
 	})
 }
 
-// The inline half (a Link with readonly_link_content) is left out: the Go
-// admin has no inlines.
-//
 // Ported from Django: tests/admin_views/tests.py::ReadonlyTest.test_readonly_text_field
 func TestReadonlyTextField(t *testing.T) {
 	djangotest.EachDB(t, readonlyModels(), func(t *testing.T, db *orm.DB) {
@@ -231,9 +254,16 @@ func TestReadonlyTextField(t *testing.T) {
 		if err := orm.Query[ROPost](db).Create(context.Background(), p); err != nil {
 			t.Fatalf("Create(ROPost): %v", err)
 		}
+		link := &ROLink{URL: "http://www.djangoproject.com", ReadonlyLinkContent: "test\r\nlink"}
+		link.Post.SetPK(p.ID)
+		if err := orm.Query[ROLink](db).Create(context.Background(), link); err != nil {
+			t.Fatalf("Create(ROLink): %v", err)
+		}
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_ropost_change", p.ID))
 		// Checking readonly field.
 		djangotest.AssertContains(t, resp, "test<br><br>test<br><br>test<br><br>test")
+		// Checking readonly field in inline.
+		djangotest.AssertContains(t, resp, "test<br>link")
 	})
 }
 
@@ -244,8 +274,11 @@ func TestReadonlyPost(t *testing.T) {
 		env, _ := readonlyEnv(t, db, "admin")
 		addURL := mustReverse(t, env.router, "admin:admin_views_ropost_add")
 		data := url.Values{
-			"title":   {"Django Got Readonly Fields"},
-			"content": {"This is an incredible development."},
+			"title":                  {"Django Got Readonly Fields"},
+			"content":                {"This is an incredible development."},
+			"link_set-TOTAL_FORMS":   {"1"},
+			"link_set-INITIAL_FORMS": {"0"},
+			"link_set-MAX_NUM_FORMS": {"0"},
 		}
 		resp := env.client.Post(addURL, data)
 		djangotest.AssertStatus(t, resp, http.StatusFound)
@@ -438,10 +471,16 @@ func TestErrorNoteCountsFields(t *testing.T) {
 	djangotest.EachDB(t, readonlyModels(), func(t *testing.T, db *orm.DB) {
 		env, _ := readonlyEnv(t, db, "admin")
 		addURL := mustReverse(t, env.router, "admin:admin_views_ropost_add")
-		resp := env.client.Post(addURL, url.Values{"content": {"x"}})
+		// The management form of the LinkInline, with no forms.
+		data := func(values url.Values) url.Values {
+			values.Set("link_set-TOTAL_FORMS", "0")
+			values.Set("link_set-INITIAL_FORMS", "0")
+			return values
+		}
+		resp := env.client.Post(addURL, data(url.Values{"content": {"x"}}))
 		djangotest.AssertContains(t, resp, "Please correct the error below.")
 		djangotest.AssertContains(t, resp, `<div class="flex-container errors">`)
-		resp = env.client.Post(addURL, url.Values{})
+		resp = env.client.Post(addURL, data(url.Values{}))
 		djangotest.AssertContains(t, resp, "Please correct the errors below.")
 	})
 }

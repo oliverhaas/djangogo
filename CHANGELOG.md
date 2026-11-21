@@ -252,6 +252,23 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   (`RelatedFieldWidgetWrapper`). These links open the related admin in a
   popup, and saving or deleting there updates the field in the form that
   opened it. `FormOptions` still replaces any of these widgets.
+- Admin: the add and change pages edit the rows of related models in place,
+  as Django's inlines do. `ModelAdmin.Inlines` (or `GetInlines`) lists them,
+  made by `admin.TabularInline` or `admin.StackedInline` from an
+  `InlineModelAdmin`. An inline takes the layout options of a `ModelAdmin`
+  and `FKName`, `Extra`, `MinNum`, `MaxNum`, `CanDelete`, `ShowChangeLink`,
+  verbose names, `Classes`, `Media` and the permission hooks. The page adds,
+  changes and deletes the rows together with the parent row, with Django's
+  "Add another" links and error messages, and a user sees only the inlines
+  that their permissions allow. The `check` command reports Django's inline
+  errors (`admin.E201` and `admin.E202`) and runs the field checks on each
+  inline.
+- Admin: `ModelAdmin.GetExclude` and `InlineModelAdmin.GetExclude` choose the
+  excluded fields per request, as Django's `get_exclude` does.
+- Forms: `forms.WithClean` adds a form-level clean function to the options of
+  a model form, so a formset or the admin that builds the form from the
+  options runs it too. `forms.ModelFormLabels` returns the labels and help
+  texts that the options set.
 - Forms: `MultiValueField` cleans one value made of several fields, and
   `SplitDateTimeField` takes a date and a time in two inputs. `MultiWidget`
   renders several widgets as one; `SplitDateTimeWidget` and

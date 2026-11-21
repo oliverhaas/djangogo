@@ -290,6 +290,16 @@ type ModelAdmin struct {
 	// GetAutocompleteFields returns the autocomplete fields for r in place of
 	// AutocompleteFields (Django's get_autocomplete_fields).
 	GetAutocompleteFields func(r *http.Request) []string
+	// Inlines edit the rows of other models that point at the edited row on
+	// its add and change pages (Django's inlines), made by TabularInline or
+	// StackedInline.
+	Inlines []Inline
+	// GetInlines returns the inlines for r and obj, nil on the add page, in
+	// place of Inlines (Django's get_inlines).
+	GetInlines func(r *http.Request, obj any) []Inline
+	// Media adds stylesheets and scripts to the add and change pages
+	// (Django's ModelAdmin Media class).
+	Media forms.Media
 
 	// Actions registers custom bulk actions on this ModelAdmin (appended after
 	// site-wide actions such as delete_selected; an action with the same Name
@@ -327,6 +337,9 @@ type ModelAdmin struct {
 	// GetReadonlyFields returns the read-only fields for r and obj, nil on
 	// the add page (Django's get_readonly_fields).
 	GetReadonlyFields func(r *http.Request, obj any) []string
+	// GetExclude returns the fields that the form leaves out for r and obj,
+	// nil on the add page (Django's get_exclude). It replaces ExcludeFields.
+	GetExclude func(r *http.Request, obj any) []string
 	// GetQuerysetFilter returns an extra orm.Cond applied to the base
 	// changelist queryset for r (the Go analog of overriding ModelAdmin.get_queryset).
 	GetQuerysetFilter func(r *http.Request) orm.Cond

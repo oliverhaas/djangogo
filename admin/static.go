@@ -80,7 +80,7 @@ func (e *entry) media(s *AdminSite) forms.Media {
 		"urlify.js",
 		"prepopulate.js",
 		"vendor/xregexp/xregexp"+extra+".js",
-	)
+	).Add(e.admin.Media)
 }
 
 // Media returns the scripts of Django's SelectFilter2.js, which turn the list

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
@@ -115,7 +116,7 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj any, canChange boo
 	sets := s.fieldsets(r, e, obj)
 	fields := formNames(e.model, flattenFieldsets(sets))
 	readonly := e.readonlyFields(r, obj)
-	exclude := slices.Concat(s.excluded(e), readonly)
+	exclude := slices.Concat(s.excluded(r, e, obj), readonly)
 	if !canChange {
 		exclude = append(exclude, fields...)
 		readonly = fields
@@ -152,11 +153,16 @@ func namesField(names []string, f *orm.Field) bool {
 	return slices.Contains(names, f.Name) || slices.Contains(names, f.Attr)
 }
 
-// excluded returns the field names the admin omits from a model's form: the
-// configured ExcludeFields and the many-to-many fields with an explicit
-// through model, which Django's formfield_for_manytomany leaves out.
-func (s *AdminSite) excluded(e *entry) []string {
-	out := formNames(e.model, e.admin.ExcludeFields)
+// excluded returns the field names the admin omits from a model's form for r
+// and obj: GetExclude, else the configured ExcludeFields, Django's
+// get_exclude, and the many-to-many fields with an explicit through model,
+// which Django's formfield_for_manytomany leaves out.
+func (s *AdminSite) excluded(r *http.Request, e *entry, obj any) []string {
+	names := e.admin.ExcludeFields
+	if e.admin.GetExclude != nil {
+		names = e.admin.GetExclude(r, obj)
+	}
+	out := formNames(e.model, names)
 	for _, mf := range e.model.ManyToMany() {
 		if mf.Rel != nil && !mf.Rel.AutoCreated {
 			out = append(out, mf.Attr)
@@ -180,18 +186,29 @@ func formFieldNames(form *forms.Form) map[string]bool {
 // model's Meta.Ordering. The raw-id and autocomplete fields are left out:
 // loadSelectedChoices loads only the rows they show.
 func (s *AdminSite) populateChoices(r *http.Request, form *forms.Form, e *entry) {
+	for name, opts := range s.relationChoices(r, e, form, "") {
+		form.SetChoices(name, opts)
+	}
+}
+
+// relationChoices returns the options of the foreign-key and many-to-many
+// fields of form, without the field named skip and the fields that load only
+// the rows they show.
+func (s *AdminSite) relationChoices(r *http.Request, e *entry, form *forms.Form, skip string) map[string][][2]string {
+	out := map[string][][2]string{}
 	present := formFieldNames(form)
 	limited := e.limitedFields(r)
 	for _, mf := range slices.Concat(e.model.Relations(), e.model.ManyToMany()) {
-		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Attr] || slices.Contains(limited, mf) {
+		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Attr] || mf.Attr == skip || slices.Contains(limited, mf) {
 			continue
 		}
 		opts, err := orm.LabeledRowsOrdered(r.Context(), s.db, mf.Rel.Target, s.relatedOrdering(r, mf.Rel.Target), nil)
 		if err != nil {
 			continue
 		}
-		form.SetChoices(mf.Attr, opts)
+		out[mf.Attr] = opts
 	}
+	return out
 }
 
 // relatedOrdering returns the ordering of the admin of the related model
@@ -269,29 +286,40 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 		http.Error(w, "invalid admin form: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	data, ok := postData(w, r)
+	if !ok {
+		return
+	}
+	// The inlines point at the new row, which the form fills and the save
+	// gives its primary key before the rows of the inlines are saved.
+	obj := e.ops.newPtr()
+	inlines, err := s.inlineFormSets(r, e, obj, nil, data)
+	if err != nil {
+		http.Error(w, "invalid admin inline: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	if r.Method == http.MethodPost {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		af.form = af.form.Bind(r.PostForm)
+	if data != nil {
+		af.form = af.form.Bind(data)
 		form := af.form
 		if err := s.loadSelectedChoices(r, e, form); err != nil {
 			http.Error(w, "failed to load related rows", http.StatusInternalServerError)
 			return
 		}
-		if form.IsValid() {
-			obj := e.ops.newPtr()
-			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
-				http.Error(w, "failed to populate object", http.StatusInternalServerError)
-				return
-			}
+		valid, err := validChangeForm(e, form, obj, inlines)
+		if err != nil {
+			http.Error(w, "failed to populate object", http.StatusInternalServerError)
+			return
+		}
+		if valid {
 			err := s.db.Atomic(r.Context(), func(ctx context.Context) error {
 				if err := e.ops.create(ctx, obj); err != nil {
 					return err
 				}
-				return s.saveManyToMany(ctx, e, form, obj)
+				if err := s.saveManyToMany(ctx, e, form, obj); err != nil {
+					return err
+				}
+				return saveInlines(ctx, inlines)
 			})
 			if err != nil {
 				http.Error(w, "failed to create row", http.StatusInternalServerError)
@@ -324,7 +352,35 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 			return
 		}
 	}
-	s.renderChangeForm(w, r, e, title, nil, af, true, true)
+	s.renderChangeForm(w, r, e, title, nil, af, inlines, true, true)
+}
+
+// postData parses the body of a POST request and returns its form data, nil
+// for other methods. It answers a body that does not parse with 400 and
+// returns false.
+func postData(w http.ResponseWriter, r *http.Request) (url.Values, bool) {
+	if r.Method != http.MethodPost {
+		return nil, true
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return nil, false
+	}
+	return r.PostForm, true
+}
+
+// validChangeForm validates the bound form and the formsets of the inlines,
+// all of them as Django's _changeform_view does, and reports whether all are
+// valid. A valid form fills obj first, as Django's ModelForm._post_clean
+// fills its instance before the formsets validate.
+func validChangeForm(e *entry, form *forms.Form, obj any, inlines []*inlineFormSet) (bool, error) {
+	formValid := form.IsValid()
+	if formValid {
+		if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
+			return false, err
+		}
+	}
+	return inlinesValid(inlines) && formValid, nil
 }
 
 // change handles the change/view form: checks view or change permission on the
@@ -361,28 +417,37 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 		http.Error(w, "invalid admin form: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	data, ok := postData(w, r)
+	if !ok {
+		return
+	}
+	inlines, err := s.inlineFormSets(r, e, obj, obj, data)
+	if err != nil {
+		http.Error(w, "invalid admin inline: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	if r.Method == http.MethodPost {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		af.form = af.form.Bind(r.PostForm)
+	if data != nil {
+		af.form = af.form.Bind(data)
 		form := af.form
 		if err := s.loadSelectedChoices(r, e, form); err != nil {
 			http.Error(w, "failed to load related rows", http.StatusInternalServerError)
 			return
 		}
-		if form.IsValid() {
-			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
-				http.Error(w, "failed to populate object", http.StatusInternalServerError)
-				return
-			}
+		valid, err := validChangeForm(e, form, obj, inlines)
+		if err != nil {
+			http.Error(w, "failed to populate object", http.StatusInternalServerError)
+			return
+		}
+		if valid {
 			err := s.db.Atomic(r.Context(), func(ctx context.Context) error {
 				if err := e.ops.update(ctx, pk, obj); err != nil {
 					return err
 				}
-				return s.saveManyToMany(ctx, e, form, obj)
+				if err := s.saveManyToMany(ctx, e, form, obj); err != nil {
+					return err
+				}
+				return saveInlines(ctx, inlines)
 			})
 			if err != nil {
 				http.Error(w, "failed to update row", http.StatusInternalServerError)
@@ -410,12 +475,12 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 			s.redirectPostSave(w, r, e)
 			return
 		}
-		s.renderChangeForm(w, r, e, "Change "+singular, obj, af, false, true)
+		s.renderChangeForm(w, r, e, "Change "+singular, obj, af, inlines, false, true)
 		return
 	}
 
 	if !canChange {
-		s.renderChangeForm(w, r, e, "View "+singular, obj, af, false, false)
+		s.renderChangeForm(w, r, e, "View "+singular, obj, af, inlines, false, false)
 		return
 	}
 	af.form.Initial = forms.InitialFromStruct(e.model, obj)
@@ -427,7 +492,7 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 		http.Error(w, "failed to load related rows", http.StatusInternalServerError)
 		return
 	}
-	s.renderChangeForm(w, r, e, "Change "+singular, obj, af, false, true)
+	s.renderChangeForm(w, r, e, "Change "+singular, obj, af, inlines, false, true)
 }
 
 // delete handles the delete confirmation: checks delete permission on the
@@ -539,6 +604,7 @@ func (s *AdminSite) renderChangeForm(
 	title string,
 	obj any,
 	af *adminForm,
+	inlines []*inlineFormSet,
 	isAdd bool,
 	canChange bool,
 ) {
@@ -583,11 +649,12 @@ func (s *AdminSite) renderChangeForm(
 
 	ctx["form"] = af.form
 	ctx["adminform"] = s.fieldsetContext(r.Context(), e, af)
-	ctx["media"] = e.media(s).Add(af.form.Media())
+	ctx["inline_admin_formsets"] = s.inlineContexts(r.Context(), inlines)
+	ctx["media"] = e.media(s).Add(af.form.Media()).Add(s.inlinesMedia(inlines))
 	ctx["jsi18n_url"] = s.jsi18nURL()
 	ctx["errors"] = 0
 	if af.form.IsBound() {
-		ctx["errors"] = af.form.Errors().Len()
+		ctx["errors"] = af.form.Errors().Len() + inlineErrorCount(inlines)
 		ctx["non_field_errors"] = templates.MarkSafe(af.form.NonFieldErrors().AsUL())
 	}
 	if hasObjDelete {

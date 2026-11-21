@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,6 +200,23 @@ func TestModelFormOverrideCleanStillValidatesUnique(t *testing.T) {
 		bound := f.Bind(vals("left", "1", "middle", "2", "right", "1"))
 		djangotest.AssertEqual(t, bound.IsValid(), false)
 		djangotest.AssertEqual(t, len(bound.NonFieldErrors().Messages()) > 0, true)
+	})
+}
+
+// Ported from Django: tests/model_forms/tests.py::CustomCleanTests.test_model_form_clean_applies_to_model
+func TestModelFormCleanAppliesToModel(t *testing.T) {
+	djangotest.EachDB(t, []any{&Category{}}, func(t *testing.T, db *orm.DB) {
+		upper := forms.WithClean(func(form *forms.Form) error {
+			form.CleanedData()["name"] = strings.ToUpper(form.CleanedData()["name"].(string))
+			return nil
+		})
+		form := forms.NewModelForm[Category](db, forms.WithFields(forms.AllFields), upper).
+			Bind(vals("name", "Test", "slug", "test", "url", "/test"))
+		category, err := form.Save(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		djangotest.AssertEqual(t, category.Name, "TEST")
 	})
 }
 

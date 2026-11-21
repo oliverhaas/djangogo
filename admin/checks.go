@@ -9,13 +9,17 @@ import (
 	"github.com/oliverhaas/djangogo/orm"
 )
 
-// adminObject is the object of a ModelAdmin check message. Django names the
-// ModelAdmin class; a Go ModelAdmin is a value without a name, so the message
-// names the model it administers.
-type adminObject struct{ model *orm.Model }
+// adminObject is the object of a ModelAdmin or InlineModelAdmin check
+// message. Django names the admin class; a Go admin is a value without a
+// name, so the message names its kind, "ModelAdmin" or "InlineModelAdmin",
+// and the model it administers.
+type adminObject struct {
+	kind  string
+	model *orm.Model
+}
 
-// Label returns "ModelAdmin of <app>.<Model>".
-func (o adminObject) Label() string { return "ModelAdmin of " + o.model.Label() }
+// Label returns "<kind> of <app>.<Model>".
+func (o adminObject) Label() string { return o.kind + " of " + o.model.Label() }
 
 // Check runs the checks of Django's ModelAdminChecks that apply to the Go
 // ModelAdmin over every registered model and returns the problems, in the
@@ -24,36 +28,45 @@ func (o adminObject) Label() string { return "ModelAdmin of " + o.model.Label() 
 // (admin.E004, admin.E005, admin.E006,
 // admin.E013), Fieldsets (admin.E008, admin.E011, admin.E012, admin.E013),
 // ExcludeFields (admin.E015), FilterVertical and FilterHorizontal
-// (admin.E013, admin.E019, admin.E020), ReadonlyFields (admin.E035), then
-// ListDisplay (admin.E108, admin.E109).
+// (admin.E013, admin.E019, admin.E020), ReadonlyFields (admin.E035), the
+// inlines (see checkInlines), then ListDisplay (admin.E108, admin.E109).
 func (s *AdminSite) Check() []checks.Message {
 	var out []checks.Message
 	for _, e := range s.entries {
-		obj := adminObject{model: e.model}
-		for i, name := range e.admin.AutocompleteFields {
-			out = append(out, s.checkAutocompleteItem(e, obj, name, fmt.Sprintf("autocomplete_fields[%d]", i))...)
-		}
-		for i, name := range e.admin.RawIDFields {
-			out = append(out, checkRawIDItem(e, obj, name, fmt.Sprintf("raw_id_fields[%d]", i))...)
-		}
-		out = append(out, checkFields(e, obj)...)
-		out = append(out, checkFieldsets(e, obj)...)
-		if dups := duplicates(e.model, e.admin.ExcludeFields); len(dups) > 0 {
-			out = append(out, checks.Error("The value of 'exclude' contains duplicate field(s).",
-				checks.Hint(duplicatesHint(dups)), checks.Obj(obj), checks.ID("admin.E015")))
-		}
-		for i, name := range e.admin.FilterVertical {
-			out = append(out, checkFilterItem(e, obj, name, fmt.Sprintf("filter_vertical[%d]", i))...)
-		}
-		for i, name := range e.admin.FilterHorizontal {
-			out = append(out, checkFilterItem(e, obj, name, fmt.Sprintf("filter_horizontal[%d]", i))...)
-		}
-		for i, name := range e.admin.ReadonlyFields {
-			out = append(out, checkReadonlyItem(e, obj, name, fmt.Sprintf("readonly_fields[%d]", i))...)
-		}
+		obj := adminObject{kind: "ModelAdmin", model: e.model}
+		out = append(out, s.checkBase(e, obj)...)
+		out = append(out, s.checkInlines(e, obj)...)
 		for i, name := range e.admin.ListDisplay {
 			out = append(out, checkListDisplayItem(e, obj, name, fmt.Sprintf("list_display[%d]", i))...)
 		}
+	}
+	return out
+}
+
+// checkBase runs the checks of Django's BaseModelAdminChecks, which a
+// ModelAdmin and an InlineModelAdmin share, over the admin of e.
+func (s *AdminSite) checkBase(e *entry, obj adminObject) []checks.Message {
+	var out []checks.Message
+	for i, name := range e.admin.AutocompleteFields {
+		out = append(out, s.checkAutocompleteItem(e, obj, name, fmt.Sprintf("autocomplete_fields[%d]", i))...)
+	}
+	for i, name := range e.admin.RawIDFields {
+		out = append(out, checkRawIDItem(e, obj, name, fmt.Sprintf("raw_id_fields[%d]", i))...)
+	}
+	out = append(out, checkFields(e, obj)...)
+	out = append(out, checkFieldsets(e, obj)...)
+	if dups := duplicates(e.model, e.admin.ExcludeFields); len(dups) > 0 {
+		out = append(out, checks.Error("The value of 'exclude' contains duplicate field(s).",
+			checks.Hint(duplicatesHint(dups)), checks.Obj(obj), checks.ID("admin.E015")))
+	}
+	for i, name := range e.admin.FilterVertical {
+		out = append(out, checkFilterItem(e, obj, name, fmt.Sprintf("filter_vertical[%d]", i))...)
+	}
+	for i, name := range e.admin.FilterHorizontal {
+		out = append(out, checkFilterItem(e, obj, name, fmt.Sprintf("filter_horizontal[%d]", i))...)
+	}
+	for i, name := range e.admin.ReadonlyFields {
+		out = append(out, checkReadonlyItem(e, obj, name, fmt.Sprintf("readonly_fields[%d]", i))...)
 	}
 	return out
 }
@@ -224,8 +237,8 @@ func checkReadonlyItem(e *entry, obj adminObject, name, label string) []checks.M
 		return nil
 	}
 	return []checks.Message{checks.Error(fmt.Sprintf(
-		"The value of '%s' refers to '%s', which is not a callable, an attribute of 'ModelAdmin', or an attribute of '%s'.",
-		label, name, e.model.Label()), checks.Obj(obj), checks.ID("admin.E035"))}
+		"The value of '%s' refers to '%s', which is not a callable, an attribute of '%s', or an attribute of '%s'.",
+		label, name, obj.kind, e.model.Label()), checks.Obj(obj), checks.ID("admin.E035"))}
 }
 
 // duplicates returns the form names that occur more than once in names, in

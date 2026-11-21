@@ -96,6 +96,9 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[
 			form.AddField(name, cfg.formFields[name])
 		}
 	}
+	for _, fn := range cfg.cleaners {
+		form.CleanWith(fn)
+	}
 	if len(unknown) > 0 {
 		form.fail(fmt.Errorf("forms: Unknown field(s) (%s) specified for %s", strings.Join(unknown, ", "), m.Name()))
 	}

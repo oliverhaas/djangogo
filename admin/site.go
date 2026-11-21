@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -34,7 +35,7 @@ const (
 // templateFS holds the admin's embedded pongo2 templates under templates/admin
 // and templates/registration.
 //
-//go:embed templates/admin/*.html templates/admin/includes/*.html templates/registration/*.html
+//go:embed templates/admin/*.html templates/admin/includes/*.html templates/admin/edit_inline/*.html templates/registration/*.html
 var templateFS embed.FS
 
 // entryKey uniquely identifies a registered model within an AdminSite by app
@@ -218,12 +219,21 @@ func (s *AdminSite) emptyValue() string {
 
 // Register adds model T (which must already be registered in db's ORM registry)
 // to site with the given ModelAdmin. It panics when T has no registered model,
-// since that is a boot-time programmer error.
+// or when an inline was not made by TabularInline or StackedInline with T as
+// the parent, since that is a boot-time programmer error.
 func Register[T any](site *AdminSite, ma ModelAdmin) {
 	var zero T
 	m, ok := site.db.Registry().ModelOf(zero)
 	if !ok {
 		panic(fmt.Sprintf("admin: Register: no ORM model registered for %T", zero))
+	}
+	for _, inline := range ma.Inlines {
+		if inline.resolve == nil {
+			panic("admin: Register: an Inline must be made by TabularInline or StackedInline")
+		}
+		if inline.parent != reflect.TypeFor[T]() {
+			panic(fmt.Sprintf("admin: Register: an inline of %v cannot edit %T", inline.parent, zero))
+		}
 	}
 	slug := strings.ToLower(m.Name())
 	e := &entry{

@@ -39,6 +39,7 @@ type modelFormConfig struct {
 	formFields    map[string]Field
 	factories     map[string]fieldFactory
 	callback      func(mf *orm.Field, f Field) Field
+	cleaners      []func(*Form) error
 }
 
 // AllFields is the name list entry that selects every editable field of the
@@ -149,6 +150,16 @@ func WithFormFieldCallback(fn func(mf *orm.Field, f Field) Field) ModelFormOptio
 	return func(c *modelFormConfig) { c.callback = fn }
 }
 
+// WithClean registers a form-level clean function, the counterpart of a
+// clean() method on a ModelForm subclass. It runs after the fields have been
+// cleaned and before the model validation, as Form.CleanWith does. Unlike
+// CleanWith on a built form, the option travels with the form options, so a
+// form that a formset or the admin builds from them has it too. Several
+// WithClean options run in order.
+func WithClean(fn func(form *Form) error) ModelFormOption {
+	return func(c *modelFormConfig) { c.cleaners = append(c.cleaners, fn) }
+}
+
 // newModelFormConfig applies opts to an empty configuration.
 func newModelFormConfig(opts []ModelFormOption) *modelFormConfig {
 	c := &modelFormConfig{
@@ -165,6 +176,15 @@ func newModelFormConfig(opts []ModelFormOption) *modelFormConfig {
 		opt(c)
 	}
 	return c
+}
+
+// ModelFormLabels returns the labels and the help texts that opts set with
+// WithLabel and WithHelpText, keyed by the field name as given, Django's
+// ModelForm._meta.labels and _meta.help_texts. The admin reads them for
+// read-only fields, which the form leaves out.
+func ModelFormLabels(opts ...ModelFormOption) (labels, helpTexts map[string]string) {
+	c := newModelFormConfig(opts)
+	return c.labels, c.helpTexts
 }
 
 // attrName returns the attribute name of the model field that name refers to,

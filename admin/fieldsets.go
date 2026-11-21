@@ -93,7 +93,7 @@ func (s *AdminSite) layoutFields(r *http.Request, e *entry, obj any) []any {
 		return e.admin.Fields
 	}
 	readonly := e.readonlyFields(r, obj)
-	opts := append([]forms.ModelFormOption{forms.WithExclude(slices.Concat(s.excluded(e), readonly)...)},
+	opts := append([]forms.ModelFormOption{forms.WithExclude(slices.Concat(s.excluded(r, e, obj), readonly)...)},
 		e.admin.FormOptions...)
 	base := forms.FromModel(e.model, opts...)
 	out := make([]any, 0, len(base.FieldNames())+len(readonly))
@@ -128,6 +128,10 @@ type adminForm struct {
 	// obj is the object the read-only fields show: the edited one, or a new
 	// one with the field defaults on the add page.
 	obj any
+	// skip names a field whose own line the fieldsets leave out: the
+	// foreign key to the parent in the form of an inline, Django's
+	// InlineFieldset.
+	skip string
 }
 
 // fieldsetContext returns the template data of the fieldsets of af, one map
@@ -143,6 +147,9 @@ func (s *AdminSite) fieldsetContext(ctx context.Context, e *entry, af *adminForm
 		for _, entry := range fs.Fields {
 			if name, single := entry.(string); single && af.form.IsBound() && af.form.Errors().Has(formName(e.model, name)) {
 				collapsible = false
+			}
+			if name, single := entry.(string); single && af.skip != "" && formName(e.model, name) == af.skip {
+				continue
 			}
 			names, _ := lineNames(entry)
 			if line := s.lineContext(ctx, e, af, formNames(e.model, names)); line != nil {
@@ -167,12 +174,20 @@ func (s *AdminSite) lineContext(ctx context.Context, e *entry, af *adminForm, na
 	var errs []string
 	hasVisible := false
 	for i, name := range names {
+		bf := af.form.Field(name)
 		if slices.Contains(af.readonly, name) {
-			items = append(items, s.readonlyFieldContext(ctx, e, af.obj, name, i == 0))
-			hasVisible = true
+			item := s.readonlyFieldContext(ctx, e, af.obj, name, i == 0)
+			// A read-only field that is still on the form, as on a page
+			// that the user may only view, keeps the hidden widget of the
+			// form field, Django's AdminReadonlyField.is_hidden.
+			hidden := bf != nil && bf.IsHidden()
+			item["is_hidden"] = hidden
+			if !hidden {
+				hasVisible = true
+			}
+			items = append(items, item)
 			continue
 		}
-		bf := af.form.Field(name)
 		if bf == nil {
 			continue
 		}
@@ -245,13 +260,8 @@ func adminFieldContext(bf *forms.BoundField, first bool) map[string]any {
 // readonlyFieldContext returns the template data of a read-only field,
 // Django's helpers.AdminReadonlyField: a model field or a DisplayColumns key.
 func (s *AdminSite) readonlyFieldContext(ctx context.Context, e *entry, obj any, name string, first bool) map[string]any {
-	label, help := prettyName(name), ""
 	f := readonlyModelField(e.model, name)
-	if f != nil {
-		label, help = fieldVerboseName(f), f.HelpText
-	} else if col, ok := e.admin.DisplayColumns[name]; ok && col.Description != "" {
-		label = col.Description
-	}
+	label, help := readonlyLabel(e, f, name)
 	class := ""
 	if !first {
 		class = ` class="inline"`
@@ -269,6 +279,39 @@ func (s *AdminSite) readonlyFieldContext(ctx context.Context, e *entry, obj any,
 		"errors":       "",
 		"contents":     templates.MarkSafe(s.readonlyContents(ctx, e, obj, f, name)),
 	}
+}
+
+// readonlyLabel returns the label and the help text of the read-only field
+// name with the model field f, which may be nil. The WithLabel and
+// WithHelpText options of the form come first, as Django reads
+// ModelForm.Meta.labels and help_texts in AdminReadonlyField and
+// InlineAdminFormSet.fields; then the verbose name and the help text of the
+// model field, or the description of a DisplayColumn.
+func readonlyLabel(e *entry, f *orm.Field, name string) (label, help string) {
+	label = prettyName(name)
+	if f != nil {
+		label, help = fieldVerboseName(f), f.HelpText
+	} else if col, ok := e.admin.DisplayColumns[name]; ok && col.Description != "" {
+		label = col.Description
+	}
+	labels, helpTexts := forms.ModelFormLabels(e.admin.FormOptions...)
+	keys := []string{name}
+	if f != nil && f.Name != name {
+		keys = append(keys, f.Name)
+	}
+	for _, key := range keys {
+		if v := labels[key]; v != "" {
+			label = v
+			break
+		}
+	}
+	for _, key := range keys {
+		if v := helpTexts[key]; v != "" {
+			help = v
+			break
+		}
+	}
+	return label, help
 }
 
 // readonlyModelField returns the concrete or many-to-many field of m that name

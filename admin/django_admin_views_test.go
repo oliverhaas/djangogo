@@ -17,7 +17,7 @@ import (
 //
 // FIXME-PORT: the cases of fields that a many-to-many field, a parent model,
 // an inline or a generic relation references need relations to fields other
-// than the primary key, inlines and generic relations.
+// than the primary key, and generic relations.
 //
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_disallowed_to_field
 func TestDisallowedToField(t *testing.T) {
@@ -77,18 +77,21 @@ func TestPopupDismissRelated(t *testing.T) {
 }
 
 // Django's override_settings(DEBUG=...) maps to AdminSite.Debug, which the
-// application sets from Settings.Debug.
-//
-// FIXME-PORT: the inlines.js assertions wait for inlines.
+// application sets from Settings.Debug. Django's SectionAdmin has an inline of
+// the articles of a section; the Article of this package has no foreign key
+// to Section, so SectionedPost stands in for it.
 //
 // Ported from Django: tests/admin_views/tests.py::AdminJavaScriptTest.test_js_minified_only_if_debug_is_false
 func TestJSMinifiedOnlyIfDebugIsFalse(t *testing.T) {
-	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+	models := append(adminViewsModels(), djangotest.App("blog", &SectionedPost{}))
+	djangotest.EachDB(t, models, func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
 		for _, debug := range []bool{false, true} {
 			env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
 				site.Debug = debug
-				registerBasicAdminModels(site)
+				admin.Register[Section](site, admin.ModelAdmin{Inlines: []admin.Inline{
+					admin.TabularInline[Section, SectionedPost](admin.InlineModelAdmin{}),
+				}})
 			})
 			env.client.ForceLogin(super)
 			resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_section_add"))
@@ -101,6 +104,7 @@ func TestJSMinifiedOnlyIfDebugIsFalse(t *testing.T) {
 			}
 			djangotest.AssertContains(t, resp, "prepopulate.js")
 			djangotest.AssertContains(t, resp, "actions.js")
+			djangotest.AssertContains(t, resp, "inlines.js")
 		}
 	})
 }

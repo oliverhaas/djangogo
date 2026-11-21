@@ -33,6 +33,16 @@ type Song struct {
 	Featuring orm.M2M[Band] `orm:"related_name=featured"`
 }
 
+// Concert stands in for tests/modeladmin/models.py::Concert, without the
+// choices of day and transport, which no ported test reaches.
+type Concert struct {
+	ID          int64
+	MainBand    orm.FK[Band] `orm:"on_delete=cascade;related_name=main_concerts"`
+	OpeningBand orm.FK[Band] `orm:"on_delete=cascade;related_name=opening_concerts;blank"`
+	Day         string       `orm:"max_length=3"`
+	Transport   string       `orm:"max_length=100;blank"`
+}
+
 // ValidationTestModel stands in for
 // tests/modeladmin/models.py::ValidationTestModel, with the fields the ported
 // checks address.
@@ -43,6 +53,16 @@ type ValidationTestModel struct {
 	Band       orm.FK[Band]       `orm:"on_delete=cascade"`
 	BestFriend orm.O2O[auth.User] `orm:"on_delete=cascade;related_name=best_friend"`
 }
+
+// ValidationTestInlineModel stands in for
+// tests/modeladmin/models.py::ValidationTestInlineModel.
+type ValidationTestInlineModel struct {
+	ID     int64
+	Parent orm.FK[ValidationTestModel] `orm:"on_delete=cascade"`
+}
+
+// NotAModel is a type that no app registers as a model.
+type NotAModel struct{ ID int64 }
 
 // Contact and Customer stand in for the models that
 // FilterVerticalCheckTests.test_invalid_reverse_m2m_field_with_related_name
@@ -79,7 +99,8 @@ func modeladminCheckModels() []any {
 		auth.App{},
 		contenttypes.App{},
 		djangotest.App("modeladmin",
-			&Band{}, &Song{}, &ValidationTestModel{}, &Contact{}, &Customer{}, &Artist{}, &BandArtist{},
+			&Band{}, &Song{}, &Concert{}, &ValidationTestModel{}, &ValidationTestInlineModel{},
+			&Contact{}, &Customer{}, &Artist{}, &BandArtist{},
 		),
 	}
 }
@@ -111,6 +132,25 @@ func assertIsInvalid(t *testing.T, site *admin.AdminSite, model, msg, id string,
 // optional hint given, about the ModelAdmin of model.
 func assertCheckError(t *testing.T, m checks.Message, model, msg, id string, hint ...string) {
 	t.Helper()
+	assertCheckErrorOn(t, m, "ModelAdmin of "+model, msg, id, hint...)
+}
+
+// assertInlineIsInvalid mirrors CheckTestCase.assertIsInvalid with an
+// invalid_obj that is an inline: the site reports exactly one error, about
+// the inline of model.
+func assertInlineIsInvalid(t *testing.T, site *admin.AdminSite, model, msg, id string, hint ...string) {
+	t.Helper()
+	got := site.Check()
+	if len(got) != 1 {
+		t.Fatalf("Check() = %v, want one error %s %q", got, id, msg)
+	}
+	assertCheckErrorOn(t, got[0], "InlineModelAdmin of "+model, msg, id, hint...)
+}
+
+// assertCheckErrorOn asserts that m is an error with the message, ID and
+// optional hint given, about the admin object with the label obj.
+func assertCheckErrorOn(t *testing.T, m checks.Message, obj, msg, id string, hint ...string) {
+	t.Helper()
 	wantHint := ""
 	if len(hint) > 0 {
 		wantHint = hint[0]
@@ -118,9 +158,9 @@ func assertCheckError(t *testing.T, m checks.Message, model, msg, id string, hin
 	if m.Level != checks.LevelError || m.Msg != msg || m.ID != id || m.Hint != wantHint {
 		t.Errorf("Check() = %+v, want error %s %q hint %q", m, id, msg, wantHint)
 	}
-	obj, ok := m.Obj.(interface{ Label() string })
-	if !ok || obj.Label() != "ModelAdmin of "+model {
-		t.Errorf("Check() object = %v, want the ModelAdmin of %s", m.Obj, model)
+	got, ok := m.Obj.(interface{ Label() string })
+	if !ok || got.Label() != obj {
+		t.Errorf("Check() object = %v, want the %s", m.Obj, obj)
 	}
 }
 
@@ -359,16 +399,125 @@ func TestFieldsetsCheck(t *testing.T) {
 }
 
 // Ported from Django: tests/modeladmin/test_checks.py::FieldsCheckTests.test_duplicate_fields_in_fields
+// Ported from Django: tests/modeladmin/test_checks.py::FieldsCheckTests.test_inline
 func TestFieldsCheck(t *testing.T) {
 	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
-		// FIXME-PORT: test_inline (admin.E004) needs inlines, which the Go
-		// admin does not have yet.
 		site := checkSite(t, db, func(site *admin.AdminSite) {
 			admin.Register[ValidationTestModel](site, admin.ModelAdmin{Fields: []any{"name", "name"}})
 		})
 		assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
 			"The value of 'fields' contains duplicate field(s).", "admin.E006", "Remove duplicates of 'name'.")
+
+		// Django sets the fields of the inline to 10; Fields is a Go []any,
+		// so the Go counterpart is an entry that is not a field name.
+		site = checkSite(t, db, func(site *admin.AdminSite) {
+			admin.Register[ValidationTestModel](site, admin.ModelAdmin{Inlines: []admin.Inline{
+				admin.TabularInline[ValidationTestModel, ValidationTestInlineModel](admin.InlineModelAdmin{Fields: []any{10}}),
+			}})
+		})
+		assertInlineIsInvalid(t, site, "modeladmin.ValidationTestInlineModel",
+			"The value of 'fields[0]' must be a field name or a []string.", "admin.E004")
 	})
+}
+
+// Ported from Django: tests/modeladmin/test_checks.py::InlinesCheckTests.test_not_model_admin
+// Ported from Django: tests/modeladmin/test_checks.py::InlinesCheckTests.test_invalid_model_type
+// Ported from Django: tests/modeladmin/test_checks.py::InlinesCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::FkNameCheckTests.test_missing_field
+// Ported from Django: tests/modeladmin/test_checks.py::FkNameCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::ExtraCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::MaxNumCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::MinNumCheckTests.test_valid_case
+func TestInlinesCheck(t *testing.T) {
+	// No Go counterpart: InlinesCheckTests.test_not_iterable,
+	// test_not_correct_inline_field, test_invalid_callable and
+	// test_invalid_model, ExtraCheckTests, MaxNumCheckTests and
+	// MinNumCheckTests.test_not_integer and FormsetCheckTests check option
+	// types that Go fixes at compile time: Inlines is a []admin.Inline,
+	// Extra and MaxNum are *int, MinNum is an int, and an inline has no
+	// formset class.
+	// test_missing_model_field has none either: TabularInline and
+	// StackedInline take the model as a type parameter. The proxy tests of
+	// FkNameCheckTests have none, as the ORM has no proxy models.
+	const model = "modeladmin.ValidationTestModel"
+	const inlineModel = "modeladmin.ValidationTestInlineModel"
+	inlineSite := func(t *testing.T, db *orm.DB, inlines ...admin.Inline) *admin.AdminSite {
+		t.Helper()
+		return checkSite(t, db, func(site *admin.AdminSite) {
+			admin.Register[ValidationTestModel](site, admin.ModelAdmin{Inlines: inlines})
+		})
+	}
+	tabular := admin.TabularInline[ValidationTestModel, ValidationTestInlineModel]
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		t.Run("test_not_model_admin", func(t *testing.T) {
+			// An admin.Inline that TabularInline or StackedInline did not
+			// make stands in for a class that is not an InlineModelAdmin.
+			// Register rejects it at boot, where Django reports admin.E104.
+			assertPanics(t, "admin: Register: an Inline must be made by TabularInline or StackedInline", func() {
+				inlineSite(t, db, admin.Inline{})
+			})
+		})
+
+		t.Run("test_invalid_model_type", func(t *testing.T) {
+			// A type that is not a registered model stands in for
+			// SomethingBad.
+			assertIsInvalid(t, inlineSite(t, db, admin.TabularInline[ValidationTestModel, NotAModel](admin.InlineModelAdmin{})),
+				model, "The value of 'inlines[0].model' must be a Model.", "admin.E106")
+		})
+
+		t.Run("test_valid_case", func(t *testing.T) {
+			assertIsValid(t, inlineSite(t, db, tabular(admin.InlineModelAdmin{})))
+		})
+
+		t.Run("FkNameCheckTests.test_missing_field", func(t *testing.T) {
+			site := inlineSite(t, db, tabular(admin.InlineModelAdmin{FKName: "non_existent_field"}))
+			assertInlineIsInvalid(t, site, inlineModel,
+				"'"+inlineModel+"' has no field named 'non_existent_field'.", "admin.E202")
+		})
+
+		t.Run("FkNameCheckTests.test_valid_case", func(t *testing.T) {
+			assertIsValid(t, inlineSite(t, db, tabular(admin.InlineModelAdmin{FKName: "parent"})))
+		})
+
+		t.Run("ExtraCheckTests.test_valid_case", func(t *testing.T) {
+			assertIsValid(t, inlineSite(t, db, tabular(admin.InlineModelAdmin{Extra: new(2)})))
+		})
+
+		t.Run("MaxNumCheckTests.test_valid_case", func(t *testing.T) {
+			assertIsValid(t, inlineSite(t, db, tabular(admin.InlineModelAdmin{MaxNum: new(2)})))
+		})
+
+		t.Run("MinNumCheckTests.test_valid_case", func(t *testing.T) {
+			assertIsValid(t, inlineSite(t, db, tabular(admin.InlineModelAdmin{MinNum: 2})))
+		})
+	})
+}
+
+// TestInlineParentCheck has no Django counterpart: a Django inline takes
+// its parent model from the ModelAdmin, while TabularInline and
+// StackedInline name it as a type parameter, which Register checks.
+func TestInlineParentCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		assertPanics(t, "admin: Register: an inline of admin_test.ValidationTestModel cannot edit admin_test.Band", func() {
+			checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[Band](site, admin.ModelAdmin{Inlines: []admin.Inline{
+					admin.TabularInline[ValidationTestModel, ValidationTestInlineModel](admin.InlineModelAdmin{}),
+				}})
+			})
+		})
+	})
+}
+
+// assertPanics asserts that fn panics with the message want.
+func assertPanics(t *testing.T, want string, fn func()) {
+	t.Helper()
+	defer func() {
+		t.Helper()
+		if got := recover(); got != want {
+			t.Errorf("panic = %v, want %q", got, want)
+		}
+	}()
+	fn()
 }
 
 // Ported from Django: tests/modeladmin/test_checks.py::RawIdCheckTests.test_missing_field
