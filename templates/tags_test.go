@@ -168,7 +168,7 @@ func TestCSRFTokenTagEscapes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderString: %v", err)
 	}
-	want := `<input type="hidden" name="csrfmiddlewaretoken" value="a&#34;&lt;&gt;&amp;b">`
+	want := `<input type="hidden" name="csrfmiddlewaretoken" value="a&quot;&lt;&gt;&amp;b">`
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -176,12 +176,13 @@ func TestCSRFTokenTagEscapes(t *testing.T) {
 
 func TestCSRFTokenTagAbsentToken(t *testing.T) {
 	eng := newStringEngine(t)
-	got, err := eng.RenderString(`{% csrf_token %}`, nil)
-	if err != nil {
-		t.Fatalf("RenderString: %v", err)
-	}
-	want := `<input type="hidden" name="csrfmiddlewaretoken" value="">`
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	for _, ctx := range []map[string]any{nil, {"csrf_token": ""}, {"csrf_token": "NOTPROVIDED"}} {
+		got, err := eng.RenderString(`{% csrf_token %}`, ctx)
+		if err != nil {
+			t.Fatalf("RenderString(%v): %v", ctx, err)
+		}
+		if got != "" {
+			t.Fatalf("RenderString(%v) = %q, want empty", ctx, got)
+		}
 	}
 }

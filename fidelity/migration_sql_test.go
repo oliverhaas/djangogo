@@ -57,21 +57,12 @@ var migrationSQLDivergences = map[dialectCaseKey]string{
 	{dialect: "postgres", name: "add_field_default_char"}: "PostgreSQL AddField emits NOT NULL DEFAULT 'draft' vs Django's DEFAULT 'draft' NOT NULL",
 	{dialect: "postgres", name: "add_field_default_bool"}: "PostgreSQL AddField emits NOT NULL DEFAULT true vs Django's DEFAULT true NOT NULL",
 
-	// PostgreSQL AlterField: unconditional USING on varchar widening.
-	{dialect: "postgres", name: "alter_field_varchar_len"}: "Djan-Go-Go always appends USING col::type on PostgreSQL TYPE changes; Django omits USING when base type is unchanged",
-
 	// PostgreSQL AlterField NULL -> NOT NULL backfill omits SET DEFAULT / SET CONSTRAINTS ALL IMMEDIATE / DROP DEFAULT.
 	{dialect: "postgres", name: "alter_field_null_to_not_null"}: "Djan-Go-Go backfills with UPDATE then SET NOT NULL; Django also emits SET DEFAULT, SET CONSTRAINTS ALL IMMEDIATE, and DROP DEFAULT",
 
 	// PostgreSQL varchar_pattern_ops (_like) indexes on unique CharField changes.
 	{dialect: "postgres", name: "alter_field_add_unique"}:    "Django PostgreSQL creates a companion varchar_pattern_ops _like index for unique varchar columns; Djan-Go-Go omits it",
 	{dialect: "postgres", name: "alter_field_remove_unique"}: "Django PostgreSQL drops the companion varchar_pattern_ops _like index when removing unique; Djan-Go-Go omits it",
-
-	// PostgreSQL RemoveField emits DROP COLUMN ... CASCADE; Django 6.0 drops CASCADE.
-	{dialect: "postgres", name: "remove_field"}: "Djan-Go-Go emits DROP COLUMN ... CASCADE on PostgreSQL; Django 6.0 omits CASCADE",
-
-	// PostgreSQL RemoveIndex omits IF EXISTS.
-	{dialect: "postgres", name: "remove_index"}: "Djan-Go-Go emits DROP INDEX on PostgreSQL; Django emits DROP INDEX IF EXISTS",
 
 	// Derived index rename on RenameModel when the model has FK/field indexes.
 	{dialect: "*", name: "rename_model_with_fk"}: "Djan-Go-Go renames derived indexes when a table is renamed so later operations find them without introspection; Django leaves existing index names untouched",

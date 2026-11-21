@@ -126,7 +126,7 @@ func (e *SchemaEditor) alterFieldPostgres(ctx context.Context, state *ProjectSta
 		}
 	}
 	if shouldIndex(oldF) && (!shouldIndex(newF) || renamed) {
-		if err := e.Execute(ctx, "DROP INDEX "+e.q(e.fieldIndexName(oldMS.Table, oldF.Column))); err != nil {
+		if err := e.Execute(ctx, e.dropIndexSQL(e.fieldIndexName(oldMS.Table, oldF.Column))); err != nil {
 			return err
 		}
 	}
@@ -142,8 +142,15 @@ func (e *SchemaEditor) alterFieldPostgres(ctx context.Context, state *ProjectSta
 		}
 	}
 	if typeChanged {
+		// Django adds USING only when the base type changes, so a new varchar
+		// length or numeric precision stays a cheap metadata change.
 		typ := e.bareType(newF)
-		if err := e.Execute(ctx, alter+"ALTER COLUMN "+col+" TYPE "+typ+" USING "+col+"::"+typ); err != nil {
+		stmt := alter + "ALTER COLUMN " + col + " TYPE " + typ
+		oldBase, _, _ := strings.Cut(e.bareType(oldF), "(")
+		if newBase, _, _ := strings.Cut(typ, "("); oldBase != newBase {
+			stmt += " USING " + col + "::" + typ
+		}
+		if err := e.Execute(ctx, stmt); err != nil {
 			return err
 		}
 	}

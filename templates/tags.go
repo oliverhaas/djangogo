@@ -2,7 +2,6 @@ package templates
 
 import (
 	"fmt"
-	"html"
 	"strings"
 	"sync"
 
@@ -152,16 +151,20 @@ func staticTagParser(_ *pongo2.Parser, _ *pongo2.Token, args *pongo2.Parser) (po
 // csrfTokenTagNode implements {% csrf_token %}.
 type csrfTokenTagNode struct{}
 
-// Execute writes a hidden input carrying the HTML-escaped context value csrf_token
-// (empty string when absent).
+// Execute writes a hidden input carrying the HTML-escaped context value
+// csrf_token. Like Django, it writes nothing when the token is missing, empty or
+// "NOTPROVIDED".
 func (csrfTokenTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter) *pongo2.Error {
 	token := ""
 	if v, ok := ctx.Public["csrf_token"]; ok && v != nil {
 		token = pongo2.AsValue(v).String()
 	}
+	if token == "" || token == "NOTPROVIDED" {
+		return nil
+	}
 	field := fmt.Sprintf(
 		`<input type="hidden" name="csrfmiddlewaretoken" value="%s">`,
-		html.EscapeString(token),
+		escapeHTML(token),
 	)
 	if _, werr := w.WriteString(field); werr != nil {
 		return ctx.OrigError(werr, nil)

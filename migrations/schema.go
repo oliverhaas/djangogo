@@ -334,7 +334,7 @@ func (e *SchemaEditor) removeField(ctx context.Context, state *ProjectState, old
 	if e.isSQLite() {
 		return e.remakeTable(ctx, state, oldMS, newMS, nil)
 	}
-	return e.Execute(ctx, "ALTER TABLE "+e.q(oldMS.Table)+" DROP COLUMN "+e.q(f.Column)+" CASCADE")
+	return e.Execute(ctx, "ALTER TABLE "+e.q(oldMS.Table)+" DROP COLUMN "+e.q(f.Column))
 }
 
 // schemaEqual reports whether two fields produce the same column apart from
@@ -513,5 +513,14 @@ func (e *SchemaEditor) addIndex(ctx context.Context, ms *ModelState, idx Index) 
 
 // removeIndex drops a named index.
 func (e *SchemaEditor) removeIndex(ctx context.Context, name string) error {
-	return e.Execute(ctx, "DROP INDEX "+e.q(name))
+	return e.Execute(ctx, e.dropIndexSQL(name))
+}
+
+// dropIndexSQL renders the statement that drops a named index. PostgreSQL adds
+// IF EXISTS, as Django's PostgreSQL schema editor does.
+func (e *SchemaEditor) dropIndexSQL(name string) string {
+	if e.isSQLite() {
+		return "DROP INDEX " + e.q(name)
+	}
+	return "DROP INDEX IF EXISTS " + e.q(name)
 }

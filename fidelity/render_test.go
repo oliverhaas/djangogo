@@ -34,8 +34,6 @@ var skippedCases = map[string]string{
 	"print_list":                 "a list prints in Go syntax vs Python's repr",
 	"lorem_words":                "pongo2's lorem words start with a capital letter and keep punctuation",
 	"urlize_bracket_punctuation": "Django 6.0.3 drops the punctuation in front of a trailing bracket, which Django's main branch fixed",
-	"csrf_token_escape":          "csrf_token uses html.EscapeString (&#34;) instead of Django's &quot; (templates/tags.go:164)",
-	"csrf_token_missing":         "csrf_token renders an empty hidden input when missing from context vs empty string in Django (templates/tags.go:158-165)",
 }
 
 // loadCases reads and decodes cases.json from the harness directory.

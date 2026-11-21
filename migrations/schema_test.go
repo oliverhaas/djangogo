@@ -141,7 +141,7 @@ func TestAlterFieldPostgresAltersInPlace(t *testing.T) {
 		{
 			title: "wider column",
 			newF:  with(func(f *migrations.FieldState) { f.MaxLength = 50 }),
-			want:  []string{`ALTER TABLE "zoo_pony" ALTER COLUMN "name" TYPE VARCHAR(50) USING "name"::VARCHAR(50);`},
+			want:  []string{`ALTER TABLE "zoo_pony" ALTER COLUMN "name" TYPE VARCHAR(50);`},
 		},
 		{
 			title: "text column",
@@ -167,7 +167,7 @@ func TestAlterFieldPostgresAltersInPlace(t *testing.T) {
 			newF:  with(func(f *migrations.FieldState) { f.Column, f.MaxLength = "title", 30 }),
 			want: []string{
 				`ALTER TABLE "zoo_pony" RENAME COLUMN "name" TO "title";`,
-				`ALTER TABLE "zoo_pony" ALTER COLUMN "title" TYPE VARCHAR(30) USING "title"::VARCHAR(30);`,
+				`ALTER TABLE "zoo_pony" ALTER COLUMN "title" TYPE VARCHAR(30);`,
 			},
 		},
 	}
@@ -200,7 +200,7 @@ func TestAlterFieldPostgresAltersInPlace(t *testing.T) {
 			t.Errorf("unexpected index statement: %s", create)
 		}
 		indexName := strings.Fields(create)[2]
-		djangotest.AssertEqual(t, drop, "DROP INDEX "+indexName+";")
+		djangotest.AssertEqual(t, drop, "DROP INDEX IF EXISTS "+indexName+";")
 		djangotest.AssertEqual(t, collectAlter(t, postgres.New(), unique, name, nil)[0],
 			`ALTER TABLE "zoo_pony" DROP CONSTRAINT "zoo_pony_name_key";`)
 	})
