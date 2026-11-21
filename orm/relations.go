@@ -224,6 +224,13 @@ func RelatedObjects[Child any](db *DB, fkColumn string, parentPK int64) *QuerySe
 // error (including ErrDoesNotExist) is propagated.
 func (f *FK[T]) Fetch(ctx context.Context, db *DB) (*T, error) {
 	if f.loaded {
+		if f.obj == nil {
+			var zero T
+			if m, ok := db.Registry().ModelOf(zero); ok {
+				return nil, doesNotExist(m)
+			}
+			return nil, ErrDoesNotExist
+		}
 		return f.obj, nil
 	}
 	v, err := Query[T](db).Get(ctx, "pk", f.pk)

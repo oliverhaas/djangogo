@@ -33,6 +33,9 @@ func Query[T any](db *DB) *QuerySet[T] {
 // lookup: Filter("author__in", orm.Query[Author](db).Filter(...)).
 func (qs *QuerySet[T]) subquery() *query { return qs.q }
 
+// prefetchQuery exposes the underlying *query for PrefetchSpec.QuerySet.
+func (qs *QuerySet[T]) prefetchQuery() *query { return qs.q }
+
 // SelectRelated returns a clone that loads the named foreign keys in the same
 // query, with a JOIN, and stores each related object on its FK field. A name
 // is the attribute of a forward foreign key ("author"); a double underscore
@@ -45,6 +48,34 @@ func (qs *QuerySet[T]) subquery() *query { return qs.q }
 func (qs *QuerySet[T]) SelectRelated(fields ...string) *QuerySet[T] {
 	cp := qs.q.clone()
 	cp.selectRelated = append(cp.selectRelated, fields...)
+	return &QuerySet[T]{q: cp}
+}
+
+// PrefetchRelated returns a clone that loads the named relations using one
+// batched IN query per relation level and caches the results on the returned
+// model instances. Lookups may be plain "__"-separated relation paths
+// ("comment_set", "tags", "author__profile", "books__read_by") or PrefetchSpec
+// values carrying a custom QuerySet and/or ToAttr cache key.
+//
+// Forward FK and O2O relations are stored directly on the field via SetObject
+// (even on models without orm.RelCache). Reverse FK, reverse O2O, M2M (both
+// sides), and custom ToAttr results are cached in orm.RelCache so subsequent
+// RelatedManager, ManyManager, RelatedOne, and Prefetched calls execute no
+// queries. Calling PrefetchRelated() with no arguments or PrefetchRelated(nil)
+// clears previously configured prefetches, matching Django's
+// prefetch_related(None).
+func (qs *QuerySet[T]) PrefetchRelated(lookups ...any) *QuerySet[T] {
+	cp := qs.q.clone()
+	specs, reset, err := parsePrefetchLookups(lookups)
+	if err != nil {
+		cp.setErr(err)
+		return &QuerySet[T]{q: cp}
+	}
+	if reset {
+		cp.prefetchRelated = nil
+		return &QuerySet[T]{q: cp}
+	}
+	cp.prefetchRelated = append(cp.prefetchRelated, specs...)
 	return &QuerySet[T]{q: cp}
 }
 

@@ -15,18 +15,21 @@ type query struct {
 	model *Model
 	// filters holds one condition per Filter or Exclude call, in call order.
 	// The order matters: each call may change the type of the joins it uses.
-	filters       []Cond
-	m2mFilter     *m2mCoreFilter
-	orders        []orderTerm
-	explicitOrder bool
-	selectRelated []string
-	annotations   []annotation
-	values        *valuesSpec
-	limit         int // -1 means no limit
-	offset        int // 0 means no offset
-	distinct      bool
-	forUpdate     bool
-	err           error
+	filters         []Cond
+	m2mFilter       *m2mCoreFilter
+	m2mPrefetch     *m2mPrefetchFilter
+	orders          []orderTerm
+	explicitOrder   bool
+	selectRelated   []string
+	prefetchRelated []PrefetchSpec
+	prefetchedList  any
+	annotations     []annotation
+	values          *valuesSpec
+	limit           int // -1 means no limit
+	offset          int // 0 means no offset
+	distinct        bool
+	forUpdate       bool
+	err             error
 }
 
 // orderTerm is one ORDER BY term: a field key or annotation name, descending
@@ -67,6 +70,8 @@ func (q *query) clone() *query {
 	cp.filters = append([]Cond(nil), q.filters...)
 	cp.orders = append([]orderTerm(nil), q.orders...)
 	cp.selectRelated = append([]string(nil), q.selectRelated...)
+	cp.prefetchRelated = append([]PrefetchSpec(nil), q.prefetchRelated...)
+	cp.prefetchedList = nil
 	cp.annotations = append([]annotation(nil), q.annotations...)
 	if q.values != nil {
 		v := *q.values

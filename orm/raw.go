@@ -96,12 +96,37 @@ func skipQuoted(s string, start int) int {
 // RawQuerySet maps the rows of a hand-written SELECT to model T, the
 // counterpart of Django's Manager.raw(). Build one with Raw.
 type RawQuerySet[T any] struct {
-	db           *DB
-	model        *Model
-	query        string
-	args         []any
-	translations map[string]string
-	err          error
+	db              *DB
+	model           *Model
+	query           string
+	args            []any
+	translations    map[string]string
+	prefetchRelated []PrefetchSpec
+	err             error
+}
+
+// isRawQuerySet marks RawQuerySet so PrefetchSpec rejects raw querysets.
+func (*RawQuerySet[T]) isRawQuerySet() {}
+
+// PrefetchRelated returns a copy of r that prefetches the given lookups after
+// executing the raw SQL query. Calling PrefetchRelated() with no arguments or
+// PrefetchRelated(nil) clears previously configured prefetches.
+func (r *RawQuerySet[T]) PrefetchRelated(lookups ...any) *RawQuerySet[T] {
+	out := *r
+	out.prefetchRelated = append([]PrefetchSpec(nil), r.prefetchRelated...)
+	specs, reset, err := parsePrefetchLookups(lookups)
+	if err != nil {
+		if out.err == nil {
+			out.err = err
+		}
+		return &out
+	}
+	if reset {
+		out.prefetchRelated = nil
+		return &out
+	}
+	out.prefetchRelated = append(out.prefetchRelated, specs...)
+	return &out
 }
 
 // Raw prepares a hand-written SELECT whose rows are mapped to model T by
@@ -176,6 +201,15 @@ func (r *RawQuerySet[T]) All(ctx context.Context) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(out) > 0 && len(r.prefetchRelated) > 0 {
+		elems := make([]reflect.Value, len(out))
+		for i := range out {
+			elems[i] = reflect.ValueOf(&out[i]).Elem()
+		}
+		if err := prefetchRelatedObjects(ctx, r.db, r.model, elems, r.prefetchRelated); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 
@@ -189,6 +223,15 @@ func (r *RawQuerySet[T]) AllAnnotated(ctx context.Context) ([]Annotated[T], erro
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(out) > 0 && len(r.prefetchRelated) > 0 {
+		elems := make([]reflect.Value, len(out))
+		for i := range out {
+			elems[i] = reflect.ValueOf(&out[i].Object).Elem()
+		}
+		if err := prefetchRelatedObjects(ctx, r.db, r.model, elems, r.prefetchRelated); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }

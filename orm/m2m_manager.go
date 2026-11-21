@@ -55,8 +55,10 @@ func parseManyConfig(opts []ManyOption) manyConfig {
 type manyCore struct {
 	db             *DB
 	ownerModel     *Model
+	ownerVal       reflect.Value
 	ownerInstance  any // pointer to owner struct
 	ownerPK        any
+	cacheName      string
 	declaringModel *Model
 	field          *Field
 	targetModel    *Model
@@ -66,6 +68,14 @@ type manyCore struct {
 	reverse        bool
 	symmetrical    bool
 	err            error
+}
+
+// clearPrefetch removes any cached prefetch list for this M2M relation on the
+// owner instance.
+func (c *manyCore) clearPrefetch() {
+	if c.ownerModel != nil && c.cacheName != "" && c.ownerVal.IsValid() {
+		clearPrefetchListCache(c.ownerModel, c.ownerVal, c.cacheName)
+	}
 }
 
 // newManyCore builds a manyCore by resolving forward or reverse M2M name on owner.
@@ -88,6 +98,7 @@ func newManyCore(db *DB, owner any, name string, wantTarget reflect.Type) manyCo
 		target    *Model
 		sourceFK  *Field
 		targetFK  *Field
+		cacheName string
 		reverse   bool
 	)
 
@@ -97,6 +108,7 @@ func newManyCore(db *DB, owner any, name string, wantTarget reflect.Type) manyCo
 		target = f.Rel.Target
 		sourceFK = f.Rel.SourceField
 		targetFK = f.Rel.TargetField
+		cacheName = f.Attr
 		reverse = false
 	} else {
 		rev, found, ambiguous := ownerModel.lookupReverseAccessor(name)
@@ -116,6 +128,7 @@ func newManyCore(db *DB, owner any, name string, wantTarget reflect.Type) manyCo
 		target = rev.Source
 		sourceFK = rev.Field.Rel.TargetField
 		targetFK = rev.Field.Rel.SourceField
+		cacheName = rev.Name
 		reverse = true
 	}
 
@@ -138,8 +151,10 @@ func newManyCore(db *DB, owner any, name string, wantTarget reflect.Type) manyCo
 	}
 
 	core.ownerModel = ownerModel
+	core.ownerVal = ownerVal
 	core.ownerInstance = ownerPtr.Interface()
 	core.ownerPK = ownerPK
+	core.cacheName = cacheName
 	core.declaringModel = declaring
 	core.field = field
 	core.targetModel = target
@@ -196,6 +211,9 @@ func (m *ManyManager[T]) QuerySet() *QuerySet[T] {
 		sourceField: m.core.sourceFK,
 		ownerPK:     m.core.ownerPK,
 	}
+	if items, _, ok := getPrefetchListCache(m.core.ownerModel, m.core.ownerVal, m.core.cacheName); ok {
+		cp.prefetchedList = items
+	}
 	return &QuerySet[T]{q: cp}
 }
 
@@ -229,11 +247,17 @@ func (m *ManyManager[T]) First(ctx context.Context) (T, error) {
 	return m.QuerySet().First(ctx)
 }
 
-// Count returns the number of related T rows, querying the through table
-// directly without joining the target table (matching Django's optimization).
+// Count returns the number of related T rows, reading from the prefetch cache
+// when populated and otherwise querying the through table directly without
+// joining the target table (matching Django's optimization).
 func (m *ManyManager[T]) Count(ctx context.Context) (int64, error) {
 	if m.core.err != nil {
 		return 0, m.core.err
+	}
+	if items, _, ok := getPrefetchListCache(m.core.ownerModel, m.core.ownerVal, m.core.cacheName); ok {
+		if slice, ok := items.([]T); ok {
+			return int64(len(slice)), nil
+		}
 	}
 	d := m.core.db.dialect
 	w := newSQLWriter(d)
@@ -259,11 +283,17 @@ func (m *ManyManager[T]) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-// Exists reports whether any T row is related to the owner, querying the
-// through table directly without joining the target table.
+// Exists reports whether any T row is related to the owner, reading from the
+// prefetch cache when populated and otherwise querying the through table
+// directly without joining the target table.
 func (m *ManyManager[T]) Exists(ctx context.Context) (bool, error) {
 	if m.core.err != nil {
 		return false, m.core.err
+	}
+	if items, _, ok := getPrefetchListCache(m.core.ownerModel, m.core.ownerVal, m.core.cacheName); ok {
+		if slice, ok := items.([]T); ok {
+			return len(slice) > 0, nil
+		}
 	}
 	d := m.core.db.dialect
 	w := newSQLWriter(d)

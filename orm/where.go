@@ -218,6 +218,32 @@ func (c *compiler) addFilters() error {
 		}
 		root.children = append(root.children, whereChild{pred: pred})
 	}
+	if mp := c.q.m2mPrefetch; mp != nil && c.q.model != nil && c.q.model.PrimaryKey() != nil {
+		h := hop{
+			fromColumn: c.q.model.PrimaryKey().Column,
+			target:     mp.through,
+			toColumn:   mp.targetFK.Column,
+			nullable:   false,
+			many:       true,
+		}
+		joins := c.joins.setup([]hop{h}, nil)
+		c.joins.demote(joins)
+		c.m2mPrefetchJoin = joins[0]
+		pred := &predicate{
+			lookup: lookupIn,
+			lhs:    colNode{join: joins[0], field: mp.sourceFK},
+			rhs:    make([]sqlNode, 0, len(mp.parentPKs)),
+		}
+		for _, pk := range mp.parentPKs {
+			arg, err := bindField(c.d, mp.sourceFK, pk)
+			if err != nil {
+				return err
+			}
+			pred.rhs = append(pred.rhs, paramNode{value: arg})
+		}
+		pred.empty = len(pred.rhs) == 0
+		root.children = append(root.children, whereChild{pred: pred})
+	}
 	for _, cond := range c.q.filters {
 		if cond.err != nil {
 			return cond.err
