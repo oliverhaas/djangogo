@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -60,9 +61,12 @@ type ValidationTestModel struct {
 	Slug       string             `orm:"type=slug"`
 	Users      orm.M2M[auth.User] `orm:"related_name=validationtestmodels"`
 	State      string             `orm:"max_length=2"`
+	IsActive   bool               `orm:"default=false"`
 	PubDate    time.Time
 	Band       orm.FK[Band]       `orm:"on_delete=cascade"`
 	BestFriend orm.O2O[auth.User] `orm:"on_delete=cascade;related_name=best_friend"`
+	// No is intentionally 2 characters long, as in Django (#16080).
+	No *int64 `orm:"null;blank;verbose_name=Number"`
 }
 
 // Meta gives state the choices of Django's ValidationTestModel.
@@ -870,6 +874,246 @@ func TestListDisplayEditableCheck(t *testing.T) {
 			assertIsInvalid(t, site, model,
 				"The value of 'name' cannot be in both 'list_editable' and 'list_display_links'.",
 				"admin.E123")
+		})
+	})
+}
+
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayLinksCheckTests.test_missing_field
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayLinksCheckTests.test_missing_in_list_display
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayLinksCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayLinksCheckTests.test_None_is_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::ListDisplayLinksCheckTests.test_list_display_links_check_skipped_if_get_list_display_overridden
+func TestListDisplayLinksCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		// No Go counterpart: test_not_iterable and
+		// test_list_display_link_checked_for_list_tuple_if_get_list_display_overridden
+		// (admin.E110) check the type of list_display_links, which Go fixes at
+		// compile time: ListDisplayLinks is a []string.
+		const model = "modeladmin.ValidationTestModel"
+		register := func(a admin.ModelAdmin) *admin.AdminSite {
+			return checkSite(t, db, func(site *admin.AdminSite) { admin.Register[ValidationTestModel](site, a) })
+		}
+
+		t.Run("test_missing_field", func(t *testing.T) {
+			assertIsInvalid(t, register(admin.ModelAdmin{ListDisplayLinks: []string{"non_existent_field"}}), model,
+				"The value of 'list_display_links[0]' refers to 'non_existent_field', which is not defined in 'list_display'.",
+				"admin.E111")
+		})
+
+		t.Run("test_missing_in_list_display", func(t *testing.T) {
+			assertIsInvalid(t, register(admin.ModelAdmin{ListDisplayLinks: []string{"name"}}), model,
+				"The value of 'list_display_links[0]' refers to 'name', which is not defined in 'list_display'.",
+				"admin.E111")
+		})
+
+		t.Run("test_valid_case", func(t *testing.T) {
+			// DisplayColumns stand in for the method and the callable.
+			columns := []string{"name", "decade_published_in", "a_method", "a_callable"}
+			assertIsValid(t, register(admin.ModelAdmin{
+				ListDisplay:      columns,
+				ListDisplayLinks: columns,
+				DisplayColumns: map[string]admin.DisplayColumn{
+					"decade_published_in": {Value: func(any) any { return "" }},
+					"a_method":            {Value: func(any) any { return "" }},
+					"a_callable":          {Value: func(any) any { return "" }},
+				},
+			}))
+		})
+
+		t.Run("test_None_is_valid_case", func(t *testing.T) {
+			// An empty ListDisplayLinks is Django's list_display_links = None.
+			assertIsValid(t, register(admin.ModelAdmin{ListDisplayLinks: []string{}}))
+		})
+
+		t.Run("test_list_display_links_check_skipped_if_get_list_display_overridden", func(t *testing.T) {
+			assertIsValid(t, register(admin.ModelAdmin{
+				ListDisplayLinks: []string{"name", "subtitle"},
+				GetListDisplay:   func(*http.Request) []string { return nil },
+			}))
+		})
+	})
+}
+
+// listFilterE113 is the Go message of Django's admin.E113 for list_filter[0].
+// Django says the value "must inherit from 'ListFilter'"; a Go list filter is
+// a field name, an admin.FieldFilter or an admin.SimpleListFilter.
+const listFilterE113 = "The value of 'list_filter[0]' must be a field name, a FieldFilter, or a SimpleListFilter."
+
+// Ported from Django: tests/modeladmin/test_checks.py::ListFilterTests.test_not_list_filter_class
+// Ported from Django: tests/modeladmin/test_checks.py::ListFilterTests.test_callable
+// Ported from Django: tests/modeladmin/test_checks.py::ListFilterTests.test_missing_field
+// Ported from Django: tests/modeladmin/test_checks.py::ListFilterTests.test_not_filter
+// Ported from Django: tests/modeladmin/test_checks.py::ListFilterTests.test_list_filter_is_func
+// Ported from Django: tests/modeladmin/test_checks.py::ListFilterTests.test_valid_case
+func TestListFilterCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		// No Go counterpart: test_list_filter_validation (admin.E112) checks the
+		// type of list_filter, a []any in Go. test_not_callable,
+		// test_not_filter_again and test_not_filter_again_again (admin.E115)
+		// pair a field with a class that is not a FieldListFilter, and
+		// test_not_associated_with_field_name (admin.E114) passes a
+		// FieldListFilter class without a field: a Go FieldFilter names its
+		// field and picks its filter with FieldFilterKind, so neither mistake
+		// can be written.
+		const model = "modeladmin.ValidationTestModel"
+		register := func(filters ...any) *admin.AdminSite {
+			return checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{ListFilter: filters})
+			})
+		}
+		e116 := func(name string) string {
+			return "The value of 'list_filter[0]' refers to '" + name + "', which does not refer to a Field."
+		}
+
+		t.Run("test_not_list_filter_class", func(t *testing.T) {
+			assertIsInvalid(t, register("RandomClass"), model, e116("RandomClass"), "admin.E116")
+		})
+
+		t.Run("test_callable", func(t *testing.T) {
+			assertIsInvalid(t, register(func() {}), model, listFilterE113, "admin.E113")
+		})
+
+		t.Run("test_missing_field", func(t *testing.T) {
+			assertIsInvalid(t, register("non_existent_field"), model, e116("non_existent_field"), "admin.E116")
+		})
+
+		t.Run("test_not_filter", func(t *testing.T) {
+			type RandomClass struct{}
+			assertIsInvalid(t, register(RandomClass{}), model, listFilterE113, "admin.E113")
+		})
+
+		t.Run("test_list_filter_is_func", func(t *testing.T) {
+			getFilter := func() admin.SimpleListFilter { return admin.SimpleListFilter{} }
+			assertIsInvalid(t, register(getFilter), model, listFilterE113, "admin.E113")
+		})
+
+		t.Run("test_valid_case", func(t *testing.T) {
+			awesome := admin.SimpleListFilter{
+				Title:         "awesomeness",
+				ParameterName: "awesomeness",
+				Lookups: func(*http.Request) []admin.FilterLookup {
+					return []admin.FilterLookup{{Value: "bit", Display: "A bit awesome"}, {Value: "very", Display: "Very awesome"}}
+				},
+			}
+			assertIsValid(t, register("is_active", awesome, admin.BooleanFilter("is_active"), "no"))
+		})
+
+		// No Django test exists: Django does not check the field of a
+		// (field, FieldListFilter) pair and fails on the changelist instead. A
+		// Go FieldFilter with an unknown field shows no filter, so the check
+		// reports it.
+		t.Run("field_filter_missing_field", func(t *testing.T) {
+			assertIsInvalid(t, register(admin.BooleanFilter("non_existent_field")), model,
+				e116("non_existent_field"), "admin.E116")
+		})
+
+		// No Django test exists: a name that ends in a lookup, rather than a
+		// field, is no field either.
+		t.Run("lookup_is_not_a_field", func(t *testing.T) {
+			assertIsInvalid(t, register("name__exact"), model, e116("name__exact"), "admin.E116")
+		})
+
+		// No Django test exists: a path across a relation names a field.
+		t.Run("related_field", func(t *testing.T) {
+			assertIsValid(t, register("band__name", "users", "band"))
+		})
+	})
+}
+
+// Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_not_iterable
+// Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_random_marker_not_alone
+// Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_valid_random_marker_case
+// Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_valid_complex_case
+// Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_valid_case
+func TestOrderingCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		// No Go counterpart: test_invalid_expression and
+		// test_valid_expression order by F() and OrderBy expressions, and the
+		// admin.E031 half of test_not_iterable checks the type of ordering:
+		// Ordering is a []string.
+		const model = "modeladmin.ValidationTestModel"
+		register := func(ordering ...string) *admin.AdminSite {
+			return checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{Ordering: ordering})
+			})
+		}
+
+		t.Run("test_not_iterable", func(t *testing.T) {
+			assertIsInvalid(t, register("non_existent_field"), model,
+				"The value of 'ordering[0]' refers to 'non_existent_field', which is not a field of 'modeladmin.ValidationTestModel'.",
+				"admin.E033")
+		})
+
+		t.Run("test_random_marker_not_alone", func(t *testing.T) {
+			assertIsInvalid(t, register("?", "name"), model,
+				"The value of 'ordering' has the random ordering marker '?', but contains other fields as well.",
+				"admin.E032", `Either remove the "?", or remove the other fields.`)
+		})
+
+		t.Run("test_valid_random_marker_case", func(t *testing.T) {
+			assertIsValid(t, register("?"))
+		})
+
+		t.Run("test_valid_complex_case", func(t *testing.T) {
+			assertIsValid(t, register("band__name"))
+		})
+
+		t.Run("test_valid_case", func(t *testing.T) {
+			assertIsValid(t, register("name", "pk"))
+		})
+
+		// No Django test exists: a descending name is checked without its
+		// "-".
+		t.Run("descending_missing_field", func(t *testing.T) {
+			assertIsInvalid(t, register("-non_existent_field"), model,
+				"The value of 'ordering[0]' refers to 'non_existent_field', which is not a field of 'modeladmin.ValidationTestModel'.",
+				"admin.E033")
+		})
+
+		// No Django test exists: the ordering of an inline is checked too, as
+		// Django's BaseModelAdminChecks checks it for an InlineModelAdmin.
+		t.Run("inline", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{Inlines: []admin.Inline{
+					admin.TabularInline[ValidationTestModel, ValidationTestInlineModel](admin.InlineModelAdmin{Ordering: []string{"non_existent_field"}}),
+				}})
+			})
+			assertInlineIsInvalid(t, site, "modeladmin.ValidationTestInlineModel",
+				"The value of 'ordering[0]' refers to 'non_existent_field', which is not a field of 'modeladmin.ValidationTestInlineModel'.",
+				"admin.E033")
+		})
+	})
+}
+
+// Ported from Django: tests/modeladmin/test_checks.py::ActionsCheckTests.test_actions_not_unique
+// Ported from Django: tests/modeladmin/test_checks.py::ActionsCheckTests.test_actions_unique
+func TestActionsCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		// No Go counterpart: test_custom_permissions_require_matching_has_method
+		// (admin.E129). A custom permission of a Go action without an entry in
+		// ModelAdmin.CustomPermissions checks the user's model permission of
+		// that name, so no method is missing.
+		register := func(actions ...admin.Action) *admin.AdminSite {
+			return checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[Band](site, admin.ModelAdmin{Actions: actions})
+			})
+		}
+
+		t.Run("test_actions_not_unique", func(t *testing.T) {
+			action := admin.Action{Name: "action"}
+			assertIsInvalid(t, register(action, action), "modeladmin.Band",
+				"Name attributes of actions defined in ModelAdmin must be unique. Name 'action' is not unique.",
+				"admin.E130")
+		})
+
+		t.Run("test_actions_unique", func(t *testing.T) {
+			assertIsValid(t, register(admin.Action{Name: "action1"}, admin.Action{Name: "action2"}))
+		})
+
+		// No Django test exists: an action of the ModelAdmin replaces the site
+		// action of the same name, so the two names do not clash.
+		t.Run("overrides_site_action", func(t *testing.T) {
+			assertIsValid(t, register(admin.Action{Name: "delete_selected"}))
 		})
 	})
 }

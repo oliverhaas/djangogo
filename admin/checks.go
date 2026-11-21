@@ -30,10 +30,12 @@ func (o adminObject) Label() string { return o.kind + " of " + o.model.Label() }
 // admin.E011, admin.E012, admin.E013), ExcludeFields (admin.E015),
 // FilterVertical and FilterHorizontal (admin.E013, admin.E019, admin.E020),
 // RadioFields (admin.E022, admin.E023, admin.E024), PrepopulatedFields
-// (admin.E027, admin.E028, admin.E030), ReadonlyFields (admin.E035), the
-// inlines (see checkInlines), ListDisplay (admin.E108, admin.E109),
-// ListEditable (admin.E121, admin.E122, admin.E123, admin.E124, admin.E125),
-// then DateHierarchy (admin.E127, admin.E128).
+// (admin.E027, admin.E028, admin.E030), Ordering (admin.E032, admin.E033),
+// ReadonlyFields (admin.E035), the inlines (see checkInlines), ListDisplay
+// (admin.E108, admin.E109), ListDisplayLinks (admin.E111), ListFilter
+// (admin.E113, admin.E116), ListEditable (admin.E121, admin.E122,
+// admin.E123, admin.E124, admin.E125), DateHierarchy (admin.E127,
+// admin.E128), then Actions (admin.E130).
 func (s *AdminSite) Check() []checks.Message {
 	var out []checks.Message
 	for _, e := range s.entries {
@@ -43,10 +45,13 @@ func (s *AdminSite) Check() []checks.Message {
 		for i, name := range e.admin.ListDisplay {
 			out = append(out, checkListDisplayItem(e, obj, name, fmt.Sprintf("list_display[%d]", i))...)
 		}
+		out = append(out, checkListDisplayLinks(e, obj)...)
+		out = append(out, checkListFilter(e, obj)...)
 		for i, name := range e.admin.ListEditable {
 			out = append(out, checkListEditableItem(e, obj, name, fmt.Sprintf("list_editable[%d]", i))...)
 		}
 		out = append(out, checkDateHierarchy(e, obj)...)
+		out = append(out, checkActions(e, obj)...)
 	}
 	return out
 }
@@ -75,6 +80,7 @@ func (s *AdminSite) checkBase(e *entry, obj adminObject) []checks.Message {
 	}
 	out = append(out, checkRadioFields(e, obj)...)
 	out = append(out, checkPrepopulated(e, obj)...)
+	out = append(out, checkOrdering(e, obj)...)
 	for i, name := range e.admin.ReadonlyFields {
 		out = append(out, checkReadonlyItem(e, obj, name, fmt.Sprintf("readonly_fields[%d]", i))...)
 	}
@@ -307,6 +313,115 @@ func checkReadonlyItem(e *entry, obj adminObject, name, label string) []checks.M
 	return []checks.Message{checks.Error(fmt.Sprintf(
 		"The value of '%s' refers to '%s', which is not a callable, an attribute of '%s', or an attribute of '%s'.",
 		label, name, obj.kind, e.model.Label()), checks.Obj(obj), checks.ID("admin.E035"))}
+}
+
+// checkOrdering checks Ordering, Django's _check_ordering: the random marker
+// "?" stands alone, and each name is "pk" or a field of the model, with or
+// without a leading "-". Django skips the names that span relations.
+func checkOrdering(e *entry, obj adminObject) []checks.Message {
+	ordering := e.admin.Ordering
+	var out []checks.Message
+	for i, name := range ordering {
+		if name == "?" {
+			if len(ordering) != 1 {
+				out = append(out, checks.Error(
+					"The value of 'ordering' has the random ordering marker '?', but contains other fields as well.",
+					checks.Hint(`Either remove the "?", or remove the other fields.`),
+					checks.Obj(obj), checks.ID("admin.E032")))
+			}
+			continue
+		}
+		field := strings.TrimPrefix(name, "-")
+		if strings.Contains(field, "__") || field == "pk" {
+			continue
+		}
+		if _, ok := relationOrField(e.model, field); !ok {
+			out = append(out, checks.Error(fmt.Sprintf(
+				"The value of 'ordering[%d]' refers to '%s', which is not a field of '%s'.", i, field, e.model.Label()),
+				checks.Obj(obj), checks.ID("admin.E033")))
+		}
+	}
+	return out
+}
+
+// checkListDisplayLinks checks ListDisplayLinks, Django's
+// _check_list_display_links: each entry is a column of ListDisplay. Django
+// skips the check when the admin overrides get_list_display, as when
+// GetListDisplay is set.
+func checkListDisplayLinks(e *entry, obj adminObject) []checks.Message {
+	if e.admin.GetListDisplay != nil {
+		return nil
+	}
+	display := e.admin.ListDisplay
+	if len(display) == 0 {
+		display = []string{"__str__"}
+	}
+	var out []checks.Message
+	for i, name := range e.admin.ListDisplayLinks {
+		link := normalizeFieldPath(e.model, name)
+		if !slices.ContainsFunc(display, func(d string) bool { return normalizeFieldPath(e.model, d) == link }) {
+			out = append(out, checks.Error(fmt.Sprintf(
+				"The value of 'list_display_links[%d]' refers to '%s', which is not defined in 'list_display'.", i, name),
+				checks.Obj(obj), checks.ID("admin.E111")))
+		}
+	}
+	return out
+}
+
+// checkListFilter checks ListFilter, Django's _check_list_filter: each entry
+// is a field name, a FieldFilter or a SimpleListFilter (admin.E113), and a
+// field name names a field of the model or of a related model (admin.E116).
+// Django checks the field of a (field, FieldListFilter) pair only on the
+// changelist; the field of a FieldFilter is checked here.
+func checkListFilter(e *entry, obj adminObject) []checks.Message {
+	var out []checks.Message
+	for i, item := range e.admin.ListFilter {
+		var name string
+		switch v := item.(type) {
+		case SimpleListFilter, *SimpleListFilter:
+			continue
+		case string:
+			name = v
+		case FieldFilter:
+			name = v.Field
+		default:
+			out = append(out, checks.Error(fmt.Sprintf(
+				"The value of 'list_filter[%d]' must be a field name, a FieldFilter, or a SimpleListFilter.", i),
+				checks.Obj(obj), checks.ID("admin.E113")))
+			continue
+		}
+		info, ok := orm.ResolveLookupPath(e.model, normalizeFieldPath(e.model, name))
+		if !ok || info.Lookup != "" {
+			out = append(out, checks.Error(fmt.Sprintf(
+				"The value of 'list_filter[%d]' refers to '%s', which does not refer to a Field.", i, name),
+				checks.Obj(obj), checks.ID("admin.E116")))
+		}
+	}
+	return out
+}
+
+// checkActions checks Actions, Django's _check_actions: no two actions of
+// the ModelAdmin share a name. An action of the ModelAdmin replaces the site
+// action of the same name, and AddAction keeps the site's names unique, so
+// only the ModelAdmin's own actions can clash.
+func checkActions(e *entry, obj adminObject) []checks.Message {
+	counts := make(map[string]int, len(e.admin.Actions))
+	var names []string
+	for _, a := range e.admin.Actions {
+		if counts[a.Name] == 0 {
+			names = append(names, a.Name)
+		}
+		counts[a.Name]++
+	}
+	var out []checks.Message
+	for _, name := range names {
+		if counts[name] > 1 {
+			out = append(out, checks.Error(fmt.Sprintf(
+				"Name attributes of actions defined in ModelAdmin must be unique. Name '%s' is not unique.", name),
+				checks.Obj(obj), checks.ID("admin.E130")))
+		}
+	}
+	return out
 }
 
 // duplicates returns the form names that occur more than once in names, in

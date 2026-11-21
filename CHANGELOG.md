@@ -497,6 +497,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `admin.ShowFacetsNever` hides the counts and the link. Each filter with
   counts runs one more query. A choice of a `SimpleListFilter` whose `Filter`
   returns no condition shows "(-)".
+- Admin: `check` reports these configuration mistakes, which the changelist
+  ignores or fails on: a `ListDisplayLinks` entry that is not a column of
+  `ListDisplay` (admin.E111); a `ListFilter` entry that is not a field name, a
+  `FieldFilter` or a `SimpleListFilter` (admin.E113), or that names no field
+  (admin.E116); an `Ordering` with `"?"` and other names (admin.E032), or with
+  a name that is no field of the model, also on an inline (admin.E033); two
+  `Actions` with the same name (admin.E130). Run `check` after the upgrade.
 
 ### Changed
 
