@@ -232,6 +232,54 @@ func canonicalMigrationCases() []migrationCase {
 			},
 		},
 		{
+			name:  "alter_field_char_to_text",
+			setup: []migrations.Operation{authorOp, articleOp},
+			target: []migrations.Operation{
+				migrations.AlterField{
+					Model: "Article",
+					Field: migrations.FieldState{Name: "Title", Column: "title", Kind: orm.KindText},
+				},
+			},
+		},
+		{
+			name:  "alter_field_int_to_decimal",
+			setup: []migrations.Operation{authorOp, articleOp},
+			target: []migrations.Operation{
+				migrations.AlterField{
+					Model: "Article",
+					Field: migrations.FieldState{
+						Name: "Rank", Column: "rank", Kind: orm.KindDecimal, MaxDigits: 10, DecimalPlaces: 2,
+					},
+				},
+			},
+		},
+		{
+			name:  "alter_field_add_positive_check",
+			setup: []migrations.Operation{authorOp, articleOp},
+			target: []migrations.Operation{
+				migrations.AlterField{
+					Model: "Article",
+					Field: migrations.FieldState{Name: "Rank", Column: "rank", Kind: orm.KindPositiveSmallInt},
+				},
+			},
+		},
+		{
+			name: "alter_field_drop_positive_check",
+			setup: []migrations.Operation{migrations.CreateModel{
+				Name: "Article",
+				Fields: []migrations.FieldState{
+					idField,
+					{Name: "Rank", Column: "rank", Kind: orm.KindPositiveSmallInt},
+				},
+			}},
+			target: []migrations.Operation{
+				migrations.AlterField{
+					Model: "Article",
+					Field: migrations.FieldState{Name: "Rank", Column: "rank", Kind: orm.KindSmallInt},
+				},
+			},
+		},
+		{
 			name:  "alter_field_null_to_not_null",
 			setup: []migrations.Operation{authorOp, articleOp},
 			target: []migrations.Operation{

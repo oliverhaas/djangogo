@@ -1143,6 +1143,338 @@
       }
     },
     {
+      "name": "alter_field_char_to_text",
+      "statements": [
+        "CREATE TABLE \"new__migfid_article\" (\"id\" integer NOT NULL PRIMARY KEY AUTOINCREMENT, \"rank\" smallint NOT NULL, \"summary\" varchar(200) NULL, \"author_id\" bigint NOT NULL REFERENCES \"migfid_author\" (\"id\") DEFERRABLE INITIALLY DEFERRED, \"title\" text NOT NULL);",
+        "INSERT INTO \"new__migfid_article\" (\"id\", \"rank\", \"summary\", \"author_id\", \"title\") SELECT \"id\", \"rank\", \"summary\", \"author_id\", \"title\" FROM \"migfid_article\";",
+        "DROP TABLE \"migfid_article\";",
+        "ALTER TABLE \"new__migfid_article\" RENAME TO \"migfid_article\";",
+        "CREATE INDEX \"migfid_article_author_id_bfd2a990\" ON \"migfid_article\" (\"author_id\");"
+      ],
+      "sqlite_rebuild": true,
+      "schema": {
+        "tables": {
+          "migfid_article": {
+            "columns": [
+              {
+                "name": "id",
+                "type": "INTEGER",
+                "notnull": true,
+                "pk": 1
+              },
+              {
+                "name": "rank",
+                "type": "smallint",
+                "notnull": true,
+                "pk": 0
+              },
+              {
+                "name": "summary",
+                "type": "varchar(200)",
+                "notnull": false,
+                "pk": 0
+              },
+              {
+                "name": "author_id",
+                "type": "bigint",
+                "notnull": true,
+                "pk": 0
+              },
+              {
+                "name": "title",
+                "type": "TEXT",
+                "notnull": true,
+                "pk": 0
+              }
+            ],
+            "indexes": [
+              {
+                "name": "migfid_article_author_id_bfd2a990",
+                "unique": false,
+                "origin": "c",
+                "columns": [
+                  "author_id"
+                ]
+              }
+            ],
+            "foreign_keys": [
+              {
+                "table": "migfid_author",
+                "from": "author_id",
+                "to": "id",
+                "on_delete": "NO ACTION"
+              }
+            ]
+          },
+          "migfid_author": {
+            "columns": [
+              {
+                "name": "id",
+                "type": "INTEGER",
+                "notnull": true,
+                "pk": 1
+              },
+              {
+                "name": "name",
+                "type": "varchar(100)",
+                "notnull": true,
+                "pk": 0
+              },
+              {
+                "name": "code",
+                "type": "varchar(20)",
+                "notnull": true,
+                "pk": 0
+              }
+            ],
+            "indexes": [
+              {
+                "name": "sqlite_autoindex_migfid_author_1",
+                "unique": true,
+                "origin": "u",
+                "columns": [
+                  "code"
+                ]
+              }
+            ],
+            "foreign_keys": []
+          }
+        }
+      }
+    },
+    {
+      "name": "alter_field_int_to_decimal",
+      "statements": [
+        "CREATE TABLE \"new__migfid_article\" (\"id\" integer NOT NULL PRIMARY KEY AUTOINCREMENT, \"title\" varchar(100) NOT NULL, \"summary\" varchar(200) NULL, \"author_id\" bigint NOT NULL REFERENCES \"migfid_author\" (\"id\") DEFERRABLE INITIALLY DEFERRED, \"rank\" decimal NOT NULL);",
+        "INSERT INTO \"new__migfid_article\" (\"id\", \"title\", \"summary\", \"author_id\", \"rank\") SELECT \"id\", \"title\", \"summary\", \"author_id\", \"rank\" FROM \"migfid_article\";",
+        "DROP TABLE \"migfid_article\";",
+        "ALTER TABLE \"new__migfid_article\" RENAME TO \"migfid_article\";",
+        "CREATE INDEX \"migfid_article_author_id_bfd2a990\" ON \"migfid_article\" (\"author_id\");"
+      ],
+      "sqlite_rebuild": true,
+      "schema": {
+        "tables": {
+          "migfid_article": {
+            "columns": [
+              {
+                "name": "id",
+                "type": "INTEGER",
+                "notnull": true,
+                "pk": 1
+              },
+              {
+                "name": "title",
+                "type": "varchar(100)",
+                "notnull": true,
+                "pk": 0
+              },
+              {
+                "name": "summary",
+                "type": "varchar(200)",
+                "notnull": false,
+                "pk": 0
+              },
+              {
+                "name": "author_id",
+                "type": "bigint",
+                "notnull": true,
+                "pk": 0
+              },
+              {
+                "name": "rank",
+                "type": "decimal",
+                "notnull": true,
+                "pk": 0
+              }
+            ],
+            "indexes": [
+              {
+                "name": "migfid_article_author_id_bfd2a990",
+                "unique": false,
+                "origin": "c",
+                "columns": [
+                  "author_id"
+                ]
+              }
+            ],
+            "foreign_keys": [
+              {
+                "table": "migfid_author",
+                "from": "author_id",
+                "to": "id",
+                "on_delete": "NO ACTION"
+              }
+            ]
+          },
+          "migfid_author": {
+            "columns": [
+              {
+                "name": "id",
+                "type": "INTEGER",
+                "notnull": true,
+                "pk": 1
+              },
+              {
+                "name": "name",
+                "type": "varchar(100)",
+                "notnull": true,
+                "pk": 0
+              },
+              {
+                "name": "code",
+                "type": "varchar(20)",
+                "notnull": true,
+                "pk": 0
+              }
+            ],
+            "indexes": [
+              {
+                "name": "sqlite_autoindex_migfid_author_1",
+                "unique": true,
+                "origin": "u",
+                "columns": [
+                  "code"
+                ]
+              }
+            ],
+            "foreign_keys": []
+          }
+        }
+      }
+    },
+    {
+      "name": "alter_field_add_positive_check",
+      "statements": [
+        "CREATE TABLE \"new__migfid_article\" (\"id\" integer NOT NULL PRIMARY KEY AUTOINCREMENT, \"title\" varchar(100) NOT NULL, \"summary\" varchar(200) NULL, \"author_id\" bigint NOT NULL REFERENCES \"migfid_author\" (\"id\") DEFERRABLE INITIALLY DEFERRED, \"rank\" smallint unsigned NOT NULL CHECK (\"rank\" >= 0));",
+        "INSERT INTO \"new__migfid_article\" (\"id\", \"title\", \"summary\", \"author_id\", \"rank\") SELECT \"id\", \"title\", \"summary\", \"author_id\", \"rank\" FROM \"migfid_article\";",
+        "DROP TABLE \"migfid_article\";",
+        "ALTER TABLE \"new__migfid_article\" RENAME TO \"migfid_article\";",
+        "CREATE INDEX \"migfid_article_author_id_bfd2a990\" ON \"migfid_article\" (\"author_id\");"
+      ],
+      "sqlite_rebuild": true,
+      "schema": {
+        "tables": {
+          "migfid_article": {
+            "columns": [
+              {
+                "name": "id",
+                "type": "INTEGER",
+                "notnull": true,
+                "pk": 1
+              },
+              {
+                "name": "title",
+                "type": "varchar(100)",
+                "notnull": true,
+                "pk": 0
+              },
+              {
+                "name": "summary",
+                "type": "varchar(200)",
+                "notnull": false,
+                "pk": 0
+              },
+              {
+                "name": "author_id",
+                "type": "bigint",
+                "notnull": true,
+                "pk": 0
+              },
+              {
+                "name": "rank",
+                "type": "smallint unsigned",
+                "notnull": true,
+                "pk": 0
+              }
+            ],
+            "indexes": [
+              {
+                "name": "migfid_article_author_id_bfd2a990",
+                "unique": false,
+                "origin": "c",
+                "columns": [
+                  "author_id"
+                ]
+              }
+            ],
+            "foreign_keys": [
+              {
+                "table": "migfid_author",
+                "from": "author_id",
+                "to": "id",
+                "on_delete": "NO ACTION"
+              }
+            ]
+          },
+          "migfid_author": {
+            "columns": [
+              {
+                "name": "id",
+                "type": "INTEGER",
+                "notnull": true,
+                "pk": 1
+              },
+              {
+                "name": "name",
+                "type": "varchar(100)",
+                "notnull": true,
+                "pk": 0
+              },
+              {
+                "name": "code",
+                "type": "varchar(20)",
+                "notnull": true,
+                "pk": 0
+              }
+            ],
+            "indexes": [
+              {
+                "name": "sqlite_autoindex_migfid_author_1",
+                "unique": true,
+                "origin": "u",
+                "columns": [
+                  "code"
+                ]
+              }
+            ],
+            "foreign_keys": []
+          }
+        }
+      }
+    },
+    {
+      "name": "alter_field_drop_positive_check",
+      "statements": [
+        "CREATE TABLE \"new__migfid_article\" (\"id\" integer NOT NULL PRIMARY KEY AUTOINCREMENT, \"rank\" smallint NOT NULL);",
+        "INSERT INTO \"new__migfid_article\" (\"id\", \"rank\") SELECT \"id\", \"rank\" FROM \"migfid_article\";",
+        "DROP TABLE \"migfid_article\";",
+        "ALTER TABLE \"new__migfid_article\" RENAME TO \"migfid_article\";"
+      ],
+      "sqlite_rebuild": true,
+      "schema": {
+        "tables": {
+          "migfid_article": {
+            "columns": [
+              {
+                "name": "id",
+                "type": "INTEGER",
+                "notnull": true,
+                "pk": 1
+              },
+              {
+                "name": "rank",
+                "type": "smallint",
+                "notnull": true,
+                "pk": 0
+              }
+            ],
+            "indexes": [],
+            "foreign_keys": []
+          }
+        }
+      }
+    },
+    {
       "name": "alter_field_null_to_not_null",
       "statements": [
         "CREATE TABLE \"new__migfid_article\" (\"id\" integer NOT NULL PRIMARY KEY AUTOINCREMENT, \"title\" varchar(100) NOT NULL, \"rank\" smallint NOT NULL, \"author_id\" bigint NOT NULL REFERENCES \"migfid_author\" (\"id\") DEFERRABLE INITIALLY DEFERRED, \"summary\" varchar(200) NOT NULL);",

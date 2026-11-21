@@ -225,6 +225,17 @@ def derive_pg_constraints(conn: Any, state: Any) -> dict[str, dict[str, dict[str
                         "index": True,
                         "type": "idx",
                     }
+                if field.db_check(conn):
+                    # An inline CHECK in CREATE TABLE gets PostgreSQL's default <table>_<col>_check name.
+                    table_cons[f"{table}_{col}_check"] = {
+                        "columns": [col],
+                        "primary_key": False,
+                        "unique": False,
+                        "foreign_key": None,
+                        "check": True,
+                        "index": False,
+                        "type": None,
+                    }
                 if field.db_index and not field.unique and not field.primary_key:
                     idx_name = editor._create_index_name(table, [col])
                     table_cons[idx_name] = {
@@ -538,6 +549,58 @@ def build_cases() -> list[dict[str, Any]]:
                     model_name="article",
                     name="rank",
                     field=models.BigIntegerField(),
+                )
+            ],
+        },
+        {
+            "name": "alter_field_char_to_text",
+            "setup": [author_op, article_op],
+            "target": [
+                migrations.AlterField(
+                    model_name="article",
+                    name="title",
+                    field=models.TextField(),
+                )
+            ],
+        },
+        {
+            "name": "alter_field_int_to_decimal",
+            "setup": [author_op, article_op],
+            "target": [
+                migrations.AlterField(
+                    model_name="article",
+                    name="rank",
+                    field=models.DecimalField(max_digits=10, decimal_places=2),
+                )
+            ],
+        },
+        {
+            "name": "alter_field_add_positive_check",
+            "setup": [author_op, article_op],
+            "target": [
+                migrations.AlterField(
+                    model_name="article",
+                    name="rank",
+                    field=models.PositiveSmallIntegerField(),
+                )
+            ],
+        },
+        {
+            "name": "alter_field_drop_positive_check",
+            "setup": [
+                migrations.CreateModel(
+                    name="Article",
+                    fields=[
+                        ("id", models.BigAutoField(primary_key=True, serialize=False)),
+                        ("rank", models.PositiveSmallIntegerField()),
+                    ],
+                )
+            ],
+            "target": [
+                migrations.AlterField(
+                    model_name="article",
+                    name="rank",
+                    field=models.SmallIntegerField(),
                 )
             ],
         },

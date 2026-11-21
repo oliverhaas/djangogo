@@ -5,6 +5,7 @@ import (
 
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/migrations"
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // The ports of Django's AutodetectorTests use Go names for models and fields:
@@ -169,6 +170,20 @@ func TestAutodetectorAlterField(t *testing.T) {
 	op := operationAt[migrations.AlterField](t, changes, "testapp", 0, 0)
 	djangotest.AssertEqual(t, op.Field.Name, "Name")
 	djangotest.AssertEqual(t, op.Default, nil)
+}
+
+// TestAutodetectorAlterFieldKind checks that a field that keeps its name and
+// changes its kind is one AlterField. Django's test_alter_field changes
+// max_length only.
+func TestAutodetectorAlterFieldKind(t *testing.T) {
+	authorNameText := model("testapp", "Author", idField,
+		migrations.FieldState{Name: "Name", Column: "name", Kind: orm.KindText})
+	changes := getChanges(t, models{authorName}, models{authorNameText}, nil)
+	assertNumberMigrations(t, changes, "testapp", 1)
+	assertOperationTypes(t, changes, "testapp", 0, "AlterField")
+	op := operationAt[migrations.AlterField](t, changes, "testapp", 0, 0)
+	djangotest.AssertEqual(t, op.Field.Name, "Name")
+	djangotest.AssertEqual(t, op.Field.Kind, orm.KindText)
 }
 
 // Ported from Django: tests/migrations/test_autodetector.py::AutodetectorTests.test_alter_field_to_not_null_with_default

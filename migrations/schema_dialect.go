@@ -57,13 +57,14 @@ func (e *SchemaEditor) remakeTable(ctx context.Context, state *ProjectState, old
 }
 
 // constraintNames returns the names of the PostgreSQL constraints of the
-// given type ('u' unique, 'f' foreign key) that cover exactly columns. The
+// given type ('u' unique, 'f' foreign key, 'c' check) that cover exactly
+// columns. The
 // database is asked because a constraint written inline keeps the name it got
 // when it was created, even after its table or column is renamed. In collect
 // mode, and when the lookup finds nothing, the name PostgreSQL would give by
 // default is returned.
 func (e *SchemaEditor) constraintNames(ctx context.Context, table string, columns []string, contype string) ([]string, error) {
-	suffix := map[string]string{"u": "key", "f": "fkey"}[contype]
+	suffix := map[string]string{"u": "key", "f": "fkey", "c": "check"}[contype]
 	fallback := []string{table + "_" + strings.Join(columns, "_") + "_" + suffix}
 	if e.collecting {
 		return fallback, nil
@@ -141,6 +142,11 @@ func (e *SchemaEditor) alterFieldPostgres(ctx context.Context, state *ProjectSta
 			return err
 		}
 	}
+	if positiveCheck(oldF) && !positiveCheck(newF) {
+		if err := e.dropConstraints(ctx, table, oldF.Column, "c"); err != nil {
+			return err
+		}
+	}
 	col := e.q(newF.Column)
 	if renamed {
 		if err := e.Execute(ctx, alter+"RENAME COLUMN "+e.q(oldF.Column)+" TO "+col); err != nil {
@@ -179,6 +185,12 @@ func (e *SchemaEditor) alterFieldPostgres(ctx context.Context, state *ProjectSta
 			return err
 		}
 	}
+	if positiveCheck(newF) && !positiveCheck(oldF) {
+		name := createIndexName(table, []string{newF.Column}, "_check", maxNameLength(e.dialect))
+		if err := e.Execute(ctx, alter+"ADD CONSTRAINT "+e.q(name)+" CHECK ("+col+" >= 0)"); err != nil {
+			return err
+		}
+	}
 	if !oldF.Unique && newF.Unique {
 		name := createIndexName(table, []string{newF.Column}, "_uniq", maxNameLength(e.dialect))
 		if err := e.Execute(ctx, alter+"ADD CONSTRAINT "+e.q(name)+" UNIQUE ("+col+")"); err != nil {
@@ -199,6 +211,17 @@ func (e *SchemaEditor) alterFieldPostgres(ctx context.Context, state *ProjectSta
 		return e.renameUniqueTogether(ctx, oldMS, newMS)
 	}
 	return nil
+}
+
+// positiveCheck reports whether the column of f carries the CHECK ("col" >=
+// 0) of a positive integer kind, Django's db_check of the positive fields.
+func positiveCheck(f FieldState) bool {
+	switch f.Kind {
+	case orm.KindPositiveSmallInt, orm.KindPositiveInt, orm.KindPositiveBigInt:
+		return true
+	default:
+		return false
+	}
 }
 
 // addForeignKey adds a named FOREIGN KEY constraint for f. The name follows

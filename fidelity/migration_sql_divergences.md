@@ -68,7 +68,7 @@ and target migrations:
   action since Django enforces `on_delete` in Python while Djan-Go-Go enforces
   it via SQL `ON DELETE`).
 
-All 25 cases pass SQLite schema equivalence with zero schema divergences.
+All 29 cases pass SQLite schema equivalence with zero schema divergences.
 
 ## Allowlisted DDL divergences
 

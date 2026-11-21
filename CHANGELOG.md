@@ -154,7 +154,8 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   slug, email, URL and generic IP address get Django's column types and CHECK
   constraints on both databases. A pointer field (`*int64`, `*orm.Date`) reads
   and writes NULL as nil. Every kind takes `choices`, and `orm.GetDisplay`
-  returns the label of the stored value.
+  returns the label of the stored value. `AlterField` changes a field's kind and
+  keeps the data on both databases.
 - `orm.Meta` gives a model Django's `Meta` options: `ordering`,
   `unique_together`, `indexes`, verbose names, `db_table`, and the choices,
   validators and error messages of its fields. `makemigrations` writes
@@ -212,7 +213,7 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   including `SimpleListFilter`. Bulk actions: `delete_selected` with Django's
   confirmation page, custom actions on `ModelAdmin.Actions` or
   `AdminSite.AddAction`, and selection across pages.
-- The fidelity harness also compares query SQL (86 cases) and migration SQL (25
+- The fidelity harness also compares query SQL (86 cases) and migration SQL (29
   operations) with Django 6.0.3 on SQLite and PostgreSQL, and
   `go generate ./fidelity/...` regenerates the golden files from Django.
 

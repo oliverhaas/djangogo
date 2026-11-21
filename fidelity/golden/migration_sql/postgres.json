@@ -82,6 +82,30 @@
       ]
     },
     {
+      "name": "alter_field_char_to_text",
+      "statements": [
+        "ALTER TABLE \"migfid_article\" ALTER COLUMN \"title\" TYPE text USING \"title\"::text;"
+      ]
+    },
+    {
+      "name": "alter_field_int_to_decimal",
+      "statements": [
+        "ALTER TABLE \"migfid_article\" ALTER COLUMN \"rank\" TYPE numeric(10, 2) USING \"rank\"::numeric(10, 2);"
+      ]
+    },
+    {
+      "name": "alter_field_add_positive_check",
+      "statements": [
+        "ALTER TABLE \"migfid_article\" ADD CONSTRAINT \"migfid_article_rank_18f0053b_check\" CHECK (\"rank\" >= 0);"
+      ]
+    },
+    {
+      "name": "alter_field_drop_positive_check",
+      "statements": [
+        "ALTER TABLE \"migfid_article\" DROP CONSTRAINT \"migfid_article_rank_check\";"
+      ]
+    },
+    {
       "name": "alter_field_null_to_not_null",
       "statements": [
         "ALTER TABLE \"migfid_article\" ALTER COLUMN \"summary\" SET DEFAULT 'none';",
