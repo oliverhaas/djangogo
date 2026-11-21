@@ -263,6 +263,10 @@ type fieldOptions struct {
 	emptyLabel    *string
 	allowUnicode  bool
 	assumeScheme  string
+	protocol      string
+	unpackIPv4    bool
+	jsonEncoder   func(any) ([]byte, error)
+	jsonDecoder   func([]byte) (any, error)
 }
 
 // FieldOption configures a field at construction, the counterpart of a keyword
@@ -433,4 +437,27 @@ func AllowUnicode() FieldOption {
 // (assume_scheme=); the default is "https".
 func AssumeScheme(scheme string) FieldOption {
 	return func(o *fieldOptions) { o.assumeScheme = scheme }
+}
+
+// Protocol restricts a GenericIPAddressField to "both", "ipv4", or "ipv6"
+// (case-insensitive, protocol=); the default is "both".
+func Protocol(protocol string) FieldOption {
+	return func(o *fieldOptions) { o.protocol = protocol }
+}
+
+// UnpackIPv4 unpacks IPv4-mapped IPv6 addresses (::ffff:a.b.c.d) to plain IPv4
+// strings on a GenericIPAddressField (unpack_ipv4=True). Valid only with
+// protocol "both".
+func UnpackIPv4() FieldOption {
+	return func(o *fieldOptions) { o.unpackIPv4 = true }
+}
+
+// JSONEncoder sets a custom encoder for a JSONField (encoder=).
+func JSONEncoder(fn func(any) ([]byte, error)) FieldOption {
+	return func(o *fieldOptions) { o.jsonEncoder = fn }
+}
+
+// JSONDecoder sets a custom decoder for a JSONField (decoder=).
+func JSONDecoder(fn func([]byte) (any, error)) FieldOption {
+	return func(o *fieldOptions) { o.jsonDecoder = fn }
 }
