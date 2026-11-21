@@ -20,8 +20,10 @@ are JSON with these conventions:
 | `null` | `None` | `nil` |
 
 The oracle runs with `USE_TZ=True`, `TIME_ZONE="UTC"`, `USE_I18N=False` and
-`STATIC_URL="/static/"`. Regenerate the golden files from the repository root
-with `python3 fidelity/oracle/render.py`.
+`STATIC_URL="/static/"`, plus a shared URLconf matching `fidelityRouter` in
+`render_test.go`. Regenerate all golden suites from the repository root with
+`go generate ./fidelity/...` (or `python3 fidelity/oracle/generate.py`), or
+templates alone with `python3 fidelity/oracle/render.py`.
 
 ## Skipped cases
 
@@ -31,6 +33,8 @@ with `python3 fidelity/oracle/render.py`.
 | `print_list` | `['a', 'b']` (Python repr) | Go's formatting of the value; the same holds for maps and for `stringformat:"s"` and `make_list` of a list |
 | `lorem_words` | `{% lorem 3 w %}` prints `lorem ipsum dolor` | pongo2's tag prints `Lorem ipsum dolor` with punctuation |
 | `urlize_bracket_punctuation` | 6.0.3 drops the `.` of `(see www.example.com).`, a bug its main branch fixed | keeps it, as Django's main branch does |
+| `csrf_token_escape` | encodes `"` as `&quot;` and `'` as `&#x27;` in `value="..."` | calls `html.EscapeString` (`&#34;` and `&#39;`, `templates/tags.go:164`) |
+| `csrf_token_missing` | renders `""` when `csrf_token` is absent from context | renders `<input type="hidden" name="csrfmiddlewaretoken" value="">` (`templates/tags.go:158-165`) |
 
 ## Differences without a case
 

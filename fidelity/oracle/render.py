@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +22,31 @@ FIDELITY_DIR = Path(__file__).resolve().parent.parent
 CASES_PATH = FIDELITY_DIR / "cases.json"
 GOLDEN_DIR = FIDELITY_DIR / "golden"
 
+_URLCONF_MODULE = "_fidelity_oracle_urls"
+
+
+def _install_urlconf() -> None:
+    """Register the shared URLconf module matching fidelityRouter() in render_test.go."""
+    from django.urls import include, path, re_path
+
+    def _nop(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    blog_patterns = (
+        [path("<int:pk>/", _nop, name="detail")],
+        "blog",
+    )
+
+    mod = types.ModuleType(_URLCONF_MODULE)
+    mod.urlpatterns = [
+        path("", _nop, name="index"),
+        path("articles/<int:pk>/", _nop, name="article_detail"),
+        path("articles/<int:year>/<slug:slug>/", _nop, name="article_archive"),
+        re_path(r"^search/(?P<q>[^/]+)/$", _nop, name="search"),
+        path("blog/", include(blog_patterns, namespace="blog")),
+    ]
+    sys.modules[_URLCONF_MODULE] = mod
+
 
 def configure_django() -> None:
     """Configure and initialize Django for English rendering in UTC."""
@@ -28,9 +55,11 @@ def configure_django() -> None:
         TIME_ZONE="UTC",
         USE_I18N=False,
         STATIC_URL="/static/",
+        ROOT_URLCONF=_URLCONF_MODULE,
         INSTALLED_APPS=["django.contrib.humanize"],
     )
     django.setup()
+    _install_urlconf()
 
 
 def decode(value: object) -> object:

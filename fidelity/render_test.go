@@ -1,20 +1,18 @@
-// Package fidelity holds a Django-as-oracle differential test harness. It renders
-// a fixed set of canonical template+context cases with the project's pongo2 engine
-// and asserts byte-equality against golden outputs produced by real Django DTL
-// (see oracle/render.py). Cases with a documented divergence are skipped and
-// catalogued in divergences.md; the rest prove genuine fidelity.
 package fidelity
 
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/oliverhaas/djangogo/templates"
+	"github.com/oliverhaas/djangogo/urls"
 )
 
 // fidelityCase is one canonical template+context pair shared with the oracle via
@@ -36,6 +34,8 @@ var skippedCases = map[string]string{
 	"print_list":                 "a list prints in Go syntax vs Python's repr",
 	"lorem_words":                "pongo2's lorem words start with a capital letter and keep punctuation",
 	"urlize_bracket_punctuation": "Django 6.0.3 drops the punctuation in front of a trailing bracket, which Django's main branch fixed",
+	"csrf_token_escape":          "csrf_token uses html.EscapeString (&#34;) instead of Django's &quot; (templates/tags.go:164)",
+	"csrf_token_missing":         "csrf_token renders an empty hidden input when missing from context vs empty string in Django (templates/tags.go:158-165)",
 }
 
 // loadCases reads and decodes cases.json from the harness directory.
@@ -121,10 +121,28 @@ func readGolden(t *testing.T, name string) string {
 	return string(data)
 }
 
+// fidelityRouter builds the shared URL table matching _install_urlconf in
+// oracle/render.py so {% url %} cases resolve identically on both sides.
+func fidelityRouter() *urls.Router {
+	nop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	return urls.NewRouter(slices.Concat(
+		[]urls.Route{
+			urls.Path("", nop, "index"),
+			urls.Path("articles/<int:pk>/", nop, "article_detail"),
+			urls.Path("articles/<int:year>/<slug:slug>/", nop, "article_archive"),
+			urls.RePath(`^search/(?P<q>[^/]+)/$`, nop, "search"),
+		},
+		urls.IncludeApp("blog/", "blog", "blog",
+			urls.Path("<int:pk>/", nop, "detail"),
+		),
+	)...)
+}
+
 // TestFidelity renders every canonical case with the project's pongo2 engine and
 // compares it byte-for-byte against the Django golden output. Documented
 // divergences are skipped (with a reason) instead of asserted.
 func TestFidelity(t *testing.T) {
+	router := fidelityRouter()
 	for _, c := range loadCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			if reason, skip := skippedCases[c.Name]; skip {
@@ -137,6 +155,7 @@ func TestFidelity(t *testing.T) {
 				}
 			}()
 			eng := templates.New(templates.MapSource("case", c.Templates))
+			eng.SetResolver(router.Reverse)
 			got, err := eng.RenderString(c.Template, c.Context)
 			if err != nil {
 				t.Fatalf("RenderString(%q): %v", c.Template, err)

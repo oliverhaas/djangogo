@@ -2226,5 +2226,89 @@
     "context": {
       "c": "(see www.example.com)."
     }
+  },
+  {
+    "name": "url_basic",
+    "template": "{% url \"index\" %}|{% url \"article_detail\" 42 %}",
+    "context": {}
+  },
+  {
+    "name": "url_kwargs",
+    "template": "{% url \"article_archive\" year=2024 slug=\"hello-world\" %}",
+    "context": {}
+  },
+  {
+    "name": "url_kwargs_filter",
+    "template": "{% url \"article_archive\" year=year slug=parts|join:\"-\" %}",
+    "context": {
+      "year": 2024,
+      "parts": [
+        "hello",
+        "django"
+      ]
+    }
+  },
+  {
+    "name": "url_as",
+    "template": "{% url \"article_detail\" 42 as u %}[{{ u }}]|{% url \"article_detail\" \"bad\" as missing %}[{{ missing }}]",
+    "context": {}
+  },
+  {
+    "name": "url_namespace",
+    "template": "{% url \"blog:detail\" pk=7 %}|{% url route_name 7 %}",
+    "context": {
+      "route_name": "article_detail"
+    }
+  },
+  {
+    "name": "url_autoescape",
+    "template": "{% url \"search\" q=\"a&b'c\" %}|{% autoescape off %}{% url \"search\" q=\"a&b'c\" %}{% endautoescape %}",
+    "context": {}
+  },
+  {
+    "name": "csrf_token",
+    "template": "{% csrf_token %}",
+    "context": {
+      "csrf_token": "tok123"
+    }
+  },
+  {
+    "name": "csrf_token_escape",
+    "template": "{% csrf_token %}",
+    "context": {
+      "csrf_token": "a\"&<b>"
+    }
+  },
+  {
+    "name": "csrf_token_missing",
+    "template": "[{% csrf_token %}]",
+    "context": {}
+  },
+  {
+    "name": "static_autoescape",
+    "template": "{% load static %}{% static \"img/a&b.png\" %}|{% autoescape off %}{% static \"img/a&b.png\" %}{% endautoescape %}",
+    "context": {}
+  },
+  {
+    "name": "autoescape_nested",
+    "template": "{% autoescape off %}{{ v }}{% autoescape on %}{{ v }}{% endautoescape %}{{ v }}{% endautoescape %}",
+    "context": {
+      "v": "<b>"
+    }
+  },
+  {
+    "name": "filter_random_single",
+    "template": "{{ one|random }}|[{{ empty|random }}]",
+    "context": {
+      "one": [
+        "only"
+      ],
+      "empty": []
+    }
+  },
+  {
+    "name": "now_as",
+    "template": "{% now \"\\n\\o\\w\" as t %}[{{ t }}]",
+    "context": {}
   }
 ]
