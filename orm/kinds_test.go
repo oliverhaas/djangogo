@@ -257,6 +257,44 @@ func TestDefaultsAndAutoNowOnNewKinds(t *testing.T) {
 	})
 }
 
+type utcTimeModel struct {
+	ID    int64
+	At    time.Time
+	Maybe *time.Time `orm:"null"`
+}
+
+// No Django test exists: Python compares aware datetimes by instant, so
+// Django's tests do not pin the time zone that a read returns. Django returns
+// UTC with USE_TZ on every backend.
+func TestDateTimeReadsInUTC(t *testing.T) {
+	djangotest.EachDB(t, []any{&utcTimeModel{}}, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		at := time.Date(2011, time.September, 1, 13, 20, 30, 0, time.FixedZone("EAT", 3*3600))
+		m := utcTimeModel{At: at, Maybe: &at}
+		djangotest.AssertEqual(t, orm.Query[utcTimeModel](db).Create(ctx, &m), nil)
+
+		got, err := orm.Query[utcTimeModel](db).Get(ctx, "pk", m.ID)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, got.At, at.UTC())
+		djangotest.AssertEqual(t, *got.Maybe, at.UTC())
+
+		vals, err := orm.Query[utcTimeModel](db).Values("at").All(ctx)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, vals[0]["at"], any(at.UTC()))
+
+		// A value saved with another offset sorts by its instant. 11:00 in
+		// UTC is after 10:20:30 in UTC but before it as text in EAT.
+		later := utcTimeModel{At: time.Date(2011, time.September, 1, 11, 0, 0, 0, time.UTC)}
+		djangotest.AssertEqual(t, orm.Query[utcTimeModel](db).Create(ctx, &later), nil)
+		latest, err := orm.Query[utcTimeModel](db).OrderBy("-at").First(ctx)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, latest.ID, later.ID)
+		n, err := orm.Query[utcTimeModel](db).Filter("at__gt", at).Count(ctx)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, n, int64(1))
+	})
+}
+
 func TestParsePGIntervalAndTemporalHelpers(t *testing.T) {
 	cases := []struct {
 		in   string

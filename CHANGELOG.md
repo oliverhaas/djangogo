@@ -485,6 +485,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 
 ### Fixed
 
+- ORM: on SQLite, datetimes saved with different UTC offsets sorted and
+  compared by their text, not by their instant, so `OrderBy` and lookups such
+  as `__gt` could return the wrong rows. A datetime field read back in the
+  local time zone of the process on PostgreSQL and in its saved offset on
+  SQLite. The ORM now writes and reads datetimes in UTC on both backends, as
+  Django does with `USE_TZ`. Rows written before the upgrade with another
+  offset keep their stored text until they are saved again.
 - Admin: a disabled field of the change form, such as a field that
   `FormOptions` disables, was saved empty when the form was submitted. The
   change view now gives the form the stored values as initial data, so a

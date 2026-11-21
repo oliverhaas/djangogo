@@ -724,6 +724,12 @@ func bindField(d Dialect, f *Field, v any) (any, error) {
 	}
 
 	switch f.Kind {
+	case KindDateTime:
+		// Write in UTC, as Django does with USE_TZ: SQLite keeps the offset
+		// in the text, and text with mixed offsets sorts and compares wrong.
+		if t, ok := v.(time.Time); ok {
+			v = t.UTC()
+		}
 	case KindGenericIPAddress:
 		return bindIPAddress(f, v)
 	case KindUUID:
@@ -996,6 +1002,12 @@ func assignFieldScanned(d Dialect, f *Field, dst reflect.Value, v any) error {
 	}
 
 	switch f.Kind {
+	case KindDateTime:
+		// PostgreSQL returns a timestamp in the local time zone of the
+		// process. Read it in UTC, as Django does with USE_TZ.
+		if t, ok := v.(time.Time); ok {
+			v = t.UTC()
+		}
 	case KindDuration:
 		dur, err := scanDuration(v)
 		if err != nil {

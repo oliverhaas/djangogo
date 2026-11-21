@@ -69,9 +69,13 @@ func convertValue(v any, t valueType) (any, error) {
 	case typeTime:
 		switch x := v.(type) {
 		case time.Time:
-			return x, nil
+			return x.UTC(), nil
 		case string:
-			return parseTime(x)
+			t, err := parseTime(x)
+			if err != nil {
+				return nil, err
+			}
+			return t.UTC(), nil
 		}
 		return nil, fmt.Errorf("orm: cannot convert %T to a time", v)
 	default:
