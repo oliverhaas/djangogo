@@ -261,6 +261,10 @@ type ModelAdmin struct {
 	// fields of the form come from Fields, Fieldsets and ExcludeFields, not
 	// from a forms.WithFields here.
 	FormOptions []forms.ModelFormOption
+	// GetFormOptions returns the options of the model form for r and obj, nil
+	// on the add page, in place of FormOptions (Django's get_form, which can
+	// pick a form class per page, as the admin of users does).
+	GetFormOptions func(r *http.Request, obj any) []forms.ModelFormOption
 	// Fields lays out the add and change forms (Django's fields). Each entry
 	// is a field name or a []string of names shown on one line. Empty shows
 	// the form fields in model order, then the ReadonlyFields.
@@ -372,4 +376,8 @@ type ModelAdmin struct {
 	// CustomPermissions maps custom action permission names (used in
 	// Action.Permissions) to request permission predicates.
 	CustomPermissions map[string]func(r *http.Request) bool
+
+	// hooks hold the behavior of the admins of the auth models that the
+	// fields above do not express.
+	hooks *adminHooks
 }

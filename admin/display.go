@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/templates"
 )
@@ -294,9 +295,13 @@ func renderColumnCell(col resolvedColumn, obj any, m *orm.Model, emptyVal string
 }
 
 // formatFieldHTML formats a concrete model field value as HTML matching
-// Django's display_for_field (choices via orm.GetDisplay, boolean icons, URL
-// links, FK labels, empty value placeholder, and nowrap classes).
+// Django's display_for_field (the summary of the password of a user, choices
+// via orm.GetDisplay, boolean icons, URL links, FK labels, empty value
+// placeholder, and nowrap classes).
 func formatFieldHTML(m *orm.Model, obj any, f *orm.Field, fv reflect.Value, emptyVal string, avoidLink bool) (string, []string) {
+	if f.Attr == "password" && m.GoType() == reflect.TypeFor[auth.User]() {
+		return auth.RenderPasswordAsHash(fv.String()), nil
+	}
 	var extraClasses []string
 	if f.Kind == orm.KindDate || f.Kind == orm.KindTime || (f.Rel != nil && (f.Rel.Kind == orm.RelFK || f.Rel.Kind == orm.RelO2O)) {
 		extraClasses = append(extraClasses, "nowrap")

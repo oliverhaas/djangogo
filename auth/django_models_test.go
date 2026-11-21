@@ -165,6 +165,23 @@ func TestGroupStr(t *testing.T) {
 	djangotest.AssertEqual(t, auth.Group{Name: "Users"}.String(), "Users")
 }
 
+// Ported from Django: tests/auth_tests/test_models.py::PermissionTests.test_str
+//
+// The content type reads from the stored names, "auth | group", where Django
+// uses the verbose names of the app and the model.
+func TestPermissionStr(t *testing.T) {
+	eachDB(t, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		_, err := auth.SyncPermissions(ctx, db)
+		must(t, err)
+		p, err := orm.Query[auth.Permission](db).Get(ctx, "codename", "view_group")
+		must(t, err)
+		got, err := p.Label(ctx, db)
+		must(t, err)
+		djangotest.AssertEqual(t, got, "auth | group | Can view group")
+	})
+}
+
 // Ported from Django: tests/auth_tests/test_models.py::PermissionTests.test_user_perm_str
 func TestPermissionUserPermStr(t *testing.T) {
 	eachDB(t, func(t *testing.T, db *orm.DB) {

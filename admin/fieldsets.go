@@ -94,7 +94,7 @@ func (s *AdminSite) layoutFields(r *http.Request, e *entry, obj any) []any {
 	}
 	readonly := e.readonlyFields(r, obj)
 	opts := append([]forms.ModelFormOption{forms.WithExclude(slices.Concat(s.excluded(r, e, obj), readonly)...)},
-		e.admin.FormOptions...)
+		e.formOptions(r, obj)...)
 	base := forms.FromModel(e.model, opts...)
 	out := make([]any, 0, len(base.FieldNames())+len(readonly))
 	for _, name := range base.FieldNames() {
@@ -106,12 +106,25 @@ func (s *AdminSite) layoutFields(r *http.Request, e *entry, obj any) []any {
 	return out
 }
 
+// formOptions returns the options of the model form for r and obj, nil on
+// the add page: GetFormOptions, else FormOptions.
+func (e *entry) formOptions(r *http.Request, obj any) []forms.ModelFormOption {
+	if e.admin.GetFormOptions != nil {
+		return e.admin.GetFormOptions(r, obj)
+	}
+	return e.admin.FormOptions
+}
+
 // fieldsets returns the fieldsets of the form for r and obj, Django's
-// get_fieldsets: GetFieldsets, else Fieldsets, else one fieldset without a
-// name that holds layoutFields.
+// get_fieldsets: GetFieldsets, else the fieldsets of the add page of the
+// admin of users, else Fieldsets, else one fieldset without a name that
+// holds layoutFields.
 func (s *AdminSite) fieldsets(r *http.Request, e *entry, obj any) []Fieldset {
 	if e.admin.GetFieldsets != nil {
 		return e.admin.GetFieldsets(r, obj)
+	}
+	if obj == nil && e.admin.hooks != nil && e.admin.hooks.addFieldsets != nil {
+		return e.admin.hooks.addFieldsets
 	}
 	if len(e.admin.Fieldsets) > 0 {
 		return e.admin.Fieldsets
@@ -128,6 +141,9 @@ type adminForm struct {
 	// obj is the object the read-only fields show: the edited one, or a new
 	// one with the field defaults on the add page.
 	obj any
+	// opts are the options of the model form from the admin, whose labels
+	// and help texts the read-only fields show.
+	opts []forms.ModelFormOption
 	// skip names a field whose own line the fieldsets leave out: the
 	// foreign key to the parent in the form of an inline, Django's
 	// InlineFieldset.
@@ -176,7 +192,7 @@ func (s *AdminSite) lineContext(ctx context.Context, e *entry, af *adminForm, na
 	for i, name := range names {
 		bf := af.form.Field(name)
 		if slices.Contains(af.readonly, name) {
-			item := s.readonlyFieldContext(ctx, e, af.obj, name, i == 0)
+			item := s.readonlyFieldContext(ctx, e, af, name, i == 0)
 			// A read-only field that is still on the form, as on a page
 			// that the user may only view, keeps the hidden widget of the
 			// form field, Django's AdminReadonlyField.is_hidden.
@@ -259,9 +275,10 @@ func adminFieldContext(bf *forms.BoundField, first bool) map[string]any {
 
 // readonlyFieldContext returns the template data of a read-only field,
 // Django's helpers.AdminReadonlyField: a model field or a DisplayColumns key.
-func (s *AdminSite) readonlyFieldContext(ctx context.Context, e *entry, obj any, name string, first bool) map[string]any {
+func (s *AdminSite) readonlyFieldContext(ctx context.Context, e *entry, af *adminForm, name string, first bool) map[string]any {
+	obj := af.obj
 	f := readonlyModelField(e.model, name)
-	label, help := readonlyLabel(e, f, name)
+	label, help := readonlyLabel(e, af.opts, f, name)
 	class := ""
 	if !first {
 		class = ` class="inline"`
@@ -287,14 +304,14 @@ func (s *AdminSite) readonlyFieldContext(ctx context.Context, e *entry, obj any,
 // ModelForm.Meta.labels and help_texts in AdminReadonlyField and
 // InlineAdminFormSet.fields; then the verbose name and the help text of the
 // model field, or the description of a DisplayColumn.
-func readonlyLabel(e *entry, f *orm.Field, name string) (label, help string) {
+func readonlyLabel(e *entry, opts []forms.ModelFormOption, f *orm.Field, name string) (label, help string) {
 	label = prettyName(name)
 	if f != nil {
 		label, help = fieldVerboseName(f), f.HelpText
 	} else if col, ok := e.admin.DisplayColumns[name]; ok && col.Description != "" {
 		label = col.Description
 	}
-	labels, helpTexts := forms.ModelFormLabels(e.admin.FormOptions...)
+	labels, helpTexts := forms.ModelFormLabels(opts...)
 	keys := []string{name}
 	if f != nil && f.Name != name {
 		keys = append(keys, f.Name)

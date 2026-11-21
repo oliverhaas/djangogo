@@ -26,7 +26,7 @@ func popupEnv(t *testing.T, db *orm.DB) *adminTestEnv {
 	t.Helper()
 	super := createTestUser(t, db, "super", "secret", true, true)
 	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
-		registerBasicAdminModels(site)
+		registerBasicAdminModels(db)(site)
 		admin.Register[Album](site, admin.ModelAdmin{})
 	})
 	env.client.ForceLogin(super)
@@ -152,9 +152,6 @@ func TestPopupTemplateResponse(t *testing.T) {
 	})
 }
 
-// FIXME-PORT: test_user_fk_add_popup and test_user_fk_change_popup post the
-// forms of Django's UserAdmin, which the Go admin does not have yet.
-//
 // Ported from Django: tests/admin_views/tests.py::UserAdminTest.test_user_fk_delete_popup
 func TestUserFKDeletePopup(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {

@@ -35,7 +35,7 @@ const (
 // templateFS holds the admin's embedded pongo2 templates under templates/admin
 // and templates/registration.
 //
-//go:embed templates/admin/*.html templates/admin/includes/*.html templates/admin/edit_inline/*.html templates/registration/*.html
+//go:embed templates/admin/*.html templates/admin/includes/*.html templates/admin/edit_inline/*.html templates/admin/auth/user/*.html templates/registration/*.html
 var templateFS embed.FS
 
 // entryKey uniquely identifies a registered model within an AdminSite by app
@@ -325,6 +325,9 @@ func (s *AdminSite) buildRoutes() []urls.Route {
 	seenApp := make(map[string]bool)
 	for _, e := range s.entries {
 		mp := e.routePrefix()
+		if e.admin.hooks != nil && e.admin.hooks.routes != nil {
+			inner = append(inner, e.admin.hooks.routes(s, e)...)
+		}
 		inner = append(inner,
 			urls.Path(mp, s.adminView(s.makeChangelistHandler(e), false), e.urlName("changelist")),
 			urls.Path(mp+"add/", s.adminView(s.makeAddHandler(e), false), e.urlName("add")),

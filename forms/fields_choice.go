@@ -368,7 +368,11 @@ func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model) func(co
 		for i := range objs {
 			obj := &objs[i]
 			pk, _ := instancePK(model, obj)
-			rows[i] = modelRow{pk: pk, label: orm.Label(model, obj), value: obj}
+			label, err := orm.LabelContext(ctx, db, model, obj)
+			if err != nil {
+				return nil, err
+			}
+			rows[i] = modelRow{pk: pk, label: label, value: obj}
 		}
 		return rows, nil
 	}

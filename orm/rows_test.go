@@ -2,6 +2,8 @@ package orm_test
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/oliverhaas/djangogo/orm"
@@ -107,5 +109,76 @@ func TestLabeledRowsEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("LabeledRows on an empty table = %v, want no rows", got)
+	}
+}
+
+// contextThing labels itself with a query, as a ContextLabeler that follows a
+// relation does.
+type contextThing struct {
+	ID   int64
+	Name string `orm:"max_length=50"`
+}
+
+// Label returns the name and the number of rows of the table.
+func (c contextThing) Label(ctx context.Context, db *orm.DB) (string, error) {
+	n, err := orm.Query[contextThing](db).Count(ctx)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s of %d", c.Name, n), nil
+}
+
+// No Django test exists: a Django __str__ that follows a relation queries
+// without a context. LabeledRows and LabeledRowsOrdered label a row through
+// its ContextLabeler, which may query the database.
+func TestLabeledRowsContextLabeler(t *testing.T) {
+	reg := orm.NewRegistry()
+	if _, err := reg.Register(&contextThing{}); err != nil {
+		t.Fatal(err)
+	}
+	reg.Freeze()
+	sdb, err := sqlite.Open("file:" + t.Name() + "?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sdb.Close() })
+	db := orm.NewDB(sdb, sqlite.New(), reg)
+	ctx := context.Background()
+	m, _ := reg.Get("contextThing")
+	if err := db.CreateTable(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b"} {
+		if err := orm.Query[contextThing](db).Create(ctx, &contextThing{Name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := [][2]string{{"1", "a of 2"}, {"2", "b of 2"}}
+	err = db.Atomic(ctx, func(ctx context.Context) error {
+		got, err := orm.LabeledRows(ctx, db, m)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("LabeledRows = %v, want %v", got, want)
+		}
+		got, err = orm.LabeledRowsOrdered(ctx, db, m, nil, nil)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("LabeledRowsOrdered = %v, want %v", got, want)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	label, err := orm.LabelContext(ctx, db, m, contextThing{Name: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if label != "c of 2" {
+		t.Errorf("LabelContext = %q, want %q", label, "c of 2")
 	}
 }

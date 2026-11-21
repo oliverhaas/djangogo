@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/apps"
@@ -125,6 +126,8 @@ func createTestUser(t *testing.T, db *orm.DB, username, password string, isStaff
 		IsStaff:     isStaff,
 		IsSuperuser: isSuperuser,
 		IsActive:    true,
+		// Django's create_user sets date_joined through its default.
+		DateJoined: time.Now().UTC(),
 	}
 	if err := u.SetPassword(password); err != nil {
 		t.Fatalf("SetPassword(%s): %v", username, err)
@@ -199,14 +202,18 @@ func ctxVal(t *testing.T, resp *djangotest.Response, key string) any {
 	return v
 }
 
-// registerBasicAdminModels registers the standard admin_views + auth models.
-func registerBasicAdminModels(site *admin.AdminSite) {
-	admin.Register[Article](site, admin.ModelAdmin{})
-	admin.Register[Section](site, admin.ModelAdmin{})
-	admin.Register[Actor](site, admin.ModelAdmin{})
-	admin.Register[Worker](site, admin.ModelAdmin{})
-	admin.Register[auth.User](site, admin.ModelAdmin{})
-	admin.Register[auth.Group](site, admin.ModelAdmin{})
+// registerBasicAdminModels returns the registration of the standard
+// admin_views models, with users and groups under Django's UserAdmin and
+// GroupAdmin as in tests/admin_views/admin.py.
+func registerBasicAdminModels(db *orm.DB) func(site *admin.AdminSite) {
+	return func(site *admin.AdminSite) {
+		admin.Register[Article](site, admin.ModelAdmin{})
+		admin.Register[Section](site, admin.ModelAdmin{})
+		admin.Register[Actor](site, admin.ModelAdmin{})
+		admin.Register[Worker](site, admin.ModelAdmin{})
+		admin.Register[auth.User](site, admin.UserAdmin(db))
+		admin.Register[auth.Group](site, admin.GroupAdmin())
+	}
 }
 
 // Ported from Django: tests/admin_views/test_adminsite.py::SiteEachContextTest.test_each_context
@@ -298,7 +305,7 @@ func TestAvailableApps(t *testing.T) {
 func TestTrailingSlashRequired(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		addURL := mustReverse(t, env.router, "admin:admin_views_article_add")
@@ -311,7 +318,7 @@ func TestTrailingSlashRequired(t *testing.T) {
 func TestBasicAddGET(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_section_add"))
@@ -328,7 +335,7 @@ func TestBasicEditGET(t *testing.T) {
 		if err := orm.Query[Section](db).Create(context.Background(), s1); err != nil {
 			t.Fatalf("Create(Section): %v", err)
 		}
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_section_change", s1.ID))
@@ -341,7 +348,7 @@ func TestBasicEditGET(t *testing.T) {
 func TestBasicEditGETStringPK(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_section_change", "abc"), djangotest.Follow())
@@ -360,7 +367,7 @@ func TestBasicEditGETOldURLRedirect(t *testing.T) {
 		if err := orm.Query[Section](db).Create(context.Background(), s1); err != nil {
 			t.Fatalf("Create(Section): %v", err)
 		}
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		changeURL := mustReverse(t, env.router, "admin:admin_views_section_change", s1.ID)
@@ -374,7 +381,7 @@ func TestBasicEditGETOldURLRedirect(t *testing.T) {
 func TestLogoutAndPasswordChangeURLs(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_article_changelist"))
@@ -386,7 +393,7 @@ func TestLogoutAndPasswordChangeURLs(t *testing.T) {
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_invalid_appindex_url
 func TestInvalidAppIndexURL(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 
 		goodURL := "/admin/admin_views/"
 		confirmGoodURL := mustReverse(t, env.router, "admin:app_list", urls.Kwargs{"app_label": "admin_views"})
@@ -406,7 +413,7 @@ func TestAdminSiteDisplaySiteURL(t *testing.T) {
 		super := createTestUser(t, db, "super", "secret", true, true)
 		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
 			site.SiteURL = "/my-site-url/"
-			registerBasicAdminModels(site)
+			registerBasicAdminModels(db)(site)
 		})
 		env.client.ForceLogin(super)
 
@@ -420,7 +427,7 @@ func TestAdminSiteDisplaySiteURL(t *testing.T) {
 func TestAppIndexContext(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:app_list", "admin_views"))
@@ -444,7 +451,7 @@ func TestAppIndexContext(t *testing.T) {
 func TestPasswordChangeHelptext(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:password_change"))
@@ -457,7 +464,7 @@ func TestPasswordChangeHelptext(t *testing.T) {
 func TestHeader(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:index"))
@@ -472,7 +479,7 @@ func TestHeader(t *testing.T) {
 func TestMainContent(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:index"))
@@ -484,7 +491,7 @@ func TestMainContent(t *testing.T) {
 func TestFooter(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:index"))
@@ -499,7 +506,7 @@ func TestFooter(t *testing.T) {
 func TestAriaDescribedbyForAddAndChangeLinks(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:index"))
@@ -525,7 +532,7 @@ func TestAriaDescribedbyForAddAndChangeLinks(t *testing.T) {
 func TestLogout(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		logoutURL := mustReverse(t, env.router, "admin:logout")
@@ -541,7 +548,7 @@ func TestLogout(t *testing.T) {
 // Ported from Django: tests/admin_views/tests.py::AdminViewLogoutTests.test_client_logout_url_can_be_used_to_login
 func TestClientLogoutURLCanBeUsedToLogin(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 
 		logoutURL := mustReverse(t, env.router, "admin:logout")
 		resp := env.client.Post(logoutURL, nil)
@@ -557,7 +564,7 @@ func TestClientLogoutURLCanBeUsedToLogin(t *testing.T) {
 // Ported from Django: tests/admin_views/tests.py::AdminSiteFinalCatchAllPatternTests.test_unknown_url_redirects_login_if_not_authenticated
 func TestUnknownURLRedirectsLoginIfNotAuthenticated(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		resp := env.client.Get("/admin/unknown/")
 		djangotest.AssertRedirects(t, resp, "/admin/login/?next=/admin/unknown/")
 	})
@@ -567,7 +574,7 @@ func TestUnknownURLRedirectsLoginIfNotAuthenticated(t *testing.T) {
 func TestUnknownURL404IfAuthenticated(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get("/admin/unknown/")
@@ -578,7 +585,7 @@ func TestUnknownURL404IfAuthenticated(t *testing.T) {
 // Ported from Django: tests/admin_views/tests.py::AdminSiteFinalCatchAllPatternTests.test_known_url_redirects_login_if_not_authenticated
 func TestKnownURLRedirectsLoginIfNotAuthenticated(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		changelistURL := mustReverse(t, env.router, "admin:admin_views_article_changelist")
 		resp := env.client.Get(changelistURL)
 		djangotest.AssertRedirects(t, resp, "/admin/login/?next="+changelistURL)
@@ -588,7 +595,7 @@ func TestKnownURLRedirectsLoginIfNotAuthenticated(t *testing.T) {
 // Ported from Django: tests/admin_views/tests.py::AdminSiteFinalCatchAllPatternTests.test_known_url_missing_slash_redirects_login_if_not_authenticated
 func TestKnownURLMissingSlashRedirectsLoginIfNotAuthenticated(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		changelistURL := mustReverse(t, env.router, "admin:admin_views_article_changelist")
 		noSlash := changelistURL[:len(changelistURL)-1]
 		resp := env.client.Get(noSlash)
@@ -601,7 +608,7 @@ func TestUnknownURL404IfNotAuthenticatedWithoutFinalCatchAllView(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
 			site.FinalCatchAllView = false
-			registerBasicAdminModels(site)
+			registerBasicAdminModels(db)(site)
 		})
 		resp := env.client.Get("/admin/unknown/")
 		djangotest.AssertStatus(t, resp, http.StatusNotFound)
@@ -614,7 +621,7 @@ func TestNonAdminURLSharesURLPrefix(t *testing.T) {
 		nonAdmin := urls.PathFunc("admin/non_admin_view/", func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte("non-admin-ok"))
 		}, "non_admin")
-		env := newAdminTestEnv(t, db, registerBasicAdminModels, nonAdmin)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db), nonAdmin)
 
 		resp := env.client.Get("/admin/non_admin_view/")
 		djangotest.AssertStatus(t, resp, http.StatusOK)
@@ -627,7 +634,7 @@ func TestNonAdminURLSharesURLPrefix(t *testing.T) {
 func TestAdminPasswordChangeFlow(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "oldpass123", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		pwChangeURL := mustReverse(t, env.router, "admin:password_change")
@@ -664,7 +671,7 @@ func TestHideChangePassword(t *testing.T) {
 		if err := orm.Query[auth.User](db).Save(context.Background(), super); err != nil {
 			t.Fatalf("Save(super): %v", err)
 		}
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:index"))
@@ -709,7 +716,7 @@ func TestAppVerboseNameFromAppsRegistry(t *testing.T) {
 func TestLogoutGETMethodNotAllowed(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:logout"))

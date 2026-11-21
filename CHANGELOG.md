@@ -337,6 +337,26 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   to the password page. `NewAdminPasswordChangeForm` sets or removes the
   password of a user. `UsernameField` normalizes usernames to NFKC, and
   `RenderPasswordAsHash` is Django's `render_password_as_hash` template tag.
+- Admin: users and groups have an admin, Django's `UserAdmin` and
+  `GroupAdmin`. The application registers them when the auth app is
+  installed and an app registers models with the admin; `admin.UserAdmin(db)`
+  and `admin.GroupAdmin()` return them for a site of your own or for changes.
+  A new user is added with a username and a password typed twice, then edited
+  on the change page, which shows the password as a summary of its hash. The
+  page at `<id>/password/` (URL name `auth_user_password_change`) sets a new
+  password or disables password-based authentication. Only a user who can
+  change users can add them, and the changelist rejects lookups on the
+  password. `auth.PrepareNewUser` readies a user that a creation form filled
+  without saving it.
+- Admin: `ModelAdmin.GetFormOptions` returns the form options per request and
+  object, Django's `get_form`, for example to use another form on the add
+  page.
+- ORM: a model whose label needs the database implements
+  `orm.ContextLabeler`, `Label(ctx, db) (string, error)`, in place of
+  `String`. `orm.LabelContext` returns such a label, and the choice fields of
+  forms and the admin use it. `auth.Permission` labels itself as Django's
+  `Permission.__str__` does, "app | model | name", so the permission choices
+  of the user and group admin read as in Django.
 
 ### Changed
 
@@ -440,6 +460,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 
 ### Fixed
 
+- Admin: a disabled field of the change form, such as a field that
+  `FormOptions` disables, was saved empty when the form was submitted. The
+  change view now gives the form the stored values as initial data, so a
+  disabled field keeps its value.
 - auth: a user row with a NULL `last_login`, which Django writes for a user who
   never logged in, failed to load. It now loads with a nil `LastLogin`.
 - Admin: a duplicate value of a unique field on the add or change page gave a

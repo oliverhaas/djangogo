@@ -417,6 +417,16 @@ func (f *UserCreationForm) Save(ctx context.Context) (*User, error) {
 	return f.ModelForm.Save(ctx)
 }
 
+// PrepareNewUser readies user, filled from a valid form of
+// UserCreationFormOptions, for its first save: an active user that joins now
+// unless the form has the fields is_active and date_joined, with the password
+// of SetPasswordFromForm. The admin of users calls it before it creates the
+// user.
+func PrepareNewUser(user *User, form *forms.Form) error {
+	applyUserDefaults(user, form)
+	return SetPasswordFromForm(user, form)
+}
+
 // applyUserDefaults gives a new user the defaults of Django's user model for
 // the fields that form does not have: is_active true and date_joined now.
 func applyUserDefaults(user *User, form *forms.Form) {

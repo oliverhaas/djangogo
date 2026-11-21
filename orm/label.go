@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 )
@@ -19,6 +20,43 @@ func Label(m *Model, instance any) string {
 		return s.String()
 	}
 	return defaultLabel(m, instance)
+}
+
+// ContextLabeler is the interface a model implements when its label needs the
+// database, as a Django __str__ that follows a relation does:
+//
+//	func (p Permission) Label(ctx context.Context, db *orm.DB) (string, error)
+//
+// LabelContext prefers it over String(), and so do the (primary key, label)
+// rows of LabeledRows and LabeledRowsOrdered, which feed the options of the
+// relation fields of a form and the admin.
+type ContextLabeler interface {
+	Label(ctx context.Context, db *DB) (string, error)
+}
+
+// LabelContext returns the label of a model instance as Label does, from its
+// ContextLabeler when it has one.
+func LabelContext(ctx context.Context, db *DB, m *Model, instance any) (string, error) {
+	if l, ok := asContextLabeler(instance); ok {
+		return l.Label(ctx, db)
+	}
+	return Label(m, instance), nil
+}
+
+// asContextLabeler returns instance as a ContextLabeler when it, or a pointer
+// to a copy of it, implements the interface.
+func asContextLabeler(instance any) (ContextLabeler, bool) {
+	if l, ok := instance.(ContextLabeler); ok {
+		return l, true
+	}
+	v := reflect.ValueOf(instance)
+	if !v.IsValid() || v.Kind() == reflect.Pointer {
+		return nil, false
+	}
+	pv := reflect.New(v.Type())
+	pv.Elem().Set(v)
+	l, ok := pv.Interface().(ContextLabeler)
+	return l, ok
 }
 
 // asStringer returns instance as an fmt.Stringer when it (or a pointer to a copy

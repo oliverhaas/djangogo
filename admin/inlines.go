@@ -794,7 +794,7 @@ func (s *AdminSite) inlineFormContext(
 		shown = ie.ops.newPtr()
 		ie.model.ApplyDefaults(shown)
 	}
-	af := &adminForm{form: form, sets: ifs.sets, readonly: readonly, obj: shown, skip: in.fk.Attr}
+	af := &adminForm{form: form, sets: ifs.sets, readonly: readonly, obj: shown, opts: ie.admin.FormOptions, skip: in.fk.Attr}
 	sets := s.fieldsetContext(ctx, ie, af)
 
 	out := map[string]any{
@@ -874,7 +874,7 @@ func (s *AdminSite) inlineHeaders(ifs *inlineFormSet, empty *forms.Form) []map[s
 		}
 		bf := empty.Field(attr)
 		if !ifs.hasChange || slices.Contains(ifs.readonly, attr) {
-			label, help := readonlyLabel(ie, readonlyModelField(ie.model, attr), attr)
+			label, help := readonlyLabel(ie, ie.admin.FormOptions, readonlyModelField(ie.model, attr), attr)
 			out = append(out, map[string]any{
 				"name":      attr,
 				"label":     label,

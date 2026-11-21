@@ -143,6 +143,19 @@ func camelCaseToSpaces(name string) string {
 	return strings.TrimSpace(b.String())
 }
 
+// Label returns "<content type> | <name>", such as "auth | group | Can view
+// group", Django's __str__. It labels the options of the permission fields of
+// the forms and the admin (see orm.ContextLabeler). The content type reads as
+// contenttypes.ContentType.String does, from the stored app label and model
+// name.
+func (p Permission) Label(ctx context.Context, db *orm.DB) (string, error) {
+	ct, err := contenttypes.GetForID(ctx, db, p.ContentTypeID)
+	if err != nil {
+		return "", err
+	}
+	return ct.String() + " | " + p.Name, nil
+}
+
 // UserPermStr returns the permission in the form HasPerm takes,
 // "<app_label>.<codename>" (Django's user_perm_str).
 func (p Permission) UserPermStr(ctx context.Context, db *orm.DB) (string, error) {

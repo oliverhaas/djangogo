@@ -129,16 +129,17 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj, instance any, can
 		built[mf.Attr] = true
 		return formfieldForDBField(mf, f)
 	}
+	adminOpts := e.formOptions(r, obj)
 	opts := slices.Concat([]forms.ModelFormOption{
 		forms.WithFields(fields...),
 		forms.WithExclude(exclude...),
 		forms.WithFormFieldCallback(callback),
-	}, s.relationWidgets(r, e), e.admin.FormOptions)
+	}, s.relationWidgets(r, e), adminOpts)
 	form := forms.FromInstance(s.db, e.model, instance, opts...)
 	syncAutocompleteRequired(form)
 	s.wrapRelatedWidgets(r, e, form, built)
 	s.populateChoices(r, form, e)
-	return &adminForm{form: form, sets: sets, readonly: readonly, obj: instance}
+	return &adminForm{form: form, sets: sets, readonly: readonly, obj: instance, opts: adminOpts}
 }
 
 // multipleSelectHint is the help text Django's admin adds to a <select
@@ -277,6 +278,10 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 		forbidden(w)
 		return
 	}
+	hooks := e.admin.hooks
+	if hooks != nil && hooks.allowAdd != nil && !hooks.allowAdd(s, w, r, e) {
+		return
+	}
 	singular, _ := modelVerboseNames(e.model)
 	title := "Add " + singular
 	// The form fills the new row and the inlines point at it; the save gives
@@ -312,6 +317,11 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 		}
 		if valid {
 			err := s.db.Atomic(r.Context(), func(ctx context.Context) error {
+				if hooks != nil && hooks.beforeCreate != nil {
+					if err := hooks.beforeCreate(form, obj); err != nil {
+						return err
+					}
+				}
 				if err := e.ops.create(ctx, obj); err != nil {
 					return err
 				}
@@ -332,7 +342,9 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 			}
 			objDisplay := displayLabel(e.model, obj)
 			msg := fmt.Sprintf("The %s “%s” was added successfully.", singular, objDisplay)
-			if r.PostForm.Has("_continue") && e.hasViewOrChangePermission(s, r, obj) {
+			continueEditing := r.PostForm.Has("_continue") ||
+				hooks != nil && hooks.continueAfterAdd && !r.PostForm.Has("_addanother")
+			if continueEditing && e.hasViewOrChangePermission(s, r, obj) {
 				if e.hasChangePermission(s, r, obj) {
 					msg += " You may edit it again below."
 				}
@@ -416,6 +428,14 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 		http.Error(w, "invalid admin form: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// The initial values are the stored ones, Django's model_to_dict of the
+	// instance: a disabled field, such as the password of a user, cleans to
+	// its initial value and keeps the stored one.
+	af.form.Initial = forms.InitialFromStruct(e.model, obj)
+	if err := s.manyInitial(r.Context(), af.form, e, obj); err != nil {
+		http.Error(w, "failed to load row", http.StatusInternalServerError)
+		return
+	}
 	data, ok := postData(w, r)
 	if !ok {
 		return
@@ -480,11 +500,6 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 
 	if !canChange {
 		s.renderChangeForm(w, r, e, "View "+singular, obj, af, inlines, false, false)
-		return
-	}
-	af.form.Initial = forms.InitialFromStruct(e.model, obj)
-	if err := s.manyInitial(r.Context(), af.form, e, obj); err != nil {
-		http.Error(w, "failed to load row", http.StatusInternalServerError)
 		return
 	}
 	if err := s.loadSelectedChoices(r, e, af.form); err != nil {
@@ -669,7 +684,11 @@ func (s *AdminSite) renderChangeForm(
 	ctx["show_close"] = !showSave && hasModelView
 	ctx["show_delete_link"] = !popup && hasObjDelete
 
-	s.render(w, r, "admin/change_form.html", ctx)
+	name := "admin/change_form.html"
+	if isAdd && e.admin.hooks != nil && e.admin.hooks.addFormTemplate != "" {
+		name = e.admin.hooks.addFormTemplate
+	}
+	s.render(w, r, name, ctx)
 }
 
 // manyLabels returns the labels of the rows obj is related to through the

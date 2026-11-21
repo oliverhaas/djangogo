@@ -8,8 +8,8 @@ import (
 )
 
 // LabeledRows returns the (primary key, label) pairs for every row of model m,
-// ordered by primary key. Each label is orm.Label of the scanned row, so a model
-// with a String() method drives the displayed text. It is the data source for a
+// ordered by primary key. Each label is orm.LabelContext of the scanned row, so
+// a model with a String() or a ContextLabeler method drives the displayed text. It is the data source for a
 // foreign-key <select> in forms and the admin changelist's FK column.
 func LabeledRows(ctx context.Context, db *DB, m *Model) ([][2]string, error) {
 	pk := m.PrimaryKey()
@@ -31,7 +31,7 @@ func LabeledRows(ctx context.Context, db *DB, m *Model) ([][2]string, error) {
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out [][2]string
+	var objs []reflect.Value
 	for rows.Next() {
 		dest := reflect.New(m.GoType())
 		elem := dest.Elem()
@@ -42,11 +42,27 @@ func LabeledRows(ctx context.Context, db *DB, m *Model) ([][2]string, error) {
 		if err := rows.Scan(targets...); err != nil {
 			return nil, fmt.Errorf("orm: labeled rows %s: %w", m.Name(), err)
 		}
-		pkVal := elem.Field(pk.Index).Interface()
-		out = append(out, [2]string{fmt.Sprint(pkVal), Label(m, dest.Interface())})
+		objs = append(objs, dest)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("orm: labeled rows %s: %w", m.Name(), err)
+	}
+	_ = rows.Close()
+	return labelRows(ctx, db, m, objs)
+}
+
+// labelRows returns the (primary key, label) pairs of objs, pointers to
+// instances of m. Call it after the rows are closed: a ContextLabeler may
+// query the database on the same connection.
+func labelRows(ctx context.Context, db *DB, m *Model, objs []reflect.Value) ([][2]string, error) {
+	pk := m.PrimaryKey()
+	out := make([][2]string, 0, len(objs))
+	for _, obj := range objs {
+		label, err := LabelContext(ctx, db, m, obj.Interface())
+		if err != nil {
+			return nil, fmt.Errorf("orm: labeled rows %s: %w", m.Name(), err)
+		}
+		out = append(out, [2]string{fmt.Sprint(obj.Elem().Field(pk.Index).Interface()), label})
 	}
 	return out, nil
 }
@@ -97,17 +113,17 @@ func LabeledRowsOrdered(ctx context.Context, db *DB, m *Model, ordering []string
 	defer func() { _ = rows.Close() }()
 
 	plan := &rowPlan{model: m, ncols: len(m.fields)}
-	var out [][2]string
+	var objs []reflect.Value
 	for rows.Next() {
 		elem, _, err := plan.scan(rows)
 		if err != nil {
 			return nil, fmt.Errorf("orm: labeled rows %s: %w", m.Name(), err)
 		}
-		pkVal := elem.Field(pk.Index).Interface()
-		out = append(out, [2]string{fmt.Sprint(pkVal), Label(m, elem.Addr().Interface())})
+		objs = append(objs, elem.Addr())
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("orm: labeled rows %s: %w", m.Name(), err)
 	}
-	return out, nil
+	_ = rows.Close()
+	return labelRows(ctx, db, m, objs)
 }

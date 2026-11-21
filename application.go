@@ -442,9 +442,11 @@ func (a *Application) Close() error {
 }
 
 // adminSite builds the admin site and lets every app that implements
-// RegisterAdmin(*admin.AdminSite) register its models with it. It returns a nil
-// site (and nil error) when no app opts in, so the admin is mounted only when at
-// least one app registers a model -- mirroring Django's contrib.admin opt-in.
+// RegisterAdmin(*admin.AdminSite) register its models with it. With the auth
+// app installed, the site has admin.UserAdmin and admin.GroupAdmin first. It
+// returns a nil site (and nil error) when no app opts in, so the admin is
+// mounted only when at least one app registers a model -- mirroring Django's
+// contrib.admin opt-in.
 func (a *Application) adminSite(appConfigs []apps.Config) (*admin.AdminSite, error) {
 	registrars := adminRegistrars(appConfigs)
 	if len(registrars) == 0 {
@@ -456,6 +458,12 @@ func (a *Application) adminSite(appConfigs []apps.Config) (*admin.AdminSite, err
 	}
 	site.Apps = a.Apps
 	site.Debug = a.Settings.Debug
+	// Django's auth app registers its models with the admin; an app can
+	// register them again to replace these admins.
+	if a.Apps.IsInstalled(auth.App{}.Name()) {
+		admin.Register[auth.User](site, admin.UserAdmin(a.DB))
+		admin.Register[auth.Group](site, admin.GroupAdmin())
+	}
 	for _, ar := range registrars {
 		ar.RegisterAdmin(site)
 	}

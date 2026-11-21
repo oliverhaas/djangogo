@@ -438,9 +438,6 @@ func TestLabelVisibilityMixin(t *testing.T) {
 	})
 }
 
-// The password change page of a user needs the admin for users, which the Go
-// admin lacks, so that URL is left out.
-//
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_error_in_titles
 func TestErrorInTitles(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
@@ -449,12 +446,13 @@ func TestErrorInTitles(t *testing.T) {
 		if err := orm.Query[Article](db).Create(context.Background(), a1); err != nil {
 			t.Fatalf("Create(Article): %v", err)
 		}
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		for _, tc := range []struct{ url, subtitle string }{
 			{mustReverse(t, env.router, "admin:admin_views_article_change", a1.ID), "Article 1 | Change article"},
 			{mustReverse(t, env.router, "admin:admin_views_article_add"), "Add article"},
 			{mustReverse(t, env.router, "admin:login"), "Log in"},
 			{mustReverse(t, env.router, "admin:password_change"), "Password change"},
+			{mustReverse(t, env.router, "admin:auth_user_password_change", super.ID), "Change password: super"},
 		} {
 			t.Run(strings.Trim(tc.url, "/"), func(t *testing.T) {
 				env.client.ForceLogin(super)

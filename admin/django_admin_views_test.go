@@ -24,7 +24,7 @@ import (
 func TestDisallowedToField(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		u := mustReverse(t, env.router, "admin:admin_views_section_changelist")
@@ -65,7 +65,7 @@ func TestDisallowedToField(t *testing.T) {
 func TestPopupDismissRelated(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		actor := &Actor{Name: "Palin", Age: 27}
@@ -120,7 +120,7 @@ func TestJSMinifiedOnlyIfDebugIsFalse(t *testing.T) {
 func TestJSI18nFormatFallback(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		super := createTestUser(t, db, "super", "secret", true, true)
-		env := newAdminTestEnv(t, db, registerBasicAdminModels)
+		env := newAdminTestEnv(t, db, registerBasicAdminModels(db))
 		env.client.ForceLogin(super)
 
 		resp := env.client.Get(mustReverse(t, env.router, "admin:jsi18n"))

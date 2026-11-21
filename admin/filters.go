@@ -45,6 +45,9 @@ func lookupAllowed(e *entry, lookup string, listFilter []any) bool {
 	if lookup == "" {
 		return true
 	}
+	if e.admin.hooks != nil && e.admin.hooks.lookupAllowed != nil && !e.admin.hooks.lookupAllowed(lookup) {
+		return false
+	}
 
 	// Build set of valid relational paths and SimpleListFilter parameter names.
 	validLookups := make(map[string]bool, len(listFilter))
