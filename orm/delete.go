@@ -728,3 +728,171 @@ func (c *deleteCollector) execDeleteByPK(ctx context.Context, m *Model, pks []an
 	}
 	return total, nil
 }
+
+// DeleteModelGroup holds one model and the instances (as *T pointers) that
+// would be deleted as part of a DeletePlan.
+type DeleteModelGroup struct {
+	Model   *Model
+	Objects []any
+}
+
+// DeletePlan is the read-only preview of a cascading deletion produced by
+// CollectDelete. Groups lists each affected model and its objects in
+// collection order; Protected lists any referencing objects that block
+// deletion via ON DELETE PROTECT or ON DELETE RESTRICT.
+type DeletePlan struct {
+	Groups    []DeleteModelGroup
+	Protected []DeleteModelGroup
+}
+
+// CollectDelete inspects the database to compute which objects would be
+// cascade-deleted and which objects would block deletion if rows of m with
+// primary keys pks were deleted. It does not modify the database.
+func CollectDelete(ctx context.Context, db *DB, m *Model, pks []any) (*DeletePlan, error) {
+	plan := &DeletePlan{}
+	if m == nil || m.PrimaryKey() == nil || len(pks) == 0 {
+		return plan, nil
+	}
+	pkField := m.PrimaryKey()
+	normPKs := make([]any, 0, len(pks))
+	for _, pk := range pks {
+		normPKs = append(normPKs, normalizePK(pkField, pk))
+	}
+
+	col := newDeleteCollector(db)
+	protectedOrder := make([]*Model, 0)
+	protectedSet := make(map[*Model]map[any]bool)
+	protectedPKs := make(map[*Model][]any)
+	addProtected := func(pm *Model, ppks []any) {
+		if len(ppks) == 0 {
+			return
+		}
+		set := protectedSet[pm]
+		if set == nil {
+			set = make(map[any]bool, len(ppks))
+			protectedSet[pm] = set
+			protectedOrder = append(protectedOrder, pm)
+		}
+		for _, pk := range ppks {
+			if !set[pk] {
+				set[pk] = true
+				protectedPKs[pm] = append(protectedPKs[pm], pk)
+			}
+		}
+	}
+
+	var walk func(model *Model, ids []any) error
+	walk = func(model *Model, ids []any) error {
+		set := col.collectedSet[model]
+		if set == nil {
+			set = make(map[any]bool, len(ids))
+			col.collectedSet[model] = set
+			col.collectedOrder = append(col.collectedOrder, model)
+		}
+		newPKs := make([]any, 0, len(ids))
+		for _, pk := range ids {
+			if !set[pk] {
+				set[pk] = true
+				col.collected[model] = append(col.collected[model], pk)
+				newPKs = append(newPKs, pk)
+			}
+		}
+		if len(newPKs) == 0 {
+			return nil
+		}
+		for _, inc := range incomingFKs(db.registry, model) {
+			switch inc.field.Rel.OnDelete {
+			case OnDeleteDoNothing, OnDeleteSetNull:
+				continue
+			case OnDeleteProtect:
+				childPKs, err := col.fetchPKsByColumn(ctx, inc.model, inc.field.Column, newPKs)
+				if err != nil {
+					return err
+				}
+				addProtected(inc.model, childPKs)
+			case OnDeleteRestrict:
+				childPKs, err := col.fetchPKsByColumn(ctx, inc.model, inc.field.Column, newPKs)
+				if err != nil {
+					return err
+				}
+				if len(childPKs) > 0 {
+					col.restricted = append(col.restricted, restrictedEntry{
+						child: inc.model,
+						pks:   childPKs,
+					})
+				}
+			case OnDeleteCascade:
+				childPKs, err := col.fetchPKsByColumn(ctx, inc.model, inc.field.Column, newPKs)
+				if err != nil {
+					return err
+				}
+				if len(childPKs) == 0 {
+					continue
+				}
+				if err := walk(inc.model, childPKs); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
+	if err := walk(m, normPKs); err != nil {
+		return nil, err
+	}
+
+	for _, entry := range col.restricted {
+		deleted := col.collectedSet[entry.child]
+		var remaining []any
+		for _, pk := range entry.pks {
+			if !deleted[pk] {
+				remaining = append(remaining, pk)
+			}
+		}
+		addProtected(entry.child, remaining)
+	}
+
+	for _, gm := range col.collectedOrder {
+		if gm.AutoCreated() || gm.goType == nil {
+			continue
+		}
+		vals, err := col.fetchReflectByPK(ctx, gm, col.collected[gm])
+		if err != nil {
+			return nil, err
+		}
+		if len(vals) == 0 {
+			continue
+		}
+		objs := make([]any, len(vals))
+		for i := range vals {
+			objs[i] = vals[i].Addr().Interface()
+		}
+		plan.Groups = append(plan.Groups, DeleteModelGroup{
+			Model:   gm,
+			Objects: objs,
+		})
+	}
+
+	for _, pm := range protectedOrder {
+		if pm.AutoCreated() || pm.goType == nil {
+			continue
+		}
+		vals, err := col.fetchReflectByPK(ctx, pm, protectedPKs[pm])
+		if err != nil {
+			return nil, err
+		}
+		if len(vals) == 0 {
+			continue
+		}
+		objs := make([]any, len(vals))
+		for i := range vals {
+			objs[i] = vals[i].Addr().Interface()
+		}
+		plan.Protected = append(plan.Protected, DeleteModelGroup{
+			Model:   pm,
+			Objects: objs,
+		})
+	}
+
+	return plan, nil
+}

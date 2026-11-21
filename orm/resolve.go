@@ -389,3 +389,122 @@ func resolveFieldPath(m *Model, key string, extra []string) (fieldPath, error) {
 		Message: "cannot resolve keyword '" + p.rest[0] + "' into field. Join on '" + p.field.Attr + "' not permitted.",
 	}
 }
+
+// LookupPathInfo describes the result of resolving a "__"-separated field,
+// relation, or lookup path against a Model.
+type LookupPathInfo struct {
+	// Field is the terminal concrete field addressed by the path, or the
+	// declared M2M field when the path ends on a forward many-to-many relation.
+	Field *Field
+	// Model is the model that owns Field.
+	Model *Model
+	// TargetModel is the logical target model when the path ends on a relation
+	// (or on a forward relation's primary key).
+	TargetModel *Model
+	// Lookup is the trailing ORM lookup name (such as "exact" or "icontains"),
+	// or "" when no explicit lookup was given.
+	Lookup string
+	// IsRelation reports whether the path ended on a relation rather than a
+	// scalar field.
+	IsRelation bool
+	// IsM2M reports whether the path ended on a forward or reverse M2M relation.
+	IsM2M bool
+	// Reverse is set when the path ended on a reverse relation.
+	Reverse *ReverseRelation
+	// SpawnsDuplicates reports whether any join hop along the path traverses a
+	// multi-valued relation (reverse FK, forward M2M, or reverse M2M).
+	SpawnsDuplicates bool
+	// RelationParts holds the path segments up to and including the terminal
+	// relation or field, excluding any trailing lookup.
+	RelationParts []string
+}
+
+// ResolveLookupPath resolves lookupPath against m using the ORM's relation path
+// resolver. It returns false when the path cannot be resolved or carries an
+// unknown trailing lookup.
+func ResolveLookupPath(m *Model, lookupPath string) (LookupPathInfo, bool) {
+	if m == nil || lookupPath == "" {
+		return LookupPathInfo{}, false
+	}
+	parts := strings.Split(lookupPath, lookupSep)
+	p, err := resolvePath(m, parts, nil)
+	if err != nil {
+		return LookupPathInfo{}, false
+	}
+	var lookup string
+	switch len(p.rest) {
+	case 0:
+	case 1:
+		if !knownLookup(p.rest[0]) {
+			return LookupPathInfo{}, false
+		}
+		lookup = p.rest[0]
+	default:
+		return LookupPathInfo{}, false
+	}
+
+	spawns := false
+	for _, h := range p.hops {
+		if h.many {
+			spawns = true
+			break
+		}
+	}
+	if !spawns {
+		for _, h := range p.trimmed {
+			if h.many {
+				spawns = true
+				break
+			}
+		}
+	}
+
+	relParts := parts[:len(parts)-len(p.rest)]
+	info := LookupPathInfo{
+		Field:            p.field,
+		Model:            p.model,
+		TargetModel:      p.targetModel,
+		Lookup:           lookup,
+		IsRelation:       p.relation,
+		IsM2M:            p.m2m,
+		Reverse:          p.reverse,
+		SpawnsDuplicates: spawns,
+		RelationParts:    relParts,
+	}
+
+	// Populate TargetModel for forward FK/O2O and reverse relations, and
+	// surface the declared M2M field (for verbose names) on forward M2M paths.
+	switch {
+	case p.reverse != nil:
+		info.TargetModel = p.reverse.Source
+	case p.m2m && len(relParts) > 0:
+		owner := m
+		for _, seg := range relParts[:len(relParts)-1] {
+			_, rel, ok := lookupName(owner, seg)
+			if !ok || rel == nil {
+				owner = nil
+				break
+			}
+			owner = rel.target
+		}
+		if owner != nil {
+			if mf, ok := owner.byM2MAttr[relParts[len(relParts)-1]]; ok {
+				info.Field = mf
+				info.Model = owner
+			}
+		}
+	case p.field != nil && p.field.Rel != nil && p.field.Rel.Target != nil:
+		info.TargetModel = p.field.Rel.Target
+	}
+
+	return info, true
+}
+
+// LookupSpawnsDuplicates reports whether filtering by lookupPath on model m
+// traverses any multi-valued relation (reverse FK or M2M) and can therefore
+// produce duplicate rows without DISTINCT, matching Django's
+// lookup_spawns_duplicates.
+func LookupSpawnsDuplicates(m *Model, lookupPath string) bool {
+	info, ok := ResolveLookupPath(m, lookupPath)
+	return ok && info.SpawnsDuplicates
+}
