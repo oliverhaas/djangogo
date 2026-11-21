@@ -274,6 +274,14 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - The fidelity harness also compares query SQL (86 cases) and migration SQL (29
   operations) with Django 6.0.3 on SQLite and PostgreSQL, and
   `go generate ./fidelity/...` regenerates the golden files from Django.
+- Forms: `forms.FormSet` edits several copies of a form on one page, as
+  Django's formsets do: the management form, `Extra`, `MinNum`, `MaxNum`,
+  `AbsoluteMax`, `ValidateMin`, `ValidateMax`, ordering (`CanOrder`,
+  `OrderedForms`) and deletion (`CanDelete`, `CanDeleteExtra`,
+  `DeletedForms`), the empty form for JavaScript, non-form errors from
+  `FormSet.CleanWith`, and Django's error messages and HTML. `ConfigureForm`
+  takes the place of `form_kwargs`, and `forms.AllValid` validates several
+  formsets.
 
 ### Changed
 

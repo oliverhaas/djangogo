@@ -94,6 +94,24 @@
 // that the model does not have makes the form fail (Form.Err) with Django's
 // FieldError message.
 //
+// # Formsets
+//
+// A FormSet shows and validates several copies of a form, as Django's
+// formset_factory does. The arguments of formset_factory are exported fields:
+//
+//	fs := forms.NewFormSet(newArticleForm)
+//	fs.Extra, fs.CanDelete = 2, true
+//	bound := fs.Bind(r.PostForm)
+//	if bound.IsValid() {
+//		for _, data := range bound.CleanedData() { ... }
+//	}
+//
+// ConfigureForm changes each form after it is built, where Django passes
+// form_kwargs. A clean() method of the formset is a function registered with
+// FormSet.CleanWith; its errors are the non-form errors. In a template a
+// formset is used as in Django: {{ formset.management_form }}, {% for form in
+// formset.forms %} and {{ formset.empty_form }}.
+//
 // # Not covered
 //
 // File uploads (FileField, ImageField, ClearableFileInput), option groups in

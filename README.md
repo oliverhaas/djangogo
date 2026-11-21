@@ -192,7 +192,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   literal name, and `{% lorem %}` is pongo2's tag. A template never runs a
   query: a relation renders empty unless the view loaded it with
   `SelectRelated` or `PrefetchRelated`.
-- **Forms:** no formsets, file fields or option groups, no localization and no
+- **Forms:** no model formsets, no file fields or option groups, no localization and no
   custom renderers. A template
   cannot loop over a form with `{% for field in form %}`: use `form.fields`.
   `ModelChoiceField` and `ModelMultipleChoiceField` have no `to_field_name` or
