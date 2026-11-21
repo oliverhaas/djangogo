@@ -2,7 +2,6 @@ package forms
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"maps"
@@ -10,8 +9,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
-	"unicode"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -37,13 +34,17 @@ func (invalidSaveError) Unwrap() error { return ErrInvalid }
 // default carry over. A foreign key becomes a ModelChoiceField whose options
 // the caller sets with Form.SetChoices; NewModelForm loads them itself.
 func FromModel(m *orm.Model, opts ...ModelFormOption) *Form {
-	return buildModelForm(nil, m, newModelFormConfig(opts))
+	form, _ := buildModelForm(nil, m, newModelFormConfig(opts))
+	return form
 }
 
-// buildModelForm derives the form of a model; db may be nil. A WithFields
-// name that the form cannot have makes the form fail with the FieldError
-// message of Django's ModelFormMetaclass and fields_for_model.
-func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) *Form {
+// buildModelForm derives the form of a model; db may be nil. It also returns
+// the set of model field attribute names included by WithFields/WithExclude
+// (excluding fields declared only via WithFormField outside Meta.fields or
+// inside Meta.exclude). A WithFields name that the form cannot have makes the
+// form fail with the FieldError message of Django's ModelFormMetaclass and
+// fields_for_model.
+func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[string]bool) {
 	cfg.normalize(m)
 	var all []string
 	for _, mf := range m.Fields() {
@@ -52,6 +53,7 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) *Form {
 		}
 	}
 	form := New()
+	included := map[string]bool{}
 	var unknown []string
 	for _, name := range cfg.includedNames(all) {
 		field := cfg.formFields[name]
@@ -75,6 +77,9 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) *Form {
 		if field == nil {
 			continue
 		}
+		if isModelField {
+			included[name] = true
+		}
 		cfg.apply(name, field)
 		form.AddField(name, field)
 	}
@@ -89,7 +94,7 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) *Form {
 	if len(unknown) > 0 {
 		form.fail(fmt.Errorf("forms: Unknown field(s) (%s) specified for %s", strings.Join(unknown, ", "), m.Name()))
 	}
-	return form
+	return form, included
 }
 
 // editable reports whether a model field appears in a model form.
@@ -107,55 +112,6 @@ func fieldLabel(mf *orm.Field) string {
 	return capfirst(name)
 }
 
-// formFieldFor returns the form field of a model field, Django's
-// Field.formfield, or nil for a kind that has none.
-func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory) Field {
-	opts := []FieldOption{Required(!mf.Blank), Label(fieldLabel(mf)), HelpText(mf.HelpText)}
-	if mf.HasDefault {
-		opts = append(opts, Initial(mf.Default))
-	}
-	if mf.Rel != nil {
-		var field Field
-		if factory != nil {
-			field = factory(db, opts)
-		}
-		if field == nil {
-			field = newRelatedChoiceField(db, mf.Rel.Target, collectOptions(opts))
-		}
-		if choice, ok := field.(*ModelChoiceField); ok {
-			choice.Blank = mf.Blank
-		}
-		return field
-	}
-	if len(mf.Choices) > 0 {
-		choices := make([]Choice, 0, len(mf.Choices)+1)
-		// The empty option lets the user leave the field unset; a field with a
-		// default starts on that default and needs none.
-		if mf.Blank || !mf.HasDefault {
-			choices = append(choices, Choice{Value: "", Label: EmptyChoiceLabel})
-		}
-		for _, c := range mf.Choices {
-			choices = append(choices, Choice{Value: c.Value, Label: c.Label})
-		}
-		return NewTypedChoiceField(append(opts, ChoiceList(choices))...)
-	}
-	switch mf.Kind {
-	case orm.KindChar:
-		return NewCharField(append(opts, MaxLength(mf.MaxLength))...)
-	case orm.KindText:
-		return NewCharField(append(opts, UseWidget(Textarea{}))...)
-	case orm.KindInt:
-		return NewIntegerField(opts...)
-	case orm.KindBool:
-		// An unchecked box is a valid "false", so the field is never required.
-		return NewBooleanField(append(opts, Required(false))...)
-	case orm.KindDateTime:
-		return NewDateTimeField(opts...)
-	default:
-		return nil
-	}
-}
-
 // structValue returns the struct that obj is or points to.
 func structValue(obj any) (reflect.Value, bool) {
 	rv := reflect.ValueOf(obj)
@@ -166,23 +122,6 @@ func structValue(obj any) (reflect.Value, bool) {
 		rv = rv.Elem()
 	}
 	return rv, rv.Kind() == reflect.Struct
-}
-
-// fieldInitial returns the value of a model field of an instance as a form
-// shows it: the primary key for a relation, nil for an unset relation or time.
-func fieldInitial(mf *orm.Field, fv reflect.Value) any {
-	if mf.Rel != nil {
-		pk := relationPK(fv)
-		if pk == 0 {
-			return nil
-		}
-		return pk
-	}
-	v := fv.Interface()
-	if t, ok := v.(time.Time); ok && t.IsZero() {
-		return nil
-	}
-	return v
 }
 
 // relationPK returns the primary key held by a relation field.
@@ -295,72 +234,6 @@ func relatedPK(mf *orm.Field, val any) (int64, error) {
 	return 0, fmt.Errorf("forms: field %s: cannot use %T as a primary key", mf.Attr, val)
 }
 
-// setScalar assigns a cleaned value to a struct field, converting between the
-// numeric types and filling pointers and sql.Scanner types such as
-// sql.NullString.
-func setScalar(mf *orm.Field, fv reflect.Value, val any) error {
-	if val == nil {
-		fv.SetZero()
-		return nil
-	}
-	rv := reflect.ValueOf(val)
-	if rv.Type().AssignableTo(fv.Type()) {
-		fv.Set(rv)
-		return nil
-	}
-	switch fv.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if n, ok := toInt(val); ok && !fv.OverflowInt(n) {
-			fv.SetInt(n)
-			return nil
-		}
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if n, ok := toInt(val); ok && n >= 0 && !fv.OverflowUint(uint64(n)) {
-			fv.SetUint(uint64(n))
-			return nil
-		}
-	case reflect.Float32, reflect.Float64:
-		if n, ok := toFloat(val); ok {
-			fv.SetFloat(n)
-			return nil
-		}
-	case reflect.String:
-		if s, ok := val.(string); ok {
-			fv.SetString(s)
-			return nil
-		}
-	case reflect.Pointer:
-		target := reflect.New(fv.Type().Elem())
-		if err := setScalar(mf, target.Elem(), val); err != nil {
-			return err
-		}
-		fv.Set(target)
-		return nil
-	}
-	if scanner, ok := fv.Addr().Interface().(sql.Scanner); ok {
-		if err := scanner.Scan(val); err != nil {
-			return fmt.Errorf("forms: field %s: %w", mf.Attr, err)
-		}
-		return nil
-	}
-	return fmt.Errorf("forms: field %s: cannot assign %T to %s", mf.Attr, val, fv.Type())
-}
-
-// modelVerboseName returns the human-readable name of a model, derived from
-// its Go type name: "BlogPost" becomes "blog post".
-func modelVerboseName(m *orm.Model) string {
-	var b strings.Builder
-	runes := []rune(m.Name())
-	for i, c := range runes {
-		if i > 0 && unicode.IsUpper(c) &&
-			(unicode.IsLower(runes[i-1]) || (i+1 < len(runes) && unicode.IsLower(runes[i+1]))) {
-			b.WriteByte(' ')
-		}
-		b.WriteRune(unicode.ToLower(c))
-	}
-	return b.String()
-}
-
 // ModelForm is a form derived from the model T that saves an instance of it,
 // the counterpart of Django's ModelForm. It embeds the Form, so everything a
 // form does is available on it.
@@ -371,16 +244,20 @@ func modelVerboseName(m *orm.Model) string {
 //		post, err := form.Save(r.Context())
 //	}
 //
-// Validation fills the instance from the cleaned data and checks the unique
-// fields against the database, so that a duplicate is a form error ("Post with
-// this Slug already exists.") and not a failed INSERT.
+// Validation fills the instance from the cleaned data, runs model validation
+// (orm.Model.FullClean with WithValidateUnique(false)), and validates unique
+// and unique_together constraints against the database (orm.ValidateUnique),
+// attaching errors to form fields or non-field errors just as Django's
+// BaseModelForm._post_clean does.
 type ModelForm[T any] struct {
 	*Form
 
-	db       *orm.DB
-	model    *orm.Model
-	instance *T
-	own      bool // the caller supplied the instance
+	db                    *orm.DB
+	model                 *orm.Model
+	instance              *T
+	own                   bool // the caller supplied the instance
+	includedFields        map[string]bool
+	nonFieldErrorMessages map[string]string
 }
 
 // NewModelForm returns an unbound form for a new instance of T. A foreign key
@@ -395,9 +272,13 @@ func NewModelForm[T any](db *orm.DB, opts ...ModelFormOption) *ModelForm[T] {
 		mf.fail(fmt.Errorf("forms: %T is not a registered model", *mf.instance))
 		return mf
 	}
+	cfg := newModelFormConfig(opts)
 	mf.model = model
 	mf.instance = mf.newInstance()
-	mf.Form = buildModelForm(db, model, newModelFormConfig(opts))
+	mf.Form, mf.includedFields = buildModelForm(db, model, cfg)
+	if msgs, ok := cfg.errorMessages[NonFieldErrors]; ok && len(msgs) > 0 {
+		mf.nonFieldErrorMessages = maps.Clone(msgs)
+	}
 	mf.install()
 	return mf
 }
@@ -473,79 +354,140 @@ func (mf *ModelForm[T]) adding() bool {
 }
 
 // constructData returns the cleaned data that goes into the instance, Django's
-// construct_instance: a field with a model default keeps that default when the
-// data has no value for it and its cleaned value is empty.
+// construct_instance: model fields omitted by WithFields/WithExclude are
+// skipped, and a field with a model default keeps that default when the data
+// has no value for it and its cleaned value is empty.
 func (mf *ModelForm[T]) constructData(f *Form) map[string]any {
 	data, cloned := f.cleaned, false
+	cloneIfNeeded := func() {
+		if !cloned {
+			data, cloned = maps.Clone(f.cleaned), true
+		}
+	}
 	for _, field := range mf.model.Fields() {
 		value, ok := data[field.Attr]
-		if !field.HasDefault || !ok || !isEmpty(value) {
+		if !ok {
+			continue
+		}
+		if !editable(field) || !mf.includedFields[field.Attr] {
+			cloneIfNeeded()
+			delete(data, field.Attr)
+			continue
+		}
+		if !field.HasDefault || !isEmpty(value) {
 			continue
 		}
 		def, ok := f.fields[field.Attr]
 		if !ok || !def.Base().Widget.ValueOmittedFromData(f.data, f.AddPrefix(field.Attr)) {
 			continue
 		}
-		if !cloned {
-			data, cloned = maps.Clone(f.cleaned), true
-		}
+		cloneIfNeeded()
 		delete(data, field.Attr)
 	}
 	return data
 }
 
-// postClean is the model part of validation, Django's _post_clean: it fills
-// the instance from the cleaned data and validates the unique fields,
-// including a primary key that the form sets.
+// validationExclusions returns the model field attribute names excluded from
+// model validation and uniqueness checks, matching Django's
+// BaseModelForm._get_validation_exclusions.
+func (mf *ModelForm[T]) validationExclusions(f *Form) []string {
+	var exclude []string
+	for _, field := range mf.model.Fields() {
+		name := field.Attr
+		formField, onForm := f.fields[name]
+		switch {
+		case !onForm:
+			exclude = append(exclude, name)
+		case !mf.includedFields[name]:
+			exclude = append(exclude, name)
+		case f.HasError(name):
+			exclude = append(exclude, name)
+		case !field.Blank && !formField.Base().Required && isEmpty(f.cleaned[name]):
+			exclude = append(exclude, name)
+		}
+	}
+	return exclude
+}
+
+// updateErrors merges a model-level *ValidationError into f, overriding
+// message templates by code from the matching form field (or
+// WithErrorMessages(NonFieldErrors, ...)) as Django's
+// BaseModelForm._update_errors does.
+func (mf *ModelForm[T]) updateErrors(f *Form, ve *ValidationError) {
+	errorDict := ve.Fields
+	if !ve.IsDict() {
+		errorDict = map[string][]*ValidationError{NonFieldErrors: ve.ErrorList()}
+	}
+	patched := make(map[string][]*ValidationError, len(errorDict))
+	for field, list := range errorDict {
+		var overrides map[string]string
+		if field == NonFieldErrors {
+			overrides = mf.nonFieldErrorMessages
+		} else if ff, ok := f.fields[field]; ok {
+			overrides = ff.Base().ErrorMessages
+		}
+		target := field
+		if field != NonFieldErrors && f.fields[field] == nil {
+			target = NonFieldErrors
+		}
+		for _, item := range list {
+			cp := *item
+			if overrides != nil && cp.Code != "" {
+				if msg, ok := overrides[cp.Code]; ok {
+					cp.Message = msg
+				}
+			}
+			patched[target] = append(patched[target], &cp)
+		}
+	}
+	f.AddError("", &ValidationError{Fields: patched})
+}
+
+// postClean is the model part of validation, Django's BaseModelForm._post_clean:
+// it fills the instance from the cleaned data, runs instance.FullClean with
+// validate_unique disabled, and then runs orm.ValidateUnique with recomputed
+// exclusions.
 func (mf *ModelForm[T]) postClean(f *Form) {
 	if mf.model == nil || mf.instance == nil {
 		return
 	}
 	if err := PopulateStruct(mf.model, mf.constructData(f), mf.instance); err != nil {
-		f.fail(err)
-		return
-	}
-	rv := reflect.ValueOf(mf.instance).Elem()
-	pk := mf.model.PrimaryKey()
-	for _, field := range mf.model.Fields() {
-		// A field that failed its own validation, or is not part of the form,
-		// is not checked, as in Django.
-		if _, ok := f.cleaned[field.Attr]; !ok || !field.Unique && !field.PrimaryKey {
-			continue
-		}
-		value := fieldInitial(field, rv.Field(field.Index))
-		if value == nil {
-			continue // NULL never collides
-		}
-		q := orm.Query[T](mf.db).Filter(field.Column, value)
-		if pk != nil && !mf.adding() {
-			q = q.Exclude(pk.Column, rv.Field(pk.Index).Interface())
-		}
-		exists, err := q.Exists(f.context())
-		if err != nil {
-			f.fail(fmt.Errorf("forms: unique check of %s: %w", field.Attr, err))
-			continue
-		}
-		if exists {
-			f.AddError(field.Attr, NewValidationError(uniqueMessage(f, field.Attr), "unique", map[string]any{
-				"model_name":  capfirst(modelVerboseName(mf.model)),
-				"field_label": fieldLabel(field),
-			}))
+		var ve *ValidationError
+		if errors.As(err, &ve) {
+			mf.updateErrors(f, ve)
+		} else {
+			f.fail(err)
+			return
 		}
 	}
-}
 
-// uniqueMessage returns the message of a unique error on a field: the
-// "unique" message of the form field when it has one (WithErrorMessages), as
-// Django's ModelForm._update_errors replaces the message of a model error,
-// otherwise the default of the model field.
-func uniqueMessage(f *Form, name string) string {
-	if def, ok := f.fields[name]; ok {
-		if msg, ok := def.Base().ErrorMessages["unique"]; ok {
-			return msg
+	exclude := mf.validationExclusions(f)
+	if err := mf.model.FullClean(f.context(), mf.db, mf.instance,
+		orm.WithExclude(exclude...),
+		orm.WithValidateUnique(false),
+	); err != nil {
+		var ve *ValidationError
+		if errors.As(err, &ve) {
+			mf.updateErrors(f, ve)
+		} else {
+			f.fail(fmt.Errorf("forms: model clean: %w", err))
 		}
 	}
-	return "%(model_name)s with this %(field_label)s already exists."
+
+	if mf.db != nil {
+		uniqueExclude := mf.validationExclusions(f)
+		if err := orm.ValidateUnique(f.context(), mf.db, mf.instance,
+			orm.WithExclude(uniqueExclude...),
+			orm.WithAdding(mf.adding()),
+		); err != nil {
+			var ve *ValidationError
+			if errors.As(err, &ve) {
+				mf.updateErrors(f, ve)
+			} else {
+				f.fail(fmt.Errorf("forms: unique check: %w", err))
+			}
+		}
+	}
 }
 
 // Save validates the form when that has not happened yet and writes the

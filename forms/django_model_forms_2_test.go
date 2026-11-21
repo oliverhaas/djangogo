@@ -274,8 +274,6 @@ func TestUniqueSimpleUnique(t *testing.T) {
 }
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_unique_together
-//
-// The ORM has no unique_together.
 func TestUniqueUniqueTogether(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		newForm := func() *forms.ModelForm[Price] {
@@ -287,9 +285,7 @@ func TestUniqueUniqueTogether(t *testing.T) {
 			t.Fatal(err)
 		}
 		form = newForm().Bind(vals("price", "6.00", "quantity", "1"))
-		if form.IsValid() {
-			t.Skip("FIXME-PORT: Go: the ORM has no unique_together, so the duplicate row is valid, Django: error ['Price with this Price and Quantity already exists.'] under __all__")
-		}
+		djangotest.AssertEqual(t, form.IsValid(), false)
 		djangotest.AssertEqual(t, form.Errors().Len(), 1)
 		djangotest.AssertEqual(t, form.Errors().Messages()["__all__"],
 			[]string{"Price with this Price and Quantity already exists."})
@@ -297,8 +293,6 @@ func TestUniqueUniqueTogether(t *testing.T) {
 }
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_unique_null
-//
-// The ORM has no unique_together.
 func TestUniqueUniqueNull(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		ctx := context.Background()
@@ -316,12 +310,19 @@ func TestUniqueUniqueNull(t *testing.T) {
 			t.Fatal(err)
 		}
 		form = newForm().Bind(vals("title", title, "author", "1"))
-		if form.IsValid() {
-			t.Skip("FIXME-PORT: Go: the ORM has no unique_together, so the duplicate row is valid, Django: error ['Book with this Title and Author already exists.'] under __all__")
-		}
+		djangotest.AssertEqual(t, form.IsValid(), false)
 		djangotest.AssertEqual(t, form.Errors().Len(), 1)
 		djangotest.AssertEqual(t, form.Errors().Messages()["__all__"],
 			[]string{"Book with this Title and Author already exists."})
+
+		// NULL author does not trigger unique_together.
+		form = newForm().Bind(vals("title", title))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+		if _, err := form.Save(ctx); err != nil {
+			t.Fatal(err)
+		}
+		form = newForm().Bind(vals("title", title))
+		djangotest.AssertEqual(t, form.IsValid(), true)
 	})
 }
 
@@ -337,9 +338,7 @@ func TestUniqueExplicitpkUnspecified(t *testing.T) {
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_explicitpk_unique
 //
-// Ensure keys and blank character strings are tested for uniqueness. Django
-// reports three errors on a database that stores empty strings: key, desc and
-// the unique_together of both, which the ORM lacks.
+// Ensure keys and blank character strings are tested for uniqueness.
 func TestUniqueExplicitpkUnique(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		newForm := func() *forms.ModelForm[ExplicitPK] {
@@ -353,10 +352,9 @@ func TestUniqueExplicitpkUnique(t *testing.T) {
 		form = newForm().Bind(vals("key", "key1", "desc", ""))
 		djangotest.AssertEqual(t, form.IsValid(), false)
 		messages := form.Errors().Messages()
+		djangotest.AssertEqual(t, form.Errors().Len(), 3)
 		djangotest.AssertEqual(t, messages["desc"], []string{"Explicit pk with this Desc already exists."})
 		djangotest.AssertEqual(t, messages["key"], []string{"Explicit pk with this Key already exists."})
-		t.Skip("FIXME-PORT: Go: the ORM has no unique_together, so the form has 2 errors, Django: 3 errors, the third under __all__")
-		djangotest.AssertEqual(t, form.Errors().Len(), 3)
 		djangotest.AssertEqual(t, messages["__all__"],
 			[]string{"Explicit pk with this Key and Desc already exists."})
 	})
@@ -380,17 +378,47 @@ func TestUniqueOverrideUniqueMessage(t *testing.T) {
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_override_unique_together_message
 func TestUniqueOverrideUniqueTogetherMessage(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no unique_together, so there is no unique_together error to override, Django: Meta.error_messages[NON_FIELD_ERRORS]['unique_together'] gives \"Price's Price and Quantity not unique.\"")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		if err := orm.Query[Price](db).Create(context.Background(), &Price{Price: orm.MustDecimal("6.00"), Quantity: 1}); err != nil {
+			t.Fatal(err)
+		}
+		form := forms.NewModelForm[Price](db, forms.WithFields(forms.AllFields),
+			forms.WithErrorMessages(forms.NonFieldErrors, map[string]string{
+				"unique_together": "%(model_name)s's %(field_labels)s not unique.",
+			})).Bind(vals("price", "6.00", "quantity", "1"))
+		djangotest.AssertEqual(t, form.Errors().Len(), 1)
+		djangotest.AssertEqual(t, form.Errors().Messages()[forms.NonFieldErrors],
+			[]string{"Price's Price and Quantity not unique."})
+	})
 }
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_unique_together_exclusion
 func TestUniqueUniqueTogetherExclusion(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no unique_together, Django: a unique_together that names an excluded field is not checked (Triple model)")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		if err := orm.Query[DerivedBook](db).Create(context.Background(), &DerivedBook{ISBN: "12345"}); err != nil {
+			t.Fatal(err)
+		}
+		// Only suffix1 is included in the form, so unique_together(suffix1, suffix2) is skipped.
+		form := forms.NewModelForm[DerivedBook](db, forms.WithFields("isbn", "suffix1")).
+			Bind(vals("isbn", "56789", "suffix1", "0"))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+	})
 }
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_multiple_field_unique_together
 func TestUniqueMultipleFieldUniqueTogether(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no unique_together, Django: two overlapping unique_together tuples are checked separately (Triple model)")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		if err := orm.Query[Triple](db).Create(context.Background(), &Triple{Left: 1, Middle: 2, Right: 3}); err != nil {
+			t.Fatal(err)
+		}
+		form := forms.NewModelForm[Triple](db, forms.WithFields(forms.AllFields)).
+			Bind(vals("left", "1", "middle", "2", "right", "3"))
+		djangotest.AssertEqual(t, form.IsValid(), false)
+
+		form = forms.NewModelForm[Triple](db, forms.WithFields(forms.AllFields)).
+			Bind(vals("left", "1", "middle", "3", "right", "1"))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+	})
 }
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_unique_for_date

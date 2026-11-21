@@ -1,0 +1,563 @@
+package forms
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/netip"
+	"reflect"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/oliverhaas/djangogo/orm"
+)
+
+// Reflected target types used when converting cleaned form values into model
+// struct fields and when reading initial values back out of model instances.
+var (
+	ormDecimalType     = reflect.TypeOf(orm.Decimal{})
+	ormDateType        = reflect.TypeOf(orm.Date{})
+	ormTimeType        = reflect.TypeOf(orm.Time{})
+	ormUUIDType        = reflect.TypeOf(orm.UUID{})
+	goTimeType         = reflect.TypeOf(time.Time{})
+	netipAddrType      = reflect.TypeOf(netip.Addr{})
+	jsonRawMessageType = reflect.TypeOf(json.RawMessage(nil))
+	byteSliceType      = reflect.TypeOf([]byte(nil))
+)
+
+// formFieldFor returns the form field of a model field, Django's
+// Field.formfield, or nil for a kind that has none (such as KindAuto).
+func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory) Field {
+	opts := []FieldOption{Required(!mf.Blank), Label(fieldLabel(mf)), HelpText(mf.HelpText)}
+	if mf.HasDefault {
+		if mf.Default == orm.DefaultUUID4 {
+			opts = append(opts, Initial(func() any { return orm.NewUUID().String() }))
+		} else {
+			opts = append(opts, Initial(mf.Default))
+		}
+	}
+	if mf.Rel != nil {
+		var field Field
+		if factory != nil {
+			field = factory(db, opts)
+		}
+		if field == nil {
+			field = newRelatedChoiceField(db, mf.Rel.Target, collectOptions(opts))
+		}
+		if choice, ok := field.(*ModelChoiceField); ok {
+			choice.Blank = mf.Blank
+		}
+		return field
+	}
+	if mf.HasChoices {
+		includeBlank := mf.Blank || !mf.HasDefault
+		if mf.Kind == orm.KindBool {
+			includeBlank = !mf.HasDefault
+		}
+		choices := flattenORMChoices(mf.GetChoices(includeBlank))
+		opts = append(opts, ChoiceList(choices), Coerce(coerceForField(mf)))
+		if mf.Null {
+			opts = append(opts, EmptyValue(nil))
+		}
+		return NewTypedChoiceField(opts...)
+	}
+	return formFieldForKind(mf, opts)
+}
+
+// formFieldForKind maps each non-relation, non-choice orm.Kind to its Django
+// form field with length, digit, protocol, and integer range options.
+func formFieldForKind(mf *orm.Field, opts []FieldOption) Field {
+	switch mf.Kind {
+	case orm.KindChar:
+		if mf.MaxLength > 0 {
+			opts = append(opts, MaxLength(mf.MaxLength))
+		}
+		if mf.Null {
+			opts = append(opts, EmptyValue(nil))
+		}
+		return NewCharField(opts...)
+	case orm.KindText:
+		opts = append(opts, UseWidget(Textarea{}))
+		if mf.MaxLength > 0 {
+			opts = append(opts, MaxLength(mf.MaxLength))
+		}
+		return NewCharField(opts...)
+	case orm.KindSlug:
+		if mf.MaxLength > 0 {
+			opts = append(opts, MaxLength(mf.MaxLength))
+		}
+		if mf.AllowUnicode {
+			opts = append(opts, AllowUnicode())
+		}
+		if mf.Null {
+			opts = append(opts, EmptyValue(nil))
+		}
+		return NewSlugField(opts...)
+	case orm.KindEmail:
+		if mf.MaxLength > 0 {
+			opts = append(opts, MaxLength(mf.MaxLength))
+		}
+		if mf.Null {
+			opts = append(opts, EmptyValue(nil))
+		}
+		return NewEmailField(opts...)
+	case orm.KindURL:
+		if mf.MaxLength > 0 {
+			opts = append(opts, MaxLength(mf.MaxLength))
+		}
+		if mf.Null {
+			opts = append(opts, EmptyValue(nil))
+		}
+		return NewURLField(opts...)
+	case orm.KindGenericIPAddress:
+		if mf.Protocol != "" {
+			opts = append(opts, Protocol(mf.Protocol))
+		}
+		if mf.UnpackIPv4 {
+			opts = append(opts, UnpackIPv4())
+		}
+		if mf.Null {
+			opts = append(opts, EmptyValue(nil))
+		}
+		return NewGenericIPAddressField(opts...)
+	case orm.KindInt, orm.KindSmallInt:
+		if minVal, maxVal, ok := mf.IntRange(); ok {
+			// Match Django's IntegerField/SmallIntegerField widget (no min/max
+			// HTML attributes) while still enforcing the storage range before
+			// PopulateStruct writes to int16/int32.
+			opts = append(opts, Validators(MinValueValidator(minVal), MaxValueValidator(maxVal)))
+		}
+		return NewIntegerField(opts...)
+	case orm.KindBigInt:
+		if minVal, maxVal, ok := mf.IntRange(); ok {
+			opts = append(opts, MinValue(minVal), MaxValue(maxVal))
+		}
+		return NewIntegerField(opts...)
+	case orm.KindPositiveSmallInt, orm.KindPositiveInt:
+		if _, maxVal, ok := mf.IntRange(); ok {
+			opts = append(opts, MinValue(int64(0)), Validators(MaxValueValidator(maxVal)))
+		}
+		return NewIntegerField(opts...)
+	case orm.KindPositiveBigInt:
+		if _, maxVal, ok := mf.IntRange(); ok {
+			opts = append(opts, MinValue(int64(0)), MaxValue(maxVal))
+		}
+		return NewIntegerField(opts...)
+	case orm.KindFloat:
+		return NewFloatField(opts...)
+	case orm.KindDecimal:
+		if mf.MaxDigits > 0 {
+			opts = append(opts, MaxDigits(mf.MaxDigits), DecimalPlaces(mf.DecimalPlaces))
+		} else if mf.DecimalPlaces > 0 {
+			opts = append(opts, DecimalPlaces(mf.DecimalPlaces))
+		}
+		return NewDecimalField(opts...)
+	case orm.KindBool:
+		// An unchecked box is a valid "false", so the field is never required.
+		if mf.Null {
+			return NewNullBooleanField(append(opts, Required(false))...)
+		}
+		return NewBooleanField(append(opts, Required(false))...)
+	case orm.KindDateTime:
+		return NewDateTimeField(opts...)
+	case orm.KindDate:
+		return NewDateField(opts...)
+	case orm.KindTime:
+		return NewTimeField(opts...)
+	case orm.KindDuration:
+		return NewDurationField(opts...)
+	case orm.KindUUID:
+		return NewUUIDField(opts...)
+	case orm.KindJSON:
+		return NewJSONField(opts...)
+	case orm.KindBinary:
+		if !mf.Editable {
+			return nil
+		}
+		if mf.MaxLength > 0 {
+			opts = append(opts, MaxLength(mf.MaxLength))
+		}
+		return NewCharField(opts...)
+	default:
+		return nil
+	}
+}
+
+// flattenORMChoices converts orm.Choice entries (expanding optgroups) into
+// flat forms.Choice values.
+func flattenORMChoices(in []orm.Choice) []Choice {
+	out := make([]Choice, 0, len(in))
+	for _, c := range in {
+		if len(c.Group) > 0 {
+			out = append(out, flattenORMChoices(c.Group)...)
+			continue
+		}
+		out = append(out, Choice{Value: c.Value, Label: c.Label})
+	}
+	return out
+}
+
+// coerceForField returns the TypedChoiceField coercion function for mf,
+// matching Django's Field.to_python for choices.
+func coerceForField(mf *orm.Field) func(string) (any, error) {
+	switch mf.Kind {
+	case orm.KindInt, orm.KindSmallInt, orm.KindBigInt,
+		orm.KindPositiveSmallInt, orm.KindPositiveInt, orm.KindPositiveBigInt:
+		return func(s string) (any, error) {
+			return strconv.ParseInt(s, 10, 64)
+		}
+	case orm.KindFloat:
+		return func(s string) (any, error) {
+			return strconv.ParseFloat(s, 64)
+		}
+	case orm.KindDecimal:
+		return func(s string) (any, error) {
+			return ParseDecimal(s)
+		}
+	case orm.KindBool:
+		return func(s string) (any, error) {
+			switch strings.ToLower(s) {
+			case "true", "1":
+				return true, nil
+			case "false", "0":
+				return false, nil
+			default:
+				return nil, fmt.Errorf("forms: invalid boolean choice %q", s)
+			}
+		}
+	case orm.KindDate:
+		return func(s string) (any, error) {
+			d, err := orm.ParseDate(s)
+			if err != nil {
+				return nil, err
+			}
+			return d.Time(), nil
+		}
+	case orm.KindTime:
+		return func(s string) (any, error) {
+			return orm.ParseTime(s)
+		}
+	case orm.KindDuration:
+		return func(s string) (any, error) {
+			d, ok, overflow := parseDuration(s)
+			if !ok || overflow {
+				return nil, fmt.Errorf("forms: invalid duration choice %q", s)
+			}
+			return d, nil
+		}
+	case orm.KindUUID:
+		return func(s string) (any, error) {
+			u, err := orm.ParseUUID(s)
+			if err != nil {
+				return nil, err
+			}
+			return u.String(), nil
+		}
+	default:
+		return nil
+	}
+}
+
+// fieldInitial returns the value of a model field of an instance as a form
+// shows it: the primary key for a relation, nil for nil pointers or zero dates
+// and times, and the form-side representation for ORM value types.
+func fieldInitial(mf *orm.Field, fv reflect.Value) any {
+	if mf.Rel != nil {
+		pk := relationPK(fv)
+		if pk == 0 {
+			return nil
+		}
+		return pk
+	}
+	if fv.Kind() == reflect.Pointer {
+		if fv.IsNil() {
+			return nil
+		}
+		fv = fv.Elem()
+	}
+	v := fv.Interface()
+	switch x := v.(type) {
+	case time.Time:
+		if x.IsZero() {
+			return nil
+		}
+		return x
+	case orm.Date:
+		if x.IsZero() {
+			return nil
+		}
+		return x.Time()
+	case orm.Time:
+		return time.Date(0, 1, 1, x.Hour, x.Minute, x.Second, x.Nanosecond, time.UTC)
+	case orm.Decimal:
+		if d, err := ParseDecimal(x.String()); err == nil {
+			return d
+		}
+		return x
+	case orm.UUID:
+		return x.String()
+	case netip.Addr:
+		if !x.IsValid() {
+			return nil
+		}
+		return x.String()
+	case json.RawMessage:
+		if len(x) == 0 {
+			return nil
+		}
+		var decoded any
+		if err := json.Unmarshal(x, &decoded); err == nil {
+			return decoded
+		}
+		return string(x)
+	case []byte:
+		if mf.Kind == orm.KindBinary {
+			return string(x)
+		}
+	}
+	return v
+}
+
+// setScalar assigns a cleaned value to a struct field, converting between the
+// form-side types (forms.Decimal, time.Time, canonical strings, decoded JSON)
+// and the model field's Go type (orm.Decimal, orm.Date, orm.Time, orm.UUID,
+// netip.Addr, json.RawMessage, arbitrary JSON structs, pointers, and
+// sql.Scanner types).
+func setScalar(mf *orm.Field, fv reflect.Value, val any) error {
+	if val == nil {
+		fv.SetZero()
+		return nil
+	}
+	if fv.Kind() == reflect.Pointer {
+		target := reflect.New(fv.Type().Elem())
+		if err := setScalar(mf, target.Elem(), val); err != nil {
+			return err
+		}
+		fv.Set(target)
+		return nil
+	}
+	rv := reflect.ValueOf(val)
+	if rv.Type().AssignableTo(fv.Type()) {
+		fv.Set(rv)
+		return nil
+	}
+
+	// Kind-specific conversions for ORM value types and JSON targets.
+	if handled, err := setKindScalar(mf, fv, val); handled || err != nil {
+		return err
+	}
+
+	switch fv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if n, ok := toInt(val); ok && !fv.OverflowInt(n) {
+			fv.SetInt(n)
+			return nil
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if n, ok := toInt(val); ok && n >= 0 && !fv.OverflowUint(uint64(n)) {
+			fv.SetUint(uint64(n))
+			return nil
+		}
+	case reflect.Float32, reflect.Float64:
+		if n, ok := toFloat(val); ok {
+			fv.SetFloat(n)
+			return nil
+		}
+	case reflect.String:
+		switch s := val.(type) {
+		case string:
+			fv.SetString(s)
+			return nil
+		case JSONString:
+			fv.SetString(string(s))
+			return nil
+		case orm.UUID:
+			fv.SetString(s.String())
+			return nil
+		case netip.Addr:
+			if s.IsValid() {
+				fv.SetString(s.String())
+			} else {
+				fv.SetString("")
+			}
+			return nil
+		case Decimal:
+			fv.SetString(s.String())
+			return nil
+		case orm.Decimal:
+			fv.SetString(s.String())
+			return nil
+		}
+	}
+	if scanner, ok := fv.Addr().Interface().(sql.Scanner); ok {
+		if err := scanner.Scan(val); err != nil {
+			return fmt.Errorf("forms: field %s: %w", mf.Attr, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("forms: field %s: cannot assign %T to %s", mf.Attr, val, fv.Type())
+}
+
+// setKindScalar handles conversions into ORM value types (orm.Decimal,
+// orm.Date, orm.Time, orm.UUID, netip.Addr, time.Time, json.RawMessage,
+// arbitrary KindJSON targets, and []byte).
+func setKindScalar(mf *orm.Field, fv reflect.Value, val any) (bool, error) {
+	if mf != nil && mf.Kind == orm.KindJSON {
+		return true, setJSONScalar(mf, fv, val)
+	}
+	switch fv.Type() {
+	case ormDecimalType:
+		d, err := toORMDecimal(val)
+		if err != nil {
+			return true, fmt.Errorf("forms: field %s: %w", mf.Attr, err)
+		}
+		fv.Set(reflect.ValueOf(d))
+		return true, nil
+	case ormDateType:
+		d, err := toORMDate(val)
+		if err != nil {
+			return true, fmt.Errorf("forms: field %s: %w", mf.Attr, err)
+		}
+		fv.Set(reflect.ValueOf(d))
+		return true, nil
+	case ormTimeType:
+		t, err := toORMTime(val)
+		if err != nil {
+			return true, fmt.Errorf("forms: field %s: %w", mf.Attr, err)
+		}
+		fv.Set(reflect.ValueOf(t))
+		return true, nil
+	case goTimeType:
+		switch x := val.(type) {
+		case orm.Date:
+			fv.Set(reflect.ValueOf(x.Time()))
+			return true, nil
+		case orm.Time:
+			fv.Set(reflect.ValueOf(time.Date(0, 1, 1, x.Hour, x.Minute, x.Second, x.Nanosecond, time.UTC)))
+			return true, nil
+		}
+	case ormUUIDType:
+		if val == orm.DefaultUUID4 {
+			fv.Set(reflect.ValueOf(orm.NewUUID()))
+			return true, nil
+		}
+		if s, ok := val.(string); ok {
+			if s == "" {
+				fv.SetZero()
+				return true, nil
+			}
+			u, err := orm.ParseUUID(s)
+			if err != nil {
+				return true, fmt.Errorf("forms: field %s: %w", mf.Attr, err)
+			}
+			fv.Set(reflect.ValueOf(u))
+			return true, nil
+		}
+	case netipAddrType:
+		if s, ok := val.(string); ok {
+			if strings.TrimSpace(s) == "" {
+				fv.SetZero()
+				return true, nil
+			}
+			addr, err := netip.ParseAddr(strings.TrimSpace(s))
+			if err != nil {
+				return true, fmt.Errorf("forms: field %s: %w", mf.Attr, err)
+			}
+			fv.Set(reflect.ValueOf(addr))
+			return true, nil
+		}
+	case byteSliceType:
+		if s, ok := val.(string); ok {
+			fv.SetBytes([]byte(s))
+			return true, nil
+		}
+	}
+	if val == orm.DefaultUUID4 && fv.Kind() == reflect.String {
+		fv.SetString(orm.NewUUID().String())
+		return true, nil
+	}
+	return false, nil
+}
+
+// setJSONScalar writes a cleaned JSONField value (or json.RawMessage default)
+// into a json.RawMessage or arbitrary Go struct/map/slice target.
+func setJSONScalar(mf *orm.Field, fv reflect.Value, val any) error {
+	var raw []byte
+	switch x := val.(type) {
+	case json.RawMessage:
+		raw = make([]byte, len(x))
+		copy(raw, x)
+	case JSONString:
+		b, err := json.Marshal(string(x))
+		if err != nil {
+			return fmt.Errorf("forms: field %s: %w", mf.Attr, err)
+		}
+		raw = b
+	default:
+		b, err := json.Marshal(val)
+		if err != nil {
+			return fmt.Errorf("forms: field %s: %w", mf.Attr, err)
+		}
+		raw = b
+	}
+	if fv.Type() == jsonRawMessageType {
+		fv.Set(reflect.ValueOf(json.RawMessage(raw)))
+		return nil
+	}
+	if err := json.Unmarshal(raw, fv.Addr().Interface()); err != nil {
+		return fmt.Errorf("forms: field %s: %w", mf.Attr, err)
+	}
+	return nil
+}
+
+// toORMDecimal converts a form-side decimal or numeric value to orm.Decimal.
+func toORMDecimal(val any) (orm.Decimal, error) {
+	switch x := val.(type) {
+	case orm.Decimal:
+		return x, nil
+	case Decimal:
+		return orm.ParseDecimal(x.String())
+	case string:
+		return orm.ParseDecimal(x)
+	case float64:
+		return orm.DecimalFromFloat(x)
+	case float32:
+		return orm.DecimalFromFloat(float64(x))
+	}
+	if n, ok := toInt(val); ok {
+		return orm.DecimalFromInt(n), nil
+	}
+	return orm.Decimal{}, fmt.Errorf("cannot convert %T to orm.Decimal", val)
+}
+
+// toORMDate converts a form-side DateField value to orm.Date.
+func toORMDate(val any) (orm.Date, error) {
+	switch x := val.(type) {
+	case orm.Date:
+		return x, nil
+	case time.Time:
+		return orm.DateFromTime(x), nil
+	case string:
+		if strings.TrimSpace(x) == "" {
+			return orm.Date{}, nil
+		}
+		return orm.ParseDate(x)
+	default:
+		return orm.Date{}, fmt.Errorf("cannot convert %T to orm.Date", val)
+	}
+}
+
+// toORMTime converts a form-side TimeField value to orm.Time.
+func toORMTime(val any) (orm.Time, error) {
+	switch x := val.(type) {
+	case orm.Time:
+		return x, nil
+	case time.Time:
+		return orm.TimeFromTime(x), nil
+	case string:
+		return orm.ParseTime(x)
+	default:
+		return orm.Time{}, fmt.Errorf("cannot convert %T to orm.Time", val)
+	}
+}

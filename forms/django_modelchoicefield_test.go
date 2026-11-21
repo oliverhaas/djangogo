@@ -202,12 +202,9 @@ func TestModelChoiceFieldCleanToFieldName(t *testing.T) {
 
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_model_choice_null_characters
 func TestModelChoiceFieldNullCharacters(t *testing.T) {
-	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
-		f := choiceLoaded(t, forms.NewModelChoiceField(db, choiceAllCategories(db)))
-		if got := cleanErr(f, "\x00something"); len(got) != 1 {
-			t.Fatalf("errors = %q", got)
-		}
-		t.Skip("FIXME-PORT: Go: the model has no character primary key (ExplicitPK) and an integer key with a null character gives \"Select a valid choice\", Django: \"Null characters are not allowed.\"")
+	djangotest.EachDB(t, []any{&ExplicitPK{}}, func(t *testing.T, db *orm.DB) {
+		f := choiceLoaded(t, forms.NewModelChoiceField(db, orm.Query[ExplicitPK](db)))
+		rejects(t, f, "\x00something", "Null characters are not allowed.")
 	})
 }
 

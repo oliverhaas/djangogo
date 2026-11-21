@@ -304,9 +304,28 @@ type ModelChoiceField struct {
 
 	rows   []modelRow
 	loaded bool
+	charPK bool
 	load   func(ctx context.Context) ([]modelRow, error)
 	// pkOf returns the primary key of an initial value that is an object.
 	pkOf func(value any) (string, bool)
+}
+
+// isStringPK reports whether m has a character-based primary key whose input
+// must prohibit NUL characters, matching Django's ModelChoiceField validation.
+func isStringPK(m *orm.Model) bool {
+	if m == nil {
+		return false
+	}
+	pk := m.PrimaryKey()
+	if pk == nil {
+		return false
+	}
+	switch pk.Kind {
+	case orm.KindChar, orm.KindText, orm.KindSlug, orm.KindEmail, orm.KindURL:
+		return true
+	default:
+		return false
+	}
 }
 
 // invalidModelChoiceMessage is the message for a key that selects no row.
@@ -331,6 +350,7 @@ func NewModelChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ...FieldOp
 		qs = orm.Query[T](db)
 	}
 	model, _ := db.Registry().ModelOf(new(T))
+	f.charPK = isStringPK(model)
 	f.pkOf = func(value any) (string, bool) { return instancePK(model, value) }
 	f.load = func(ctx context.Context) ([]modelRow, error) {
 		objs, err := qs.All(ctx)
@@ -353,6 +373,7 @@ func NewModelChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ...FieldOp
 // set with Form.SetChoices. The cleaned value is the primary key.
 func newRelatedChoiceField(db *orm.DB, target *orm.Model, o *fieldOptions) *ModelChoiceField {
 	f := newModelChoiceField(o)
+	f.charPK = isStringPK(target)
 	f.pkOf = func(value any) (string, bool) { return instancePK(target, value) }
 	if db == nil || target == nil {
 		return f
@@ -469,6 +490,11 @@ func (f *ModelChoiceField) ToGo(value any) (any, error) {
 		return nil, nil
 	}
 	key := pyString(f.PrepareValue(value))
+	if f.charPK {
+		if err := ProhibitNullCharactersValidator(key); err != nil {
+			return nil, err
+		}
+	}
 	for _, r := range f.rows {
 		if r.pk == key {
 			return r.value, nil

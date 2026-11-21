@@ -2,9 +2,12 @@ package forms
 
 import (
 	"math"
+	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // CharField is a text field; its cleaned value is a string.
@@ -140,11 +143,38 @@ func (f *IntegerField) ToGo(value any) (any, error) {
 	if i, ok := toInt(value); ok {
 		return i, nil
 	}
-	i, ok := pyInt(trailingZerosRE.ReplaceAllString(pyString(value), ""))
-	if !ok {
-		return nil, f.Error("invalid")
+	cleaned := trailingZerosRE.ReplaceAllString(pyString(value), "")
+	if i, ok := pyInt(cleaned); ok {
+		return i, nil
 	}
-	return i, nil
+	// Values outside int64 that still violate explicit MinValue/MaxValue limits
+	// report Django's range error rather than "Enter a whole number.".
+	if f.MinValue != nil || f.MaxValue != nil {
+		if bigVal, ok := pyBigInt(cleaned); ok {
+			r := new(big.Rat).SetInt(bigVal)
+			if f.MaxValue != nil {
+				if maxR, ok := toRat(f.MaxValue); ok && r.Cmp(maxR) > 0 {
+					msg := f.ErrorMessages["max_value"]
+					if msg == "" {
+						msg = "Ensure this value is less than or equal to %(limit_value)s."
+					}
+					return nil, NewValidationError(msg, "max_value",
+						map[string]any{"limit_value": f.MaxValue, "show_value": bigVal, "value": bigVal})
+				}
+			}
+			if f.MinValue != nil {
+				if minR, ok := toRat(f.MinValue); ok && r.Cmp(minR) < 0 {
+					msg := f.ErrorMessages["min_value"]
+					if msg == "" {
+						msg = "Ensure this value is greater than or equal to %(limit_value)s."
+					}
+					return nil, NewValidationError(msg, "min_value",
+						map[string]any{"limit_value": f.MinValue, "show_value": bigVal, "value": bigVal})
+				}
+			}
+		}
+	}
+	return nil, f.Error("invalid")
 }
 
 // WidgetAttrs adds min, max and step to a number input.
@@ -246,6 +276,13 @@ func (f *DecimalField) ToGo(value any) (any, error) {
 	}
 	if d, ok := value.(Decimal); ok {
 		return d, nil
+	}
+	if d, ok := value.(orm.Decimal); ok {
+		parsed, err := ParseDecimal(d.String())
+		if err != nil {
+			return nil, f.Error("invalid")
+		}
+		return parsed, nil
 	}
 	d, err := ParseDecimal(strings.TrimSpace(pyString(value)))
 	if err != nil {

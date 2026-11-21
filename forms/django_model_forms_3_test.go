@@ -486,10 +486,44 @@ func TestOtherModelFormChoicesType(t *testing.T) {
 
 // Ported from Django: tests/model_forms/tests.py::ModelFormCustomErrorTests.test_custom_error_messages
 func TestModelFormCustomErrorMessages(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no model validators or model error_messages, Django: name1 and name2 carry validate_slug and the message 'Model custom error message.', which the form field of name1 overrides with 'Form custom error message.'")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		form := forms.NewModelForm[CustomErrorMessage](db,
+			forms.WithFields(forms.AllFields),
+			forms.WithErrorMessages("name1", map[string]string{
+				"invalid": "Form custom error message.",
+			}),
+		).Bind(vals("name1", "@#$!!**@#$", "name2", "@#$!!**@#$"))
+		assertHTMLEqual(t, form.Errors().Get("name1").String(),
+			`<ul class="errorlist" id="id_name1_error"><li>Form custom error message.</li></ul>`)
+		assertHTMLEqual(t, form.Errors().Get("name2").String(),
+			`<ul class="errorlist" id="id_name2_error"><li>Model custom error message.</li></ul>`)
+	})
 }
 
 // Ported from Django: tests/model_forms/tests.py::ModelFormCustomErrorTests.test_model_clean_error_messages
 func TestModelFormModelCleanErrorMessages(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no model clean method, Django: the clean of CustomErrorMessage raises field errors for name1 and the non-field error 'Global error message.'")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		newForm := func() *forms.ModelForm[CustomErrorMessage] {
+			return forms.NewModelForm[CustomErrorMessage](db,
+				forms.WithFields(forms.AllFields),
+				forms.WithErrorMessages("name1", map[string]string{
+					"invalid": "Form custom error message.",
+				}),
+			)
+		}
+
+		form := newForm().Bind(vals("name1", "FORBIDDEN_VALUE", "name2", "ABC"))
+		djangotest.AssertEqual(t, form.IsValid(), false)
+		assertHTMLEqual(t, form.Errors().Get("name1").String(),
+			`<ul class="errorlist" id="id_name1_error"><li>Model.clean() error messages.</li></ul>`)
+
+		form = newForm().Bind(vals("name1", "FORBIDDEN_VALUE2", "name2", "ABC"))
+		djangotest.AssertEqual(t, form.IsValid(), false)
+		assertHTMLEqual(t, form.Errors().Get("name1").String(),
+			`<ul class="errorlist" id="id_name1_error"><li>Model.clean() error messages (simpler syntax).</li></ul>`)
+
+		form = newForm().Bind(vals("name1", "GLOBAL_ERROR", "name2", "ABC"))
+		djangotest.AssertEqual(t, form.IsValid(), false)
+		djangotest.AssertEqual(t, form.Errors().Messages()["__all__"], []string{"Global error message."})
+	})
 }

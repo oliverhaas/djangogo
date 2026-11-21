@@ -67,28 +67,66 @@ type Product struct {
 	Slug string `orm:"max_length=50;unique"`
 }
 
-// Price is the Price model of Django's tests/model_forms/models.py. The ORM
-// has no DecimalField, so the price is a string, and no unique_together.
+// Price is the Price model of Django's tests/model_forms/models.py.
 type Price struct {
 	ID       int64
-	Price    string `orm:"max_length=12"`
-	Quantity int
+	Price    orm.Decimal `orm:"max_digits=10;decimal_places=2"`
+	Quantity int         `orm:"type=positive_int"`
 }
 
-// Book is the Book model of Django's tests/model_forms/models.py, without the
-// unique_together of title and author.
+// Meta declares unique_together on (price, quantity).
+func (Price) Meta() orm.Meta {
+	return orm.Meta{UniqueTogether: [][]string{{"Price", "Quantity"}}}
+}
+
+// Book is the Book model of Django's tests/model_forms/models.py.
 type Book struct {
 	ID        int64
 	Title     string         `orm:"max_length=40"`
 	Author    orm.FK[Writer] `orm:"null;blank"`
-	SpecialID int            `orm:"blank;null;unique"`
+	SpecialID *int           `orm:"blank;null;unique"`
 }
 
-// ExplicitPK is the ExplicitPK model of Django's tests/model_forms/models.py,
-// without the unique_together of key and desc.
+// Meta declares unique_together on (title, author).
+func (Book) Meta() orm.Meta {
+	return orm.Meta{UniqueTogether: [][]string{{"Title", "Author"}}}
+}
+
+// DerivedBook mirrors Django's DerivedBook for unique_together exclusion tests.
+type DerivedBook struct {
+	ID      int64
+	ISBN    string `orm:"max_length=20"`
+	Suffix1 int    `orm:"default=0"`
+	Suffix2 int    `orm:"default=0"`
+}
+
+// Meta declares unique_together on (suffix1, suffix2).
+func (DerivedBook) Meta() orm.Meta {
+	return orm.Meta{UniqueTogether: [][]string{{"Suffix1", "Suffix2"}}}
+}
+
+// Triple mirrors Django's Triple model with overlapping unique_together tuples.
+type Triple struct {
+	ID     int64
+	Left   int
+	Middle int
+	Right  int
+}
+
+// Meta declares overlapping unique_together tuples.
+func (Triple) Meta() orm.Meta {
+	return orm.Meta{UniqueTogether: [][]string{{"Left", "Middle"}, {"Middle", "Right"}}}
+}
+
+// ExplicitPK is the ExplicitPK model of Django's tests/model_forms/models.py.
 type ExplicitPK struct {
 	Key  string `orm:"max_length=20;pk"`
 	Desc string `orm:"max_length=20;blank;unique"`
+}
+
+// Meta declares unique_together on (key, desc).
+func (ExplicitPK) Meta() orm.Meta {
+	return orm.Meta{UniqueTogether: [][]string{{"Key", "Desc"}}}
 }
 
 // Post is the Post model of Django's tests/model_forms/models.py, without the
@@ -154,20 +192,60 @@ func (ArticleStatus) Choices() map[string][]orm.Choice {
 }
 
 // CustomErrorMessage is the CustomErrorMessage model of Django's
-// tests/model_forms/models.py without its validators, error messages and
-// clean method, which the ORM lacks.
+// tests/model_forms/models.py.
 type CustomErrorMessage struct {
 	ID    int64
 	Name1 string `orm:"max_length=50"`
 	Name2 string `orm:"max_length=50"`
 }
 
+// Meta attaches ValidateSlug and model-level custom invalid messages.
+func (CustomErrorMessage) Meta() orm.Meta {
+	return orm.Meta{
+		Validators: map[string][]orm.Validator{
+			"Name1": {forms.ValidateSlug},
+			"Name2": {forms.ValidateSlug},
+		},
+		ErrorMessages: map[string]map[string]string{
+			"Name1": {"invalid": "Model custom error message."},
+			"Name2": {"invalid": "Model custom error message."},
+		},
+	}
+}
+
+// Clean implements Django's CustomErrorMessage.clean().
+func (c *CustomErrorMessage) Clean() error {
+	switch c.Name1 {
+	case "FORBIDDEN_VALUE":
+		return orm.ValidationErrorDict(map[string]any{
+			"name1": orm.ValidationErrors(orm.NewValidationError("Model.clean() error messages.", "")),
+		})
+	case "FORBIDDEN_VALUE2":
+		return orm.ValidationErrorDict(map[string]any{
+			"name1": "Model.clean() error messages (simpler syntax).",
+		})
+	case "GLOBAL_ERROR":
+		return orm.NewValidationError("Global error message.", "")
+	}
+	return nil
+}
+
+// NullableUniqueCharFieldModel is Django's NullableUniqueCharFieldModel.
+type NullableUniqueCharFieldModel struct {
+	ID       int64
+	Codename *string `orm:"max_length=50;blank;null;unique"`
+	Email    *string `orm:"type=email;blank;null"`
+	Slug     *string `orm:"type=slug;blank;null"`
+	URL      *string `orm:"type=url;blank;null"`
+}
+
 // mfModels returns the models of the ported tests/model_forms tests.
 func mfModels() []any {
 	return []any{
 		&Person{}, &Category{}, &Writer{}, &Article{}, &Product{}, &Price{}, &Book{},
-		&ExplicitPK{}, &Post{}, &Character{}, &Student{}, &Award{},
-		&PublicationDefaults{}, &ArticleStatus{}, &CustomErrorMessage{},
+		&DerivedBook{}, &Triple{}, &ExplicitPK{}, &Post{}, &Character{}, &Student{},
+		&Award{}, &PublicationDefaults{}, &ArticleStatus{}, &CustomErrorMessage{},
+		&NullableUniqueCharFieldModel{},
 	}
 }
 

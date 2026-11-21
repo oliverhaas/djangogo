@@ -2,6 +2,7 @@ package forms
 
 import (
 	"fmt"
+	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
@@ -66,10 +67,10 @@ func formatFloat(f float64) string {
 	return s + ".0"
 }
 
-// pyInt parses s as Python's int(s) does: surrounding whitespace, an optional
-// sign, and decimal digits of any script (fullwidth "５０" is 50), single
-// underscores allowed between digits.
-func pyInt(s string) (int64, bool) {
+// normalizePyInt validates Python int syntax (surrounding whitespace, optional
+// sign, Unicode decimal digits, single underscores between digits) and returns
+// its ASCII decimal digit string.
+func normalizePyInt(s string) (string, bool) {
 	s = strings.TrimSpace(s)
 	var b strings.Builder
 	prevDigit := false
@@ -85,14 +86,35 @@ func pyInt(s string) (int64, bool) {
 			prevDigit = true
 			continue
 		default:
-			return 0, false
+			return "", false
 		}
 	}
 	if !prevDigit {
+		return "", false
+	}
+	return b.String(), true
+}
+
+// pyInt parses s as Python's int(s) does: surrounding whitespace, an optional
+// sign, and decimal digits of any script (fullwidth "５０" is 50), single
+// underscores allowed between digits.
+func pyInt(s string) (int64, bool) {
+	norm, ok := normalizePyInt(s)
+	if !ok {
 		return 0, false
 	}
-	i, err := strconv.ParseInt(b.String(), 10, 64)
+	i, err := strconv.ParseInt(norm, 10, 64)
 	return i, err == nil
+}
+
+// pyBigInt parses s as an arbitrary-precision Python integer.
+func pyBigInt(s string) (*big.Int, bool) {
+	norm, ok := normalizePyInt(s)
+	if !ok {
+		return nil, false
+	}
+	n, ok := new(big.Int).SetString(norm, 10)
+	return n, ok
 }
 
 // digitValue returns the value of a Unicode decimal digit. The digits of every
