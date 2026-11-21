@@ -28,7 +28,7 @@ var (
 
 // formFieldFor returns the form field of a model field, Django's
 // Field.formfield, or nil for a kind that has none (such as KindAuto).
-func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory) Field {
+func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory, class fieldClass) Field {
 	opts := []FieldOption{Required(!mf.Blank), Label(fieldLabel(mf)), HelpText(mf.HelpText)}
 	if mf.HasDefault {
 		if mf.Default == orm.DefaultUUID4 {
@@ -65,12 +65,22 @@ func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory) Field {
 		}
 		return NewTypedChoiceField(opts...)
 	}
-	return formFieldForKind(mf, opts)
+	opts, def := kindField(mf, opts)
+	switch {
+	case def == nil:
+		return nil
+	case class != nil:
+		return class(opts...)
+	default:
+		return def(opts...)
+	}
 }
 
-// formFieldForKind maps each non-relation, non-choice orm.Kind to its Django
-// form field with length, digit, protocol, and integer range options.
-func formFieldForKind(mf *orm.Field, opts []FieldOption) Field {
+// kindField maps each non-relation, non-choice orm.Kind to the constructor of
+// its Django form field and returns the options with the length, digit,
+// protocol and integer range of mf added. The constructor is nil for a kind
+// without a form field.
+func kindField(mf *orm.Field, opts []FieldOption) ([]FieldOption, fieldClass) {
 	switch mf.Kind {
 	case orm.KindChar:
 		if mf.MaxLength > 0 {
@@ -79,13 +89,13 @@ func formFieldForKind(mf *orm.Field, opts []FieldOption) Field {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return NewCharField(opts...)
+		return opts, ctor(NewCharField)
 	case orm.KindText:
 		opts = append(opts, UseWidget(Textarea{}))
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
 		}
-		return NewCharField(opts...)
+		return opts, ctor(NewCharField)
 	case orm.KindSlug:
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
@@ -96,7 +106,7 @@ func formFieldForKind(mf *orm.Field, opts []FieldOption) Field {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return NewSlugField(opts...)
+		return opts, ctor(NewSlugField)
 	case orm.KindEmail:
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
@@ -104,7 +114,7 @@ func formFieldForKind(mf *orm.Field, opts []FieldOption) Field {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return NewEmailField(opts...)
+		return opts, ctor(NewEmailField)
 	case orm.KindURL:
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
@@ -112,7 +122,7 @@ func formFieldForKind(mf *orm.Field, opts []FieldOption) Field {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return NewURLField(opts...)
+		return opts, ctor(NewURLField)
 	case orm.KindGenericIPAddress:
 		if mf.Protocol != "" {
 			opts = append(opts, Protocol(mf.Protocol))
@@ -123,7 +133,7 @@ func formFieldForKind(mf *orm.Field, opts []FieldOption) Field {
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
 		}
-		return NewGenericIPAddressField(opts...)
+		return opts, ctor(NewGenericIPAddressField)
 	case orm.KindInt, orm.KindSmallInt:
 		if minVal, maxVal, ok := mf.IntRange(); ok {
 			// Match Django's IntegerField/SmallIntegerField widget (no min/max
@@ -131,60 +141,65 @@ func formFieldForKind(mf *orm.Field, opts []FieldOption) Field {
 			// PopulateStruct writes to int16/int32.
 			opts = append(opts, Validators(MinValueValidator(minVal), MaxValueValidator(maxVal)))
 		}
-		return NewIntegerField(opts...)
+		return opts, ctor(NewIntegerField)
 	case orm.KindBigInt:
 		if minVal, maxVal, ok := mf.IntRange(); ok {
 			opts = append(opts, MinValue(minVal), MaxValue(maxVal))
 		}
-		return NewIntegerField(opts...)
+		return opts, ctor(NewIntegerField)
 	case orm.KindPositiveSmallInt, orm.KindPositiveInt:
 		if _, maxVal, ok := mf.IntRange(); ok {
 			opts = append(opts, MinValue(int64(0)), Validators(MaxValueValidator(maxVal)))
 		}
-		return NewIntegerField(opts...)
+		return opts, ctor(NewIntegerField)
 	case orm.KindPositiveBigInt:
 		if _, maxVal, ok := mf.IntRange(); ok {
 			opts = append(opts, MinValue(int64(0)), MaxValue(maxVal))
 		}
-		return NewIntegerField(opts...)
+		return opts, ctor(NewIntegerField)
 	case orm.KindFloat:
-		return NewFloatField(opts...)
+		return opts, ctor(NewFloatField)
 	case orm.KindDecimal:
 		if mf.MaxDigits > 0 {
 			opts = append(opts, MaxDigits(mf.MaxDigits), DecimalPlaces(mf.DecimalPlaces))
 		} else if mf.DecimalPlaces > 0 {
 			opts = append(opts, DecimalPlaces(mf.DecimalPlaces))
 		}
-		return NewDecimalField(opts...)
+		return opts, ctor(NewDecimalField)
 	case orm.KindBool:
 		// An unchecked box is a valid "false", so the field is never required.
 		if mf.Null {
-			return NewNullBooleanField(append(opts, Required(false))...)
+			return append(opts, Required(false)), ctor(NewNullBooleanField)
 		}
-		return NewBooleanField(append(opts, Required(false))...)
+		return append(opts, Required(false)), ctor(NewBooleanField)
 	case orm.KindDateTime:
-		return NewDateTimeField(opts...)
+		return opts, ctor(NewDateTimeField)
 	case orm.KindDate:
-		return NewDateField(opts...)
+		return opts, ctor(NewDateField)
 	case orm.KindTime:
-		return NewTimeField(opts...)
+		return opts, ctor(NewTimeField)
 	case orm.KindDuration:
-		return NewDurationField(opts...)
+		return opts, ctor(NewDurationField)
 	case orm.KindUUID:
-		return NewUUIDField(opts...)
+		return opts, ctor(NewUUIDField)
 	case orm.KindJSON:
-		return NewJSONField(opts...)
+		return opts, ctor(NewJSONField)
 	case orm.KindBinary:
 		if !mf.Editable {
-			return nil
+			return nil, nil
 		}
 		if mf.MaxLength > 0 {
 			opts = append(opts, MaxLength(mf.MaxLength))
 		}
-		return NewCharField(opts...)
+		return opts, ctor(NewCharField)
 	default:
-		return nil
+		return nil, nil
 	}
+}
+
+// ctor returns fn as a fieldClass.
+func ctor[F Field](fn func(opts ...FieldOption) F) fieldClass {
+	return func(opts ...FieldOption) Field { return fn(opts...) }
 }
 
 // flattenORMChoices converts orm.Choice entries (expanding optgroups) into

@@ -138,13 +138,13 @@ func TestModelFormPrefixedFormWithDefaultField(t *testing.T) {
 }
 
 // fieldOverridesForm is FieldOverridesByFormMetaForm of Django's
-// tests/model_forms/tests.py. Go's URLField takes the place of Meta.field_classes,
-// so the form field carries the label and length of the model field.
+// tests/model_forms/tests.py. The Go model has no slug kind, so the slug field
+// is declared.
 func fieldOverridesForm(db *orm.DB) *forms.ModelForm[Category] {
 	return forms.NewModelForm[Category](db,
 		forms.WithFields("name", "url", "slug"),
 		forms.WithFormField("slug", forms.NewSlugField(forms.MaxLength(20))),
-		forms.WithFormField("url", forms.NewURLField(forms.MaxLength(40), forms.Label("The URL"))),
+		forms.WithFieldClass("url", forms.NewURLField),
 		forms.WithWidget("name", forms.Textarea{}),
 		forms.WithWidget("url", forms.TextInput{Attrs: forms.Attrs{"class": "url"}}),
 		forms.WithLabel("name", "Title"),

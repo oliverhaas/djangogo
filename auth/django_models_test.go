@@ -184,9 +184,9 @@ func TestPermissionUserPermStr(t *testing.T) {
 func TestTableNames(t *testing.T) {
 	db := newTestDB(t)
 	want := map[string]any{
-		"auth_user":                  &auth.User{},
-		"auth_group":                 &auth.Group{},
-		"auth_permission":            &auth.Permission{},
+		"auth_user":       &auth.User{},
+		"auth_group":      &auth.Group{},
+		"auth_permission": &auth.Permission{},
 	}
 	for table, instance := range want {
 		m, ok := db.Registry().ModelOf(instance)

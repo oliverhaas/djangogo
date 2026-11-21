@@ -197,8 +197,9 @@ func (f *Form) Data() url.Values { return f.data }
 // run with context.Background.
 func (f *Form) SetContext(ctx context.Context) { f.ctx = ctx }
 
-// context returns the form's context.
-func (f *Form) context() context.Context {
+// Context returns the context of SetContext, or context.Background without
+// one. A clean function that queries the database uses it.
+func (f *Form) Context() context.Context {
 	if f.ctx == nil {
 		return context.Background()
 	}
@@ -224,7 +225,7 @@ func (f *Form) resolve() {
 	}
 	f.resolved = true
 	if f.loadInitial != nil {
-		if err := f.loadInitial(f.context(), f); err != nil {
+		if err := f.loadInitial(f.Context(), f); err != nil {
 			f.fail(err)
 		}
 	}
@@ -233,7 +234,7 @@ func (f *Form) resolve() {
 		if !ok {
 			continue
 		}
-		field, err := cf.WithContext(f.context())
+		field, err := cf.WithContext(f.Context())
 		if err != nil {
 			f.fail(fmt.Errorf("forms: field %q: %w", name, err))
 			continue

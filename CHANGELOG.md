@@ -322,6 +322,21 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   taken name with Django's message.
 - Forms: `forms.RenderAttrs` renders HTML attributes for widgets of other
   packages.
+- Forms: `forms.WithFieldClass` builds the form field of a model field with
+  another constructor, Django's `Meta.field_classes`, and
+  `forms.WithCleanField` adds a clean function for one field to the options
+  of a model form, the counterpart of a `clean_<field>()` method. `Form.Context`
+  returns the context that `Form.SetContext` set, for clean functions that
+  query the database.
+- auth: the user forms of `django.contrib.auth.forms`. `NewUserCreationForm`
+  and `NewAdminUserCreationForm` create a user with a password typed twice,
+  check the username without regard to case, validate the password with the
+  password validators and save the hash; the admin form can create a user
+  without a usable password. `NewUserChangeForm` edits a user and shows the
+  password as `ReadOnlyPasswordHashField`, a summary of the hash with a link
+  to the password page. `NewAdminPasswordChangeForm` sets or removes the
+  password of a user. `UsernameField` normalizes usernames to NFKC, and
+  `RenderPasswordAsHash` is Django's `render_password_as_hash` template tag.
 
 ### Changed
 

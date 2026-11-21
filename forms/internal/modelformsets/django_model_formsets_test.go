@@ -2053,13 +2053,10 @@ func TestInlineformsetFactoryErrorMessagesOverrides(t *testing.T) {
 }
 
 // Ported from Django: tests/model_formsets/tests.py::TestModelFormsetOverridesTroughFormMeta.test_modelformset_factory_field_class_overrides
-//
-// Django's field_classes keeps the options of the model field; WithFormField
-// takes the field as given.
 func TestModelformsetFactoryFieldClassOverrides(t *testing.T) {
 	eachDB(t, func(t *testing.T, db *orm.DB) {
 		author := create(t, db, &Author{Name: "Charles Baudelaire"})
-		bookFormSet := forms.NewModelFormSet[Book](db, forms.WithFormField("title", forms.NewSlugField()))
+		bookFormSet := forms.NewModelFormSet[Book](db, forms.WithFieldClass("title", forms.NewSlugField))
 		form := bookFormSet.NewForm().Bind(postData("title", strings.Repeat("Foo ", 30), "author", fmt.Sprint(author.ID)))
 		title, _ := bookFormSet.Model().FieldByAttr("title")
 		djangotest.AssertEqual(t, title.Kind, orm.KindChar)
@@ -2074,7 +2071,7 @@ func TestModelformsetFactoryFieldClassOverrides(t *testing.T) {
 func TestInlineformsetFactoryFieldClassOverrides(t *testing.T) {
 	eachDB(t, func(t *testing.T, db *orm.DB) {
 		author := create(t, db, &Author{Name: "Charles Baudelaire"})
-		bookFormSet := forms.NewInlineFormSet[Author, Book](db, "", forms.WithFormField("title", forms.NewSlugField()))
+		bookFormSet := forms.NewInlineFormSet[Author, Book](db, "", forms.WithFieldClass("title", forms.NewSlugField))
 		form := bookFormSet.NewForm().Bind(postData("title", strings.Repeat("Foo ", 30), "author", fmt.Sprint(author.ID)))
 		title, _ := bookFormSet.Model().FieldByAttr("title")
 		djangotest.AssertEqual(t, title.Kind, orm.KindChar)

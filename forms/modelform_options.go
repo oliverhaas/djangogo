@@ -15,7 +15,7 @@ import (
 //	Meta.widgets         WithWidget, once per field
 //	Meta.help_texts      WithHelpText, once per field
 //	Meta.error_messages  WithErrorMessages, once per field
-//	Meta.field_classes   WithFormField, once per field
+//	Meta.field_classes   WithFieldClass, once per field
 //
 // A field is named by its attribute name ("created_at"); the Go field name
 // ("CreatedAt") is accepted as well.
@@ -24,6 +24,10 @@ type ModelFormOption func(*modelFormConfig)
 // fieldFactory builds the form field of a model field from the options that
 // its model field implies.
 type fieldFactory func(db *orm.DB, mf *orm.Field, opts []FieldOption) Field
+
+// fieldClass builds a form field from its options, as the constructors of the
+// form fields do.
+type fieldClass func(opts ...FieldOption) Field
 
 // modelFormConfig accumulates the options of a model form.
 type modelFormConfig struct {
@@ -38,8 +42,10 @@ type modelFormConfig struct {
 	errorMessages map[string]map[string]string
 	formFields    map[string]Field
 	factories     map[string]fieldFactory
+	classes       map[string]fieldClass
 	callback      func(mf *orm.Field, f Field) Field
 	cleaners      []func(*Form) error
+	fieldCleaners map[string]func(*Form, any) (any, error)
 }
 
 // AllFields is the name list entry that selects every editable field of the
@@ -106,8 +112,8 @@ func WithErrorMessages(field string, messages map[string]string) ModelFormOption
 
 // WithFormField declares a form field, as a field declared on a Django
 // ModelForm: the form always has it, whatever WithFields and WithExclude say.
-// For a model field it takes the place of the derived field (also the
-// counterpart of Meta.field_classes); WithFields gives its position, and
+// For a model field it takes the place of the derived field; WithFields gives
+// its position, and
 // without one it comes after the fields of the form, in the order of the
 // options. WithLabel, WithWidget and the other overrides of the same name
 // apply to it as well.
@@ -118,6 +124,21 @@ func WithFormField(field string, f Field) ModelFormOption {
 		}
 		c.formFields[field] = f
 	}
+}
+
+// WithFieldClass builds the form field of a model field with class instead of
+// the constructor of its kind, Django's Meta.field_classes. class receives the
+// options the model field implies, such as the label, the help text and the
+// maximum length:
+//
+//	forms.WithFieldClass("url", forms.NewURLField)
+//
+// Unlike WithFormField, the field is part of the form only when WithFields
+// and WithExclude select it. A field with choices keeps its TypedChoiceField,
+// as in Django. A relation keeps its choice field, where Django uses class:
+// use WithQuerySet or WithFormField for it.
+func WithFieldClass[F Field](field string, class func(opts ...FieldOption) F) ModelFormOption {
+	return func(c *modelFormConfig) { c.classes[field] = ctor(class) }
 }
 
 // WithQuerySet restricts the options of a foreign key or many-to-many field
@@ -160,6 +181,15 @@ func WithClean(fn func(form *Form) error) ModelFormOption {
 	return func(c *modelFormConfig) { c.cleaners = append(c.cleaners, fn) }
 }
 
+// WithCleanField registers a function that runs after the named field has
+// been cleaned, the counterpart of a clean_<field>() method on a ModelForm
+// subclass, as Form.CleanFieldWith does. Unlike CleanFieldWith on a built
+// form, the option travels with the form options. A later WithCleanField for
+// the same field replaces an earlier one.
+func WithCleanField(field string, fn func(form *Form, value any) (any, error)) ModelFormOption {
+	return func(c *modelFormConfig) { c.fieldCleaners[field] = fn }
+}
+
 // newModelFormConfig applies opts to an empty configuration.
 func newModelFormConfig(opts []ModelFormOption) *modelFormConfig {
 	c := &modelFormConfig{
@@ -171,6 +201,8 @@ func newModelFormConfig(opts []ModelFormOption) *modelFormConfig {
 		errorMessages: map[string]map[string]string{},
 		formFields:    map[string]Field{},
 		factories:     map[string]fieldFactory{},
+		classes:       map[string]fieldClass{},
+		fieldCleaners: map[string]func(*Form, any) (any, error){},
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -219,6 +251,8 @@ func (c *modelFormConfig) normalize(m *orm.Model) {
 	c.errorMessages = renamed(m, c.errorMessages)
 	c.formFields = renamed(m, c.formFields)
 	c.factories = renamed(m, c.factories)
+	c.classes = renamed(m, c.classes)
+	c.fieldCleaners = renamed(m, c.fieldCleaners)
 }
 
 // renamed returns in with its keys rewritten to attribute names.
@@ -240,7 +274,9 @@ func (c *modelFormConfig) includedNames(all []string) []string {
 	}
 	out := make([]string, 0, len(source))
 	for _, name := range source {
-		if !c.exclude[name] {
+		// A name given twice counts once, as in the field dict of Django's
+		// fields_for_model.
+		if !c.exclude[name] && !slices.Contains(out, name) {
 			out = append(out, name)
 		}
 	}

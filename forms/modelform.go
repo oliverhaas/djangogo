@@ -74,7 +74,7 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[
 		case isAutoPK(mf):
 			continue
 		default:
-			field = formFieldFor(db, mf, cfg.factories[name])
+			field = formFieldFor(db, mf, cfg.factories[name], cfg.classes[name])
 			if cfg.callback != nil && field != nil {
 				field = cfg.callback(mf, field)
 			}
@@ -98,6 +98,9 @@ func buildModelForm(db *orm.DB, m *orm.Model, cfg *modelFormConfig) (*Form, map[
 	}
 	for _, fn := range cfg.cleaners {
 		form.CleanWith(fn)
+	}
+	for name, fn := range cfg.fieldCleaners {
+		form.CleanFieldWith(name, fn)
 	}
 	if len(unknown) > 0 {
 		form.fail(fmt.Errorf("forms: Unknown field(s) (%s) specified for %s", strings.Join(unknown, ", "), m.Name()))
@@ -614,7 +617,7 @@ func (mf *modelSide) postClean(f *Form, instance any, adding func() bool) {
 			exclude = append(exclude, name)
 		}
 	}
-	if err := mf.model.FullClean(f.context(), mf.db, instance,
+	if err := mf.model.FullClean(f.Context(), mf.db, instance,
 		orm.WithExclude(exclude...),
 		orm.WithValidateUnique(false),
 	); err != nil {
@@ -628,7 +631,7 @@ func (mf *modelSide) postClean(f *Form, instance any, adding func() bool) {
 
 	if mf.db != nil {
 		uniqueExclude := mf.validationExclusions(f)
-		if err := orm.ValidateUnique(f.context(), mf.db, instance,
+		if err := orm.ValidateUnique(f.Context(), mf.db, instance,
 			orm.WithExclude(uniqueExclude...),
 			orm.WithAdding(adding()),
 		); err != nil {
