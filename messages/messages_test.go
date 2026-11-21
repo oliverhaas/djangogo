@@ -58,10 +58,36 @@ func TestSessionFormat(t *testing.T) {
 	// A list that Django wrote, with spaces, a safe flag and no extra tags.
 	sess.Set(messages.SessionKey, `[["__json_message", 1, 25, "<b>ok</b>"], ["__json_message", 0, 30, "w", "x"]]`)
 	got := messages.NewSessionStorage(sess).Messages()
-	wantMsgs := []messages.Message{{Level: 25, Message: "<b>ok</b>"}, {Level: 30, Message: "w", ExtraTags: "x"}}
+	wantMsgs := []messages.Message{{Level: 25, Message: "<b>ok</b>", Safe: true}, {Level: 30, Message: "w", ExtraTags: "x"}}
 	if len(got) != 2 || got[0] != wantMsgs[0] || got[1] != wantMsgs[1] {
 		t.Errorf("decoded %#v, want %#v", got, wantMsgs)
 	}
+}
+
+// No Django test exists: a safe message, Django's message of a SafeString,
+// is printed as it is, and the text of other messages is escaped.
+func TestSafeMessageRendersAsHTML(t *testing.T) {
+	// The session marks the safe message with is_safe 1, as Django's
+	// MessageEncoder does.
+	sess := sessions.NewSignedCookieStore([]byte("k")).New()
+	s := messages.NewSessionStorage(sess)
+	s.AddSafe(messages.LevelSuccess, "<b>safe</b>", "")
+	s.Add(messages.LevelInfo, "<b>plain</b>", "")
+	s.Update()
+	v, _ := sess.Get(messages.SessionKey)
+	if str, _ := v.(string); !strings.HasPrefix(str, `[["__json_message",1,25,`) || !strings.Contains(str, `],["__json_message",0,20,`) {
+		t.Errorf("session value = %v, want the safe flag on the first message only", v)
+	}
+
+	c := newClient(t, siteOptions{})
+	c.Post("/add/info/", url.Values{"messages": {"<b>plain</b>"}})
+	resp := c.Post("/add/safe/", url.Values{"messages": {`<a href="/p/1/">Hi</a>`}}, djangotest.Follow())
+	djangotest.AssertContains(t, resp, `<a href="/p/1/">Hi</a>`)
+	djangotest.AssertContains(t, resp, "&lt;b&gt;plain&lt;/b&gt;")
+	djangotest.AssertMessages(t, resp, []messages.Message{
+		{Level: messages.LevelInfo, Message: "<b>plain</b>"},
+		{Level: messages.LevelSuccess, Message: `<a href="/p/1/">Hi</a>`},
+	})
 }
 
 // TestDecodeMalformed checks that a session value that is not a list of

@@ -4,27 +4,48 @@
     {{ media }}
     <script src="{% static 'admin/js/cancel.js' %}" async></script>
 {% endblock %}
+{% block bodyclass %}app-{{ app_label }} model-{{ model_name }} delete-confirmation{% endblock %}
 {% block breadcrumbs %}
 <ol class="breadcrumbs">
   <li><a href="{% url 'admin:index' %}">Home</a></li>
   {% if app_url %}<li><a href="{{ app_url }}">{{ app_verbose_name }}</a></li>{% endif %}
   <li>{% if has_view_permission %}<a href="{{ changelist_url }}">{{ verbose_name_plural }}</a>{% else %}{{ verbose_name_plural }}{% endif %}</li>
-  <li><a href="{{ change_url }}">{{ object }}</a></li>
+  <li><a href="{{ change_url }}">{{ object|truncatewords:"18" }}</a></li>
   <li aria-current="page">Delete</li>
 </ol>
 {% endblock %}
 {% block content %}
-<div id="content-main">
-  <p>Are you sure you want to delete the {{ object_name }} “{{ object }}”?</p>
-  <form method="post" action="{{ action }}">
-    {% csrf_token %}
+{% if has_perms_lacking %}
+  {% block delete_forbidden %}
+    <p>Deleting the {{ object_name }} “{{ object }}” would result in deleting related objects, but your account doesn't have permission to delete the following types of objects:</p>
+    <ul id="deleted-objects">{{ perms_lacking_html }}</ul>
+  {% endblock %}
+{% elif has_protected %}
+  {% block delete_protected %}
+    {% if hide_objects %}
+      <p>Deleting the {{ object_name }} “{{ object }}” would require deleting some protected related objects.</p>
+    {% else %}
+      <p>Deleting the {{ object_name }} “{{ object }}” would require deleting the following protected related objects:</p>
+      <ul id="deleted-objects">{{ protected_html }}</ul>
+    {% endif %}
+  {% endblock %}
+{% else %}
+  {% block delete_confirm %}
+    <p>Are you sure you want to delete the {{ object_name }} “{{ object }}”? All of the following related items will be deleted:</p>
+    {% include "admin/includes/object_delete_summary.html" %}
+    {% if not hide_objects %}
+    <h2>Objects</h2>
+    <ul id="deleted-objects">{{ deleted_objects_html }}</ul>
+    {% endif %}
+    <form method="post">{% csrf_token %}
     <div>
-      <input type="hidden" name="post" value="yes">
-      {% if is_popup %}<input type="hidden" name="{{ is_popup_var }}" value="1">{% endif %}
-      {% if to_field %}<input type="hidden" name="{{ to_field_var }}" value="{{ to_field }}">{% endif %}
-      <input type="submit" value="Yes, I’m sure">
-      <a href="{{ change_url }}" class="button cancel-link">No, take me back</a>
+    <input type="hidden" name="post" value="yes">
+    {% if is_popup %}<input type="hidden" name="{{ is_popup_var }}" value="1">{% endif %}
+    {% if to_field %}<input type="hidden" name="{{ to_field_var }}" value="{{ to_field }}">{% endif %}
+    <input type="submit" value="Yes, I’m sure">
+    <a role="button" href="#" class="button cancel-link">No, take me back</a>
     </div>
-  </form>
-</div>
-{% endblock %}
+    </form>
+  {% endblock %}
+{% endif %}
+{% endblock content %}

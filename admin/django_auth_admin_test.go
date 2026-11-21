@@ -402,9 +402,6 @@ func TestUserAdminSaveButton(t *testing.T) {
 	})
 }
 
-// FIXME-PORT: the message links the new user, as Django's format_html
-// messages do; the Go admin writes the name without the link.
-//
 // Ported from Django: tests/admin_views/tests.py::UserAdminTest.test_save_continue_editing_button
 func TestUserAdminSaveContinueEditingButton(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
@@ -425,9 +422,9 @@ func TestUserAdminSaveContinueEditingButton(t *testing.T) {
 		djangotest.AssertEqual(t, countUsers(t, db), userCount+1)
 		djangotest.AssertEqual(t, newUser.HasUsablePassword(), true)
 		resp = env.client.Get(newUserURL)
-		djangotest.AssertContains(t, resp,
-			`<li class="success">The user “newuser” was added successfully. You may edit it again below.</li>`,
-			djangotest.HTML())
+		djangotest.AssertContains(t, resp, fmt.Sprintf(
+			`<li class="success">The user “<a href="%s">%s</a>” was added successfully. You may edit it again below.</li>`,
+			newUserURL, newUser.Username), djangotest.HTML())
 	})
 }
 

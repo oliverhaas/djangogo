@@ -47,6 +47,19 @@ func Add(r *http.Request, level int, message string, extraTags ...string) error 
 	return nil
 }
 
+// AddSafe adds a message whose text is HTML that templates print as it is,
+// Django's add_message with a SafeString such as the result of format_html.
+// Escape the text from users in it first, for example with
+// html.EscapeString. Otherwise it works as Add.
+func AddSafe(r *http.Request, level int, html string, extraTags ...string) error {
+	s, ok := FromContext(r.Context())
+	if !ok {
+		return ErrMiddlewareMissing
+	}
+	s.AddSafe(level, html, strings.Join(extraTags, " "))
+	return nil
+}
+
 // Debug adds a message with LevelDebug, which the default Config.Level
 // drops (Django's debug).
 func Debug(r *http.Request, message string, extraTags ...string) error {

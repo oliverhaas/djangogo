@@ -14,47 +14,33 @@
 </ol>
 {% endblock %}
 {% block content %}
-<div id="content-main">
 {% if has_perms_lacking %}
-  <p>Deleting the selected {{ objects_name }} would result in deleting related objects, but your account doesn't have permission to delete the following types of objects:</p>
-  <ul>
-    {% for perm in perms_lacking %}
-    <li>{{ perm }}</li>
-    {% endfor %}
-  </ul>
+    <p>Deleting the selected {{ objects_name }} would result in deleting related objects, but your account doesn't have permission to delete the following types of objects:</p>
+    <ul>{{ perms_lacking_html }}</ul>
 {% elif has_protected %}
-  {% if hide_objects %}
-  <p>Deleting the selected {{ objects_name }} would require deleting some protected related objects.</p>
-  {% else %}
-  <p>Deleting the selected {{ objects_name }} would require deleting the following protected related objects:</p>
-  <ul>
-    {{ protected_list_html|safe }}
-  </ul>
-  {% endif %}
+    {% if hide_objects %}
+        <p>Deleting the selected {{ objects_name }} would require deleting some protected related objects.</p>
+    {% else %}
+        <p>Deleting the selected {{ objects_name }} would require deleting the following protected related objects:</p>
+        <ul>{{ protected_html }}</ul>
+    {% endif %}
 {% else %}
-  <p>Are you sure you want to delete the selected {{ objects_name }}? All of the following objects and their related items will be deleted:</p>
-  <h2>Summary</h2>
-  <ul>
-    {% for item in model_count %}
-    <li>{{ item.name }}: {{ item.count }}</li>
-    {% endfor %}
-  </ul>
-  {% if not hide_objects %}
-  <h2>Objects</h2>
-  <ul>{{ deletable_list_html|safe }}</ul>
-  {% endif %}
-  <form method="post" action="{{ action_url }}">
-    {% csrf_token %}
+    <p>Are you sure you want to delete the selected {{ objects_name }}? All of the following objects and their related items will be deleted:</p>
+    {% include "admin/includes/object_delete_summary.html" %}
+    {% if not hide_objects %}
+    <h2>Objects</h2>
+        <ul>{{ deletable_objects_html }}</ul>
+    {% endif %}
+    <form method="post">{% csrf_token %}
     <div>
-      {% for pk in selected_pks %}
-      <input type="hidden" name="{{ action_checkbox_name }}" value="{{ pk }}">
-      {% endfor %}
-      <input type="hidden" name="action" value="delete_selected">
-      <input type="hidden" name="post" value="yes">
-      <input type="submit" value="Yes, I’m sure">
-      <a role="button" href="{{ changelist_url }}" class="button cancel-link">No, take me back</a>
+    {% for pk in selected_pks %}
+    <input type="hidden" name="{{ action_checkbox_name }}" value="{{ pk }}">
+    {% endfor %}
+    <input type="hidden" name="action" value="delete_selected">
+    <input type="hidden" name="post" value="yes">
+    <input type="submit" value="Yes, I’m sure">
+    <a role="button" href="#" class="button cancel-link">No, take me back</a>
     </div>
-  </form>
+    </form>
 {% endif %}
-</div>
 {% endblock %}

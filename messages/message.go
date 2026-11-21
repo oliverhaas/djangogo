@@ -109,10 +109,14 @@ type Message struct {
 	// ExtraTags are further tags, separated by spaces, that Tags puts before
 	// the level tag.
 	ExtraTags string
+	// Safe marks Message as HTML that templates print as it is, Django's
+	// message of a SafeString. AddSafe sets it.
+	Safe bool
 }
 
 // Equal reports whether m and other have the same level and text. Like
-// Django's Message.__eq__ it ignores the extra tags.
+// Django's Message.__eq__ it ignores the extra tags, and whether the text is
+// safe.
 func (m Message) Equal(other Message) bool {
 	return m.Level == other.Level && m.Message == other.Message
 }
@@ -150,20 +154,36 @@ func (m Message) Repr() string {
 // TemplateMessage is a message as templates see it: a map with Django's
 // attribute names "message", "level", "tags", "extra_tags" and "level_tag",
 // so that {{ message.tags }} works. {{ message }} prints the text escaped for
-// HTML. Apply filters to message.message rather than to message, which may
-// escape the text twice.
+// HTML, or as it is for a safe message. "message" is the text: a string, or
+// for a safe message a value that prints itself as HTML. Apply filters to
+// message.message rather than to message, which may escape the text twice.
 type TemplateMessage map[string]any
+
+// safeText is the text of a safe message in a TemplateMessage: HTML that a
+// template prints as it is.
+type safeText string
+
+// HTML returns the text as it is.
+func (s safeText) HTML() string { return string(s) }
+
+// String returns the text.
+func (s safeText) String() string { return string(s) }
 
 // htmlEscaper escapes the five characters Django's escape() does, with
 // Django's entities.
 var htmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#x27;")
 
-// HTML returns the text of the message escaped for HTML. A template engine
-// that prints a value with an HTML method as it is (Django's __html__
-// protocol) prints this.
+// HTML returns the text of the message escaped for HTML, or as it is for a
+// safe message. A template engine that prints a value with an HTML method as
+// it is (Django's __html__ protocol) prints this.
 func (t TemplateMessage) HTML() string {
-	s, _ := t["message"].(string)
-	return htmlEscaper.Replace(s)
+	switch s := t["message"].(type) {
+	case safeText:
+		return string(s)
+	case string:
+		return htmlEscaper.Replace(s)
+	}
+	return ""
 }
 
 // String returns the same text as HTML, so that a template engine that prints
@@ -173,8 +193,12 @@ func (t TemplateMessage) String() string { return t.HTML() }
 
 // templateMessage returns the template view of m.
 func templateMessage(m Message) TemplateMessage {
+	var text any = m.Message
+	if m.Safe {
+		text = safeText(m.Message)
+	}
 	return TemplateMessage{
-		"message":    m.Message,
+		"message":    text,
 		"level":      m.Level,
 		"tags":       m.Tags(),
 		"extra_tags": m.ExtraTags,

@@ -221,7 +221,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
 - **Sessions and messages:** no cache, cache_db or file session stores. The
   database store needs a database and the installed `sessions` app; without
   them, sessions use signed cookies. Messages use the session only: no cookie or
-  fallback storage and no safe messages. A message added after the response
+  fallback storage. A message added after the response
   headers are written is lost, and reading `messages` in a template, also in
   `{% if messages %}`, marks them as read.
 - **contenttypes:** no `GenericForeignKey` and no removal of stale content types.

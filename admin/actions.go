@@ -3,12 +3,12 @@ package admin
 import (
 	"context"
 	"fmt"
-	"html"
 	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/messages"
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -235,17 +235,9 @@ func handleDeleteSelected(w http.ResponseWriter, r *http.Request, act *ActionCon
 		return false, err
 	}
 
-	var deleted *DeletedObjects
-	if e.admin.GetDeletedObjects != nil {
-		deleted, err = e.admin.GetDeletedObjects(r, objs)
-		if err != nil {
-			return false, err
-		}
-	} else {
-		deleted, err = s.collectDeletedObjects(ctx, r, e, objs)
-		if err != nil {
-			return false, err
-		}
+	deleted, err := s.getDeletedObjects(r, e, objs)
+	if err != nil {
+		return false, err
 	}
 
 	if r.PostForm.Get("post") != "" && len(deleted.Protected) == 0 {
@@ -303,24 +295,35 @@ func handleDeleteSelected(w http.ResponseWriter, r *http.Request, act *ActionCon
 	tplCtx["changelist_url"] = s.changelistURL(e)
 	tplCtx["objects_name"] = objectsName
 	tplCtx["model_count"] = modelCounts
-	tplCtx["perms_lacking"] = deleted.PermsNeeded
 	tplCtx["has_perms_lacking"] = len(deleted.PermsNeeded) > 0
 	tplCtx["has_protected"] = len(deleted.Protected) > 0
 	tplCtx["hide_objects"] = hideObjects
-	tplCtx["protected_list_html"] = renderTruncatedListHTML(deleted.Protected, maxDisplay)
-	tplCtx["deletable_list_html"] = renderTruncatedListHTML(deleted.Items, maxDisplay)
+	tplCtx["perms_lacking_html"] = forms.SafeHTML(truncatedUnorderedList(textItems(deleted.PermsNeeded), maxDisplay))
+	tplCtx["protected_html"] = forms.SafeHTML(truncatedUnorderedList(htmlItems(deleted.Protected), maxDisplay))
+	tplCtx["deletable_objects_html"] = forms.SafeHTML(truncatedUnorderedList(deleted.Items, maxDisplay))
 	tplCtx["selected_pks"] = selectedPKs
 	tplCtx["action_checkbox_name"] = ActionCheckboxName
-	tplCtx["action_url"] = r.URL.RequestURI()
 	tplCtx["media"] = e.media(s)
 
 	s.render(w, r, "admin/delete_selected_confirmation.html", tplCtx)
 	return true, nil
 }
 
-// collectDeletedObjects runs orm.CollectDelete for objs, checks per-model
-// delete permissions on every registered affected model, and formats HTML list
-// items matching Django's get_deleted_objects.
+// getDeletedObjects returns the objects that deleting objs deletes or that
+// block it, from ModelAdmin.GetDeletedObjects when it is set, Django's
+// ModelAdmin.get_deleted_objects.
+func (s *AdminSite) getDeletedObjects(r *http.Request, e *entry, objs []any) (*DeletedObjects, error) {
+	if e.admin.GetDeletedObjects != nil {
+		return e.admin.GetDeletedObjects(r, objs)
+	}
+	return s.collectDeletedObjects(r.Context(), r, e, objs)
+}
+
+// collectDeletedObjects runs orm.CollectDelete for objs and formats the
+// result as Django's django.contrib.admin.utils.get_deleted_objects: the
+// deleted objects nested under the objects whose deletion cascades to them,
+// the count per model, the verbose names of the registered models that the
+// user may not delete, and the protected objects.
 func (s *AdminSite) collectDeletedObjects(ctx context.Context, r *http.Request, e *entry, objs []any) (*DeletedObjects, error) {
 	out := &DeletedObjects{}
 	if len(objs) == 0 {
@@ -335,30 +338,41 @@ func (s *AdminSite) collectDeletedObjects(ctx context.Context, r *http.Request, 
 		return nil, err
 	}
 
+	// formatObj is Django's format_callback: it adds the verbose name of a
+	// registered model that the user may not delete to PermsNeeded, protected
+	// objects included, and links the object to its change page.
 	permSeen := make(map[string]bool)
 	formatObj := func(m *orm.Model, obj any) string {
 		singular, _ := modelVerboseNames(m)
-		label := displayLabel(m, obj)
+		noEditLink := forms.Escape(capFirst(singular)) + ": " + forms.Escape(orm.Label(m, obj))
 		relEntry := s.entryByModel(m)
-		if relEntry != nil {
-			if !relEntry.hasDeletePermission(s, r, obj) {
-				if !permSeen[singular] {
-					permSeen[singular] = true
-					out.PermsNeeded = append(out.PermsNeeded, singular)
-				}
-			}
-			pk := pkOf(reflect.ValueOf(obj).Elem(), relEntry)
-			changeURL := s.changeURL(relEntry, pk)
-			if changeURL != "" {
-				return fmt.Sprintf(`%s: <a href="%s">%s</a>`,
-					html.EscapeString(capFirst(singular)),
-					html.EscapeString(changeURL),
-					html.EscapeString(label),
-				)
-			}
+		if relEntry == nil {
+			return noEditLink
 		}
-		return fmt.Sprintf("%s: %s", html.EscapeString(capFirst(singular)), html.EscapeString(label))
+		if !relEntry.hasDeletePermission(s, r, obj) && !permSeen[singular] {
+			permSeen[singular] = true
+			out.PermsNeeded = append(out.PermsNeeded, singular)
+		}
+		pk := pkOf(reflect.ValueOf(obj).Elem(), relEntry)
+		changeURL := s.changeURL(relEntry, pk)
+		if changeURL == "" {
+			return noEditLink
+		}
+		return fmt.Sprintf(`%s: <a href="%s">%s</a>`,
+			forms.Escape(capFirst(singular)),
+			forms.Escape(changeURL),
+			forms.Escape(displayLabel(m, obj)),
+		)
 	}
+	var nest func(nodes []orm.DeleteNode) []DeletedObject
+	nest = func(nodes []orm.DeleteNode) []DeletedObject {
+		items := make([]DeletedObject, len(nodes))
+		for i, n := range nodes {
+			items[i] = DeletedObject{HTML: formatObj(n.Model, n.Object), Children: nest(n.Children)}
+		}
+		return items
+	}
+	out.Items = nest(plan.Tree)
 
 	for _, grp := range plan.Groups {
 		_, plural := modelVerboseNames(grp.Model)
@@ -366,59 +380,67 @@ func (s *AdminSite) collectDeletedObjects(ctx context.Context, r *http.Request, 
 			Name:  plural,
 			Count: len(grp.Objects),
 		})
-		for _, obj := range grp.Objects {
-			out.Items = append(out.Items, formatObj(grp.Model, obj))
-		}
 	}
-
 	for _, grp := range plan.Protected {
 		for _, obj := range grp.Objects {
-			// Protected objects do not add to perms_needed.
-			singular, _ := modelVerboseNames(grp.Model)
-			label := displayLabel(grp.Model, obj)
-			relEntry := s.entryByModel(grp.Model)
-			if relEntry != nil {
-				pk := pkOf(reflect.ValueOf(obj).Elem(), relEntry)
-				if changeURL := s.changeURL(relEntry, pk); changeURL != "" {
-					out.Protected = append(out.Protected, fmt.Sprintf(
-						`%s: <a href="%s">%s</a>`,
-						html.EscapeString(capFirst(singular)),
-						html.EscapeString(changeURL),
-						html.EscapeString(label),
-					))
-					continue
-				}
-			}
-			out.Protected = append(out.Protected, fmt.Sprintf("%s: %s", html.EscapeString(capFirst(singular)), html.EscapeString(label)))
+			out.Protected = append(out.Protected, formatObj(grp.Model, obj))
 		}
 	}
-
 	return out, nil
 }
 
-// renderTruncatedListHTML renders pre-formatted HTML items as <li> elements,
-// truncating at *maxItems with Django's "…and N more object(s)." tail item.
-func renderTruncatedListHTML(items []string, maxItems *int) string {
+// textItems returns texts as list items, escaped.
+func textItems(texts []string) []DeletedObject {
+	items := make([]DeletedObject, len(texts))
+	for i, t := range texts {
+		items[i] = DeletedObject{HTML: forms.Escape(t)}
+	}
+	return items
+}
+
+// htmlItems returns HTML snippets as list items.
+func htmlItems(snippets []string) []DeletedObject {
+	items := make([]DeletedObject, len(snippets))
+	for i, h := range snippets {
+		items[i] = DeletedObject{HTML: h}
+	}
+	return items
+}
+
+// truncatedUnorderedList renders items as the <li> elements of Django's
+// truncated_unordered_list filter: children in a nested <ul>, at most
+// *maxItems items counted through all levels, then Django's "…and N more
+// objects." item. A nil maxItems shows every item.
+func truncatedUnorderedList(items []DeletedObject, maxItems *int) string {
 	if maxItems != nil && *maxItems <= 0 {
 		return ""
 	}
-	limit := len(items)
-	if maxItems != nil && *maxItems < limit {
-		limit = *maxItems
-	}
-	var b strings.Builder
-	for i := range limit {
-		b.WriteString("<li>")
-		b.WriteString(items[i])
-		b.WriteString("</li>\n")
-	}
-	if maxItems != nil && len(items) > *maxItems {
-		rem := len(items) - *maxItems
-		if rem == 1 {
-			fmt.Fprintf(&b, "<li>…and %d more object.</li>\n", rem)
-		} else {
-			fmt.Fprintf(&b, "<li>…and %d more objects.</li>\n", rem)
+	count := 0
+	var format func(items []DeletedObject, tabs int) string
+	format = func(items []DeletedObject, tabs int) string {
+		indent := strings.Repeat("\t", tabs)
+		out := make([]string, 0, len(items))
+		for _, it := range items {
+			count++
+			show := maxItems == nil || count <= *maxItems
+			sublist := ""
+			if len(it.Children) > 0 {
+				sublist = fmt.Sprintf("\n%s<ul>\n%s\n%s</ul>\n%s", indent, format(it.Children, tabs+1), indent, indent)
+			}
+			if show {
+				out = append(out, indent+"<li>"+it.HTML+sublist+"</li>")
+			}
 		}
+		return strings.Join(out, "\n")
 	}
-	return b.String()
+	list := format(items, 1)
+	if maxItems != nil && count > *maxItems {
+		rem := count - *maxItems
+		noun := "objects"
+		if rem == 1 {
+			noun = "object"
+		}
+		list += fmt.Sprintf("\n\t<li>…and %d more %s.</li>", rem, noun)
+	}
+	return list
 }

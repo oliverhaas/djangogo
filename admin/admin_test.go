@@ -269,7 +269,7 @@ func newPostAuthorSite(t *testing.T, authorNames ...string) (*orm.DB, *admin.Adm
 	if err != nil {
 		t.Fatalf("NewAdminSite: %v", err)
 	}
-	admin.Register[Post](site, admin.ModelAdmin{})
+	admin.Register[Post](site, admin.ModelAdmin{ListDisplay: []string{"title", "author"}})
 	return db, site, ids
 }
 
@@ -750,7 +750,10 @@ func TestDeletePOSTRemovesAndRedirects(t *testing.T) {
 	router := urls.NewRouter(site.Routes()...)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/admin/article/1/delete/", nil)
+	// Post the confirmation form's data: Django shows the page again for a
+	// POST without data.
+	req := httptest.NewRequest(http.MethodPost, "/admin/article/1/delete/", strings.NewReader("post=yes"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	staffInjector(router).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusFound {

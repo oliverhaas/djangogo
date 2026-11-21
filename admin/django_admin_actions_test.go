@@ -388,7 +388,9 @@ func TestDeleteSelectedMaxDisplayAndHook(t *testing.T) {
 
 		customDeleted := func(*http.Request, []any) (*admin.DeletedObjects, error) {
 			return &admin.DeletedObjects{
-				Items:      []string{"a deletable object", "another object", "last object"},
+				Items: []admin.DeletedObject{
+					{HTML: "a deletable object"}, {HTML: "another object"}, {HTML: "last object"},
+				},
 				ModelCount: []admin.DeletedModelCount{{Name: "books", Count: 1}},
 			}, nil
 		}

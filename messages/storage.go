@@ -94,11 +94,22 @@ func (s *Storage) AddedNew() bool { return s.addedNew }
 // Add queues a message (Django's BaseStorage.add). A message with an empty
 // text or a level below Level is dropped.
 func (s *Storage) Add(level int, message, extraTags string) {
-	if message == "" || level < s.Level() {
+	s.add(Message{Level: level, Message: message, ExtraTags: extraTags})
+}
+
+// AddSafe queues a message whose text is HTML that templates print as it is,
+// as Add does.
+func (s *Storage) AddSafe(level int, html, extraTags string) {
+	s.add(Message{Level: level, Message: html, ExtraTags: extraTags, Safe: true})
+}
+
+// add queues m unless its text is empty or its level is below Level.
+func (s *Storage) add(m Message) {
+	if m.Message == "" || m.Level < s.Level() {
 		return
 	}
 	s.addedNew = true
-	s.queued = append(s.queued, Message{Level: level, Message: message, ExtraTags: extraTags})
+	s.queued = append(s.queued, m)
 }
 
 // Level returns the lowest level that Add records: the one of SetLevel, or
@@ -143,12 +154,16 @@ func (s *Storage) store(ms []Message) {
 }
 
 // encodeMessages returns ms in Django's JSON format: a list of
-// ["__json_message", is_safe, level, message, extra_tags] entries. is_safe is
-// always 0, as the text of a message is always escaped.
+// ["__json_message", is_safe, level, message, extra_tags] entries, with
+// is_safe 1 for a safe message and 0 otherwise.
 func encodeMessages(ms []Message) string {
 	rows := make([][]any, len(ms))
 	for i, m := range ms {
-		rows[i] = []any{messageMarker, 0, m.Level, m.Message, m.ExtraTags}
+		safe := 0
+		if m.Safe {
+			safe = 1
+		}
+		rows[i] = []any{messageMarker, safe, m.Level, m.Message, m.ExtraTags}
 	}
 	// A list of strings and integers always encodes.
 	b, _ := json.Marshal(rows)
@@ -157,7 +172,7 @@ func encodeMessages(ms []Message) string {
 
 // decodeMessages parses the session value v that encodeMessages or Django
 // wrote. A value that is not such a list yields no messages, and an entry
-// that is not a message is skipped. The is_safe flag is dropped.
+// that is not a message is skipped.
 func decodeMessages(v any) []Message {
 	data, ok := v.(string)
 	if !ok || data == "" {
@@ -190,10 +205,29 @@ func decodeMessage(row any) (Message, bool) {
 	if !ok {
 		return Message{}, false
 	}
-	m := Message{Level: int(level), Message: text}
+	// Django's decoder marks the text safe for any true is_safe.
+	m := Message{Level: int(level), Message: text, Safe: truthy(fields[1])}
 	if len(fields) == 5 {
 		// Django writes null for extra tags of None.
 		m.ExtraTags, _ = fields[4].(string)
 	}
 	return m, true
+}
+
+// truthy reports whether the JSON value v is true for Python: a nonzero
+// number, true, or a nonempty string, list or object.
+func truthy(v any) bool {
+	switch v := v.(type) {
+	case bool:
+		return v
+	case float64:
+		return v != 0
+	case string:
+		return v != ""
+	case []any:
+		return len(v) > 0
+	case map[string]any:
+		return len(v) > 0
+	}
+	return false
 }

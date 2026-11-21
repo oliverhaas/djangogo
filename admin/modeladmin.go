@@ -182,17 +182,28 @@ type Fieldset struct {
 	Description string
 }
 
-// DeletedObjects holds the summary and display items rendered on the
-// delete_selected confirmation page (returned by ModelAdmin.GetDeletedObjects).
+// DeletedObjects holds what the delete page and the delete_selected
+// confirmation page show (returned by ModelAdmin.GetDeletedObjects), Django's
+// get_deleted_objects result.
 type DeletedObjects struct {
-	// Items holds pre-formatted HTML or plain-text labels of objects to delete.
-	Items []string
+	// Items lists the objects to delete, each with the objects that its
+	// deletion cascades to.
+	Items []DeletedObject
 	// ModelCount maps each affected model's plural verbose name to its count.
 	ModelCount []DeletedModelCount
-	// PermsNeeded lists verbose names of models the user lacks permission to delete.
+	// PermsNeeded lists verbose names of models the user lacks permission to
+	// delete, as plain text.
 	PermsNeeded []string
-	// Protected lists pre-formatted HTML or plain-text labels of protected objects.
+	// Protected lists the protected objects as HTML.
 	Protected []string
+}
+
+// DeletedObject is one object of DeletedObjects.Items.
+type DeletedObject struct {
+	// HTML is the object as HTML, as "Plot: <a href="...">World Domination</a>".
+	HTML string
+	// Children lists the objects deleted because of this one.
+	Children []DeletedObject
 }
 
 // DeletedModelCount is one entry in the delete confirmation Summary list.
@@ -204,13 +215,14 @@ type DeletedModelCount struct {
 }
 
 // ModelAdmin is the per-model admin customization surface. A zero value is a
-// valid configuration that displays every field, orders by Meta.Ordering or
-// -pk, enables delete_selected, and checks Django's default auth permissions
-// (<app>.add_<model>, etc.).
+// valid configuration that lists each object by its label, edits every field,
+// orders by Meta.Ordering or -pk, enables delete_selected, and checks Django's
+// default auth permissions (<app>.add_<model>, etc.).
 type ModelAdmin struct {
 	// ListDisplay names the columns shown on the changelist (model struct field
 	// names, snake_case attribute names, "__str__", "__"-spanning relation paths,
-	// or keys in DisplayColumns). An empty slice shows every concrete field.
+	// or keys in DisplayColumns). An empty slice shows the object's label,
+	// Django's default ("__str__",).
 	ListDisplay []string
 	// ListDisplayLinks names the columns in ListDisplay that link to each row's
 	// change page. nil defaults to the first column; a non-nil empty slice
@@ -351,8 +363,9 @@ type ModelAdmin struct {
 	GetActions func(r *http.Request, actions []Action) []Action
 	// DeleteQueryset overrides how delete_selected deletes the selected rows.
 	DeleteQueryset func(r *http.Request, act *ActionContext) error
-	// GetDeletedObjects overrides how delete_selected computes the confirmation
-	// summary, deletable list, missing permissions, and protected objects.
+	// GetDeletedObjects overrides how the delete page and delete_selected
+	// compute the confirmation summary, deletable list, missing permissions,
+	// and protected objects (Django's get_deleted_objects).
 	GetDeletedObjects func(r *http.Request, objs []any) (*DeletedObjects, error)
 
 	// HasAddPermission overrides the default "<app>.add_<model>" check

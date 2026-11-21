@@ -1,0 +1,6 @@
+<h2>Summary</h2>
+<ul>
+    {% for item in model_count %}
+    <li>{{ item.name }}: {{ item.count }}</li>
+    {% endfor %}
+</ul>

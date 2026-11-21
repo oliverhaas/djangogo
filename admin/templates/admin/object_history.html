@@ -4,7 +4,7 @@
   <li><a href="{% url 'admin:index' %}">Home</a></li>
   {% if app_url %}<li><a href="{{ app_url }}">{{ app_verbose_name }}</a></li>{% endif %}
   <li>{% if has_view_permission %}<a href="{{ changelist_url }}">{{ verbose_name_plural }}</a>{% else %}{{ verbose_name_plural }}{% endif %}</li>
-  <li><a href="{{ change_url }}">{{ object }}</a></li>
+  <li><a href="{{ change_url }}">{{ object|truncatewords:"18" }}</a></li>
   <li aria-current="page">History</li>
 </ol>
 {% endblock %}

@@ -386,5 +386,13 @@ func TestSessionTestsGet(t *testing.T) {
 
 // Ported from Django: tests/messages_tests/test_session.py::SessionTests.test_safedata
 func TestSessionTestsSafedata(t *testing.T) {
-	t.Skip("the safe flag is dropped on read and the output of a template is always escaped")
+	// A message containing SafeData keeps its safe status when retrieved from
+	// the message storage.
+	storage, sess := storageAndSession()
+	message := messages.Message{Level: messages.LevelDebug, Message: "<b>Hello Django!</b>", Safe: true}
+	sess.Set(messages.SessionKey, messages.EncodeMessages([]messages.Message{message}))
+	storage.ClearLoaded()
+	if got := storage.Messages(); len(got) != 1 || !got[0].Safe {
+		t.Errorf("messages = %#v, want one safe message", got)
+	}
 }

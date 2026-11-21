@@ -524,20 +524,60 @@ func (c *deleteCollector) batchSize() int {
 	return 1000
 }
 
-// fetchPKsByColumn returns the primary keys of rows in m where col IN values.
+// nestDeleted returns the DeleteNode of key with its children from edges,
+// Django's NestedObjects._nested(): a key already in seen yields nothing, so
+// each row appears once. A row that was not loaded, the row of an
+// auto-created through model, yields nothing either.
+func nestDeleted(key deleteKey, edges map[deleteKey][]deleteKey, loaded map[deleteKey]any, seen map[deleteKey]bool) []DeleteNode {
+	if seen[key] {
+		return nil
+	}
+	seen[key] = true
+	obj, ok := loaded[key]
+	if !ok {
+		return nil
+	}
+	var children []DeleteNode
+	for _, child := range edges[key] {
+		children = append(children, nestDeleted(child, edges, loaded, seen)...)
+	}
+	return []DeleteNode{{Model: key.model, Object: obj, Children: children}}
+}
+
+// fetchPKsByColumn returns the primary keys of the rows of m where col IN values.
 func (c *deleteCollector) fetchPKsByColumn(ctx context.Context, m *Model, col string, values []any) ([]any, error) {
 	pk := m.PrimaryKey()
 	if pk == nil {
 		return nil, fmt.Errorf("orm: model %s has no primary key", m.Name())
 	}
+	rows, err := c.fetchColumnsByColumn(ctx, m, []string{pk.Column}, col, values)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, len(rows))
+	for i, row := range rows {
+		out[i] = normalizePK(pk, row[0])
+	}
+	return out, nil
+}
+
+// fetchColumnsByColumn returns the raw values of the columns cols of the rows
+// of m where col IN values, one slice per row. It queries in batches of the
+// dialect's parameter limit.
+func (c *deleteCollector) fetchColumnsByColumn(ctx context.Context, m *Model, cols []string, col string, values []any) ([][]any, error) {
 	d := c.db.dialect
 	bs := c.batchSize()
-	var out []any
+	var out [][]any
 	for start := 0; start < len(values); start += bs {
 		chunk := values[start:min(start+bs, len(values))]
 		w := newSQLWriter(d)
 		w.write("SELECT ")
-		w.ident(pk.Column)
+		for i, sc := range cols {
+			if i > 0 {
+				w.write(", ")
+			}
+			w.ident(sc)
+		}
 		w.write(" FROM ")
 		w.ident(m.Table())
 		w.write(" WHERE ")
@@ -555,12 +595,16 @@ func (c *deleteCollector) fetchPKsByColumn(ctx context.Context, m *Model, col st
 			return nil, fmt.Errorf("orm: delete collect %s: %w", m.Name(), err)
 		}
 		for rows.Next() {
-			var raw any
-			if err := rows.Scan(&raw); err != nil {
+			raw := make([]any, len(cols))
+			dest := make([]any, len(cols))
+			for i := range raw {
+				dest[i] = &raw[i]
+			}
+			if err := rows.Scan(dest...); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("orm: delete collect %s: %w", m.Name(), err)
 			}
-			out = append(out, normalizePK(pk, raw))
+			out = append(out, raw)
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
@@ -739,10 +783,44 @@ type DeleteModelGroup struct {
 // DeletePlan is the read-only preview of a cascading deletion produced by
 // CollectDelete. Groups lists each affected model and its objects in
 // collection order; Protected lists any referencing objects that block
-// deletion via ON DELETE PROTECT or ON DELETE RESTRICT.
+// deletion via ON DELETE PROTECT or ON DELETE RESTRICT. Tree holds the same
+// objects as Groups, nested under the objects whose deletion cascades to them.
 type DeletePlan struct {
 	Groups    []DeleteModelGroup
 	Protected []DeleteModelGroup
+	Tree      []DeleteNode
+}
+
+// DeleteNode is one object of a DeletePlan's Tree with the objects that its
+// deletion cascades to, Django's NestedObjects.nested(). An object that more
+// than one deleted object reaches is listed once, under the first of them.
+type DeleteNode struct {
+	// Model is the model of Object.
+	Model *Model
+	// Object is the instance as a *T pointer.
+	Object any
+	// Children lists the objects deleted because of Object.
+	Children []DeleteNode
+}
+
+// deleteKey identifies one collected row of a DeletePlan by its model and
+// the treeKey of its primary key.
+type deleteKey struct {
+	model *Model
+	pk    any
+}
+
+// treeKey returns primary key v of the field pk in one comparable form,
+// whether v comes from a database row or from a loaded struct.
+func treeKey(pk *Field, v any) any {
+	v = normalizePK(pk, v)
+	switch x := v.(type) {
+	case []byte:
+		return string(x)
+	case fmt.Stringer:
+		return x.String()
+	}
+	return v
 }
 
 // CollectDelete inspects the database to compute which objects would be
@@ -780,6 +858,10 @@ func CollectDelete(ctx context.Context, db *DB, m *Model, pks []any) (*DeletePla
 			}
 		}
 	}
+
+	// edges maps each collected row to the rows that its deletion cascades to,
+	// in collection order, as Django's NestedObjects.add_edge records them.
+	edges := make(map[deleteKey][]deleteKey)
 
 	var walk func(model *Model, ids []any) error
 	walk = func(model *Model, ids []any) error {
@@ -822,12 +904,23 @@ func CollectDelete(ctx context.Context, db *DB, m *Model, pks []any) (*DeletePla
 					})
 				}
 			case OnDeleteCascade:
-				childPKs, err := col.fetchPKsByColumn(ctx, inc.model, inc.field.Column, newPKs)
+				childPK := inc.model.PrimaryKey()
+				if childPK == nil {
+					return fmt.Errorf("orm: model %s has no primary key", inc.model.Name())
+				}
+				rows, err := col.fetchColumnsByColumn(ctx, inc.model,
+					[]string{childPK.Column, inc.field.Column}, inc.field.Column, newPKs)
 				if err != nil {
 					return err
 				}
-				if len(childPKs) == 0 {
+				if len(rows) == 0 {
 					continue
+				}
+				childPKs := make([]any, len(rows))
+				for i, row := range rows {
+					childPKs[i] = normalizePK(childPK, row[0])
+					parent := deleteKey{model, treeKey(model.PrimaryKey(), row[1])}
+					edges[parent] = append(edges[parent], deleteKey{inc.model, treeKey(childPK, row[0])})
 				}
 				if err := walk(inc.model, childPKs); err != nil {
 					return err
@@ -852,6 +945,7 @@ func CollectDelete(ctx context.Context, db *DB, m *Model, pks []any) (*DeletePla
 		addProtected(entry.child, remaining)
 	}
 
+	loaded := make(map[deleteKey]any)
 	for _, gm := range col.collectedOrder {
 		if gm.AutoCreated() || gm.goType == nil {
 			continue
@@ -863,14 +957,20 @@ func CollectDelete(ctx context.Context, db *DB, m *Model, pks []any) (*DeletePla
 		if len(vals) == 0 {
 			continue
 		}
+		gpk := gm.PrimaryKey()
 		objs := make([]any, len(vals))
 		for i := range vals {
 			objs[i] = vals[i].Addr().Interface()
+			loaded[deleteKey{gm, treeKey(gpk, vals[i].Field(gpk.Index).Interface())}] = objs[i]
 		}
 		plan.Groups = append(plan.Groups, DeleteModelGroup{
 			Model:   gm,
 			Objects: objs,
 		})
+	}
+	seen := make(map[deleteKey]bool)
+	for _, pk := range normPKs {
+		plan.Tree = append(plan.Tree, nestDeleted(deleteKey{m, treeKey(pkField, pk)}, edges, loaded, seen)...)
 	}
 
 	for _, pm := range protectedOrder {

@@ -357,6 +357,18 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   forms and the admin use it. `auth.Permission` labels itself as Django's
   `Permission.__str__` does, "app | model | name", so the permission choices
   of the user and group admin read as in Django.
+- Messages: `messages.AddSafe` and `Storage.AddSafe` add a message whose text
+  is HTML, Django's message from `mark_safe`. `Message.Safe` reports it, and
+  the session keeps the flag, as Django's `is_safe`.
+- ORM: `DeletePlan.Tree` holds the collected objects as a tree of
+  `DeleteNode`, each object with the objects that its deletion cascades to,
+  Django's `NestedObjects.nested()`.
+- Admin: the delete page and the `delete_selected` confirmation list the
+  objects to delete as a nested list, each with the objects that cascade from
+  it, followed by a summary of the count per model, as in Django. When rows
+  protect the object, or the user lacks the delete permission of a model that
+  the deletion reaches, the page shows "Cannot delete" with those objects or
+  models.
 
 ### Changed
 
@@ -457,6 +469,19 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `makemigrations` name the program that runs. `startproject` and `startapp`
   print nothing at the default verbosity (`-v 2` lists the files), and
   `djangogo version` prints the bare version.
+- **BREAKING**: `admin.DeletedObjects.Items` is now `[]admin.DeletedObject`,
+  an HTML item with its cascaded children, and `Protected` holds HTML items.
+  A `GetDeletedObjects` hook must build these values. Templates that override
+  `admin/delete_confirmation.html` or
+  `admin/delete_selected_confirmation.html` read `deleted_objects_html` or
+  `deletable_objects_html`, `perms_lacking_html`, `protected_html` and
+  `model_count`, as in Django.
+- **BREAKING**: a `ModelAdmin` without `ListDisplay` shows one column with the
+  label of each object, Django's default `("__str__",)`, instead of a column
+  per field. Set `ListDisplay` to keep the columns.
+- Admin: the success message after an add, a change or a delete links the
+  object, as in Django. The delete page posts to its own URL, and its cancel
+  link goes back in the browser history.
 
 ### Fixed
 
@@ -514,6 +539,16 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - A `ModelChoiceField` over a model whose primary key is a one-to-one field
   used the printed relation as the value of its options. It now uses the
   primary key of the related row.
+- Admin: confirming the delete page of an object that protected rows block
+  answered 500 Internal Server Error. The page now shows "Cannot delete" with
+  the protected objects, also after a POST. A user without the delete
+  permission of a model that the deletion cascades to gets 403 Forbidden on
+  the POST, and protected objects of such a model count toward the missing
+  permissions, as in Django.
+- Admin: an object whose label is empty or only whitespace showed as an empty
+  link in the changelist, the breadcrumbs, the delete page and the messages.
+  It now shows "-", as in Django. The breadcrumbs cut a long label after 18
+  words.
 
 ### Security
 

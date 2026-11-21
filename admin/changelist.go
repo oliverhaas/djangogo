@@ -182,9 +182,7 @@ func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action)
 		rawDisplay = e.admin.ListDisplay
 	}
 	if len(rawDisplay) == 0 {
-		for _, f := range e.model.Fields() {
-			rawDisplay = append(rawDisplay, f.Name)
-		}
+		rawDisplay = []string{"__str__"}
 	}
 
 	// Resolve list_display_links before prepending action_checkbox.

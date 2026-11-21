@@ -33,6 +33,10 @@ var shortcuts = map[string]func(*http.Request, string, ...string) error{
 	"success": messages.Success,
 	"warning": messages.Warning,
 	"error":   messages.Error,
+	// safe adds a success message whose text is HTML.
+	"safe": func(r *http.Request, html string, extraTags ...string) error {
+		return messages.AddSafe(r, messages.LevelSuccess, html, extraTags...)
+	},
 }
 
 // levels maps the level names to their values (BaseTests.levels).
@@ -146,10 +150,16 @@ func contextMessages(t *testing.T, resp *djangotest.Response) []messages.Message
 	tms := fn()
 	out := make([]messages.Message, 0, len(tms))
 	for _, m := range tms {
+		// The text of a safe message is a value that prints itself as HTML.
+		text, plain := m["message"].(string)
+		if !plain {
+			text = fmt.Sprint(m["message"])
+		}
 		out = append(out, messages.Message{
 			Level:     m["level"].(int),
-			Message:   m["message"].(string),
+			Message:   text,
 			ExtraTags: m["extra_tags"].(string),
+			Safe:      !plain,
 		})
 	}
 	return out

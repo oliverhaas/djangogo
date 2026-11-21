@@ -340,25 +340,31 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 				s.popupResponse(w, r, "value", strconv.FormatInt(pk, 10), "obj", orm.Label(e.model, obj))
 				return
 			}
-			objDisplay := displayLabel(e.model, obj)
-			msg := fmt.Sprintf("The %s “%s” was added successfully.", singular, objDisplay)
+			// Link the object when the user can change it.
+			pk := pkOf(reflect.ValueOf(obj).Elem(), e)
+			objURL := ""
+			if e.hasChangePermission(s, r, obj) {
+				objURL = s.changeURL(e, pk)
+			}
+			msg := fmt.Sprintf("The %s “%s” was added successfully.",
+				forms.Escape(singular), objectHTML(displayLabel(e.model, obj), objURL))
 			continueEditing := r.PostForm.Has("_continue") ||
 				hooks != nil && hooks.continueAfterAdd && !r.PostForm.Has("_addanother")
 			if continueEditing && e.hasViewOrChangePermission(s, r, obj) {
-				if e.hasChangePermission(s, r, obj) {
+				if objURL != "" {
 					msg += " You may edit it again below."
 				}
-				_ = messages.Success(r, msg)
-				pk := pkOf(reflect.ValueOf(obj).Elem(), e)
+				_ = messages.AddSafe(r, messages.LevelSuccess, msg)
 				http.Redirect(w, r, s.changeURL(e, pk), http.StatusFound)
 				return
 			}
 			if r.PostForm.Has("_addanother") {
-				_ = messages.Success(r, fmt.Sprintf("%s You may add another %s below.", msg, singular))
+				_ = messages.AddSafe(r, messages.LevelSuccess,
+					fmt.Sprintf("%s You may add another %s below.", msg, forms.Escape(singular)))
 				http.Redirect(w, r, r.URL.Path, http.StatusFound)
 				return
 			}
-			_ = messages.Success(r, msg)
+			_ = messages.AddSafe(r, messages.LevelSuccess, msg)
 			s.redirectPostSave(w, r, e)
 			return
 		}
@@ -478,19 +484,20 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 					"obj", orm.Label(e.model, obj), "new_value", strconv.FormatInt(newPK, 10))
 				return
 			}
-			objDisplay := displayLabel(e.model, obj)
-			msg := fmt.Sprintf("The %s “%s” was changed successfully.", singular, objDisplay)
+			msg := fmt.Sprintf("The %s “%s” was changed successfully.",
+				forms.Escape(singular), objectHTML(displayLabel(e.model, obj), r.URL.Path))
 			if r.PostForm.Has("_continue") {
-				_ = messages.Success(r, msg+" You may edit it again below.")
+				_ = messages.AddSafe(r, messages.LevelSuccess, msg+" You may edit it again below.")
 				http.Redirect(w, r, r.URL.Path, http.StatusFound)
 				return
 			}
 			if r.PostForm.Has("_addanother") && e.hasAddPermission(s, r) {
-				_ = messages.Success(r, fmt.Sprintf("%s You may add another %s below.", msg, singular))
+				_ = messages.AddSafe(r, messages.LevelSuccess,
+					fmt.Sprintf("%s You may add another %s below.", msg, forms.Escape(singular)))
 				http.Redirect(w, r, s.addURL(e), http.StatusFound)
 				return
 			}
-			_ = messages.Success(r, msg)
+			_ = messages.AddSafe(r, messages.LevelSuccess, msg)
 			s.redirectPostSave(w, r, e)
 			return
 		}
@@ -509,9 +516,11 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 	s.renderChangeForm(w, r, e, "Change "+singular, obj, af, inlines, false, true)
 }
 
-// delete handles the delete confirmation: checks delete permission on the
-// loaded object, redirects with a warning if nonexistent, and on POST deletes
-// the row and redirects to changelist (with change perm) or admin index.
+// delete handles the delete page, Django's ModelAdmin._delete_view: it
+// checks delete permission on the loaded object, redirects with a warning if
+// it does not exist, lists the objects that the deletion cascades to, and on
+// a confirmed POST deletes the object unless protected objects block it or
+// the user may not delete one of the cascaded models.
 func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 	if e.rejectToField(w, r.FormValue(toFieldVar)) {
 		return
@@ -531,10 +540,21 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 		return
 	}
 
+	deleted, err := s.getDeletedObjects(r, e, []any{obj})
+	if err != nil {
+		http.Error(w, "failed to collect related rows", http.StatusInternalServerError)
+		return
+	}
+
 	singular, plural := modelVerboseNames(e.model)
 	objDisplay := displayLabel(e.model, obj)
 
-	if r.Method == http.MethodPost {
+	// Django tests request.POST, which is false for a POST without data.
+	if r.Method == http.MethodPost && len(r.PostForm) > 0 && len(deleted.Protected) == 0 {
+		if len(deleted.PermsNeeded) > 0 {
+			forbidden(w)
+			return
+		}
 		if err := e.ops.del(r.Context(), pk); err != nil {
 			http.Error(w, "failed to delete row", http.StatusInternalServerError)
 			return
@@ -552,19 +572,36 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 		return
 	}
 
+	title := "Delete"
+	if len(deleted.PermsNeeded) > 0 || len(deleted.Protected) > 0 {
+		title = "Cannot delete " + singular
+	}
+	maxDisplay := e.admin.DeleteConfirmationMaxDisplay
+	modelCounts := make([]map[string]any, len(deleted.ModelCount))
+	for i, mc := range deleted.ModelCount {
+		modelCounts[i] = map[string]any{"name": capFirst(mc.Name), "count": mc.Count}
+	}
+
 	ctx := s.EachContext(r)
-	ctx["title"] = "Delete"
+	ctx["title"] = title
 	ctx["subtitle"] = ""
 	ctx["object"] = objDisplay
 	ctx["object_name"] = singular
 	ctx["app_label"] = e.app
+	ctx["model_name"] = e.slug
 	ctx["app_verbose_name"] = s.appVerboseName(e.app)
 	ctx["app_url"] = s.appURLOrEmpty(e.app)
 	ctx["verbose_name_plural"] = capFirst(plural)
 	ctx["has_view_permission"] = e.hasViewOrChangePermission(s, r, nil)
 	ctx["changelist_url"] = s.changelistURL(e)
 	ctx["change_url"] = s.changeURL(e, pk)
-	ctx["action"] = r.URL.Path
+	ctx["model_count"] = modelCounts
+	ctx["has_perms_lacking"] = len(deleted.PermsNeeded) > 0
+	ctx["has_protected"] = len(deleted.Protected) > 0
+	ctx["hide_objects"] = maxDisplay != nil && *maxDisplay == 0
+	ctx["perms_lacking_html"] = forms.SafeHTML(truncatedUnorderedList(textItems(deleted.PermsNeeded), maxDisplay))
+	ctx["protected_html"] = forms.SafeHTML(truncatedUnorderedList(htmlItems(deleted.Protected), maxDisplay))
+	ctx["deleted_objects_html"] = forms.SafeHTML(truncatedUnorderedList(deleted.Items, maxDisplay))
 	ctx["media"] = e.media(s)
 	ctx["is_popup"] = isPopup(r)
 	ctx["is_popup_var"] = isPopupVar
@@ -710,6 +747,17 @@ func (s *AdminSite) manyLabels(ctx context.Context, obj any, f *orm.Field) strin
 	return strings.Join(labels, ", ")
 }
 
+// objectHTML returns the label of an object for the HTML of a success
+// message, Django's obj_repr: a link to u, or the bare label when u is empty,
+// escaped as Django's format_html('<a href="{}">{}</a>', urlquote(u), label)
+// does.
+func objectHTML(label, u string) string {
+	if u == "" {
+		return forms.Escape(label)
+	}
+	return `<a href="` + forms.Escape(pyQuote(u, "/")) + `">` + forms.Escape(label) + `</a>`
+}
+
 // isPopup reports whether r comes from a popup window, Django's IS_POPUP_VAR
 // in request.POST or request.GET.
 func isPopup(r *http.Request) bool {
@@ -804,10 +852,11 @@ func (s *AdminSite) appURLOrEmpty(appLabel string) string {
 	return s.appIndexURL(appLabel)
 }
 
-// displayLabel returns orm.Label(m, obj), or emptyValueDisplay ("-") when the
-// object's label is empty (Django's display_for_value(str(obj), "-")).
+// displayLabel returns orm.Label(m, obj) without surrounding whitespace, or
+// emptyValueDisplay ("-") when nothing is left, Django's
+// display_for_value(str(obj), EMPTY_VALUE_STRING).
 func displayLabel(m *orm.Model, obj any) string {
-	if label := orm.Label(m, obj); label != "" {
+	if label := strings.TrimSpace(orm.Label(m, obj)); label != "" {
 		return label
 	}
 	return emptyValueDisplay
