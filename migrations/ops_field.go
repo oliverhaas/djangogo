@@ -49,7 +49,7 @@ func (o AddField) DatabaseBackwards(ctx context.Context, app string, e *SchemaEd
 	if err != nil {
 		return err
 	}
-	return e.removeField(ctx, to, oldMS, newMS, o.Field)
+	return e.removeField(ctx, from, to, oldMS, newMS, o.Field)
 }
 
 // Describe returns Django's description.
@@ -94,7 +94,7 @@ func (o RemoveField) DatabaseForwards(ctx context.Context, app string, e *Schema
 	if !ok {
 		return errNoField(oldMS, o.Field)
 	}
-	return e.removeField(ctx, to, oldMS, newMS, *f)
+	return e.removeField(ctx, from, to, oldMS, newMS, *f)
 }
 
 // DatabaseBackwards adds the column again. Its values are not restored; a NOT
@@ -174,7 +174,7 @@ func (o AlterField) alter(ctx context.Context, app string, e *SchemaEditor, from
 	if !ok {
 		return errNoField(newMS, o.Field.Name)
 	}
-	return e.alterField(ctx, to, oldMS, newMS, *oldF, *newF, oneOff)
+	return e.alterField(ctx, from, to, oldMS, newMS, *oldF, *newF, oneOff)
 }
 
 // Describe returns Django's description.
@@ -232,8 +232,11 @@ func (o RenameField) StateForwards(app string, state *ProjectState) error {
 }
 
 // defaultColumn returns the column the ORM derives for a field name: the
-// snake_case name, with "_id" appended for a foreign key.
+// snake_case name, with "_id" appended for a foreign key, and "" for M2M.
 func defaultColumn(name string, rel orm.RelKind) string {
+	if rel == orm.RelM2M {
+		return ""
+	}
 	if rel != orm.RelNone {
 		return snakeCase(name) + "_id"
 	}
@@ -277,7 +280,7 @@ func (o RenameField) rename(ctx context.Context, app string, e *SchemaEditor, fr
 	if !ok {
 		return errNoField(newMS, newName)
 	}
-	return e.alterField(ctx, to, oldMS, newMS, *oldF, *newF, nil)
+	return e.alterField(ctx, from, to, oldMS, newMS, *oldF, *newF, nil)
 }
 
 // Describe returns Django's description.

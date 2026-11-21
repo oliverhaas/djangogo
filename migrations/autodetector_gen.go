@@ -42,11 +42,16 @@ func (a *Autodetector) oldModel(key modelKey) *ModelState {
 	return a.from.Models[ModelLabel(key.app, name)]
 }
 
-// foreignKeyDeps returns the dependency of a relation field: the model it
-// points to exists.
+// foreignKeyDeps returns the dependencies of a relation field: the target
+// model exists, plus any explicit M2M through model.
 func foreignKeyDeps(f FieldState) []opDep {
 	app, name := splitLabel(f.RelTo)
-	return []opDep{{app: app, model: name, kind: depCreate}}
+	deps := []opDep{{app: app, model: name, kind: depCreate}}
+	if f.RelThrough != "" {
+		tApp, tName := splitLabel(f.RelThrough)
+		deps = append(deps, opDep{app: tApp, model: tName, kind: depCreate})
+	}
+	return deps
 }
 
 // modelDeps returns the foreign-key dependencies of all fields of ms.
@@ -415,9 +420,9 @@ func (a *Autodetector) generateRemovedFields() {
 }
 
 // fillsExistingRows reports whether existing rows get a value for the new
-// column f without a one-off default.
+// column f without a one-off default. Many-to-many fields add no column.
 func fillsExistingRows(f FieldState) bool {
-	return f.Null || f.PrimaryKey || f.Kind == orm.KindAuto || effectiveDefault(f, nil) != nil
+	return f.IsManyToMany() || f.Null || f.PrimaryKey || f.Kind == orm.KindAuto || effectiveDefault(f, nil) != nil
 }
 
 // generateAddedFields generates AddField. A NOT NULL field that has nothing
@@ -465,9 +470,36 @@ func (a *Autodetector) generateAlteredFields() error {
 			if _, ok := a.renamedModels[modelKey{tApp, tName}]; ok {
 				compared.RelTo = old.RelTo
 			}
+			if field.RelThrough != "" {
+				thApp, thName := splitLabel(field.RelThrough)
+				if _, ok := a.renamedModels[modelKey{thApp, thName}]; ok {
+					compared.RelThrough = old.RelThrough
+				}
+			}
 			deps = foreignKeyDeps(*field)
 		}
 		if *old == compared {
+			continue
+		}
+		// Changing between a concrete field and an M2M field, or repointing an
+		// M2M field to a different target model, removes and re-adds the field
+		// (matching Django #23938 and M2M target-change detection).
+		if old.IsManyToMany() != field.IsManyToMany() ||
+			(old.IsManyToMany() && field.IsManyToMany() && old.RelTo != compared.RelTo) {
+			a.addOperation(key.app, RemoveField{Model: key.model, Field: key.field}, []opDep{
+				{app: key.app, model: key.model, field: key.field, kind: depAlterTogether},
+				{app: key.app, model: key.model, field: key.field, kind: depRemoveIndex},
+			}, false)
+			addDeps := append([]opDep{{app: key.app, model: key.model, field: key.field, kind: depRemove}}, deps...)
+			addOp := AddField{Model: key.model, Field: *field}
+			if !fillsExistingRows(*field) {
+				oneOff, err := a.questioner.AskNotNullAddition(newMS, *field)
+				if err != nil {
+					return err
+				}
+				addOp.Default = oneOff
+			}
+			a.addOperation(key.app, addOp, addDeps, false)
 			continue
 		}
 		op := AlterField{Model: key.model, Field: *field}

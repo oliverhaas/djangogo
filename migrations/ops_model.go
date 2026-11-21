@@ -61,7 +61,7 @@ func (o CreateModel) DatabaseBackwards(ctx context.Context, app string, e *Schem
 	if err != nil {
 		return err
 	}
-	return e.deleteModel(ctx, ms)
+	return e.deleteModel(ctx, from, ms)
 }
 
 // Describe returns Django's description.
@@ -93,7 +93,7 @@ func (o DeleteModel) DatabaseForwards(ctx context.Context, app string, e *Schema
 	if err != nil {
 		return err
 	}
-	return e.deleteModel(ctx, ms)
+	return e.deleteModel(ctx, from, ms)
 }
 
 // DatabaseBackwards creates the table again. The rows are not restored.
@@ -144,7 +144,12 @@ func (o RenameModel) StateForwards(app string, state *ProjectState) error {
 		state.Order[i] = newLabel
 	}
 	for _, ref := range state.referencing(oldLabel) {
-		ref.field.RelTo = newLabel
+		if ref.field.RelTo == oldLabel {
+			ref.field.RelTo = newLabel
+		}
+		if ref.field.RelThrough == oldLabel {
+			ref.field.RelThrough = newLabel
+		}
 	}
 	return nil
 }
@@ -170,7 +175,7 @@ func (RenameModel) rename(ctx context.Context, app string, e *SchemaEditor, from
 	if err != nil {
 		return err
 	}
-	return e.alterTable(ctx, oldMS, newMS)
+	return e.alterTable(ctx, from, to, oldMS, newMS)
 }
 
 // Describe returns Django's description.
@@ -209,7 +214,7 @@ func (o AlterModelTable) DatabaseForwards(ctx context.Context, app string, e *Sc
 	if err != nil {
 		return err
 	}
-	return e.alterTable(ctx, oldMS, newMS)
+	return e.alterTable(ctx, from, to, oldMS, newMS)
 }
 
 // DatabaseBackwards renames the table back.

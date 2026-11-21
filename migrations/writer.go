@@ -266,8 +266,12 @@ func (w *writer) fieldParts(f FieldState) string {
 	w.usesORM = true
 	parts := []string{
 		fmt.Sprintf("Name: %q", f.Name),
-		fmt.Sprintf("Column: %q", f.Column),
-		"Kind: orm.Kind" + f.Kind.String(),
+	}
+	if !f.IsManyToMany() {
+		parts = append(parts,
+			fmt.Sprintf("Column: %q", f.Column),
+			"Kind: orm.Kind"+f.Kind.String(),
+		)
 	}
 	flag := func(set bool, name string) {
 		if set {
@@ -302,6 +306,13 @@ func (w *writer) fieldParts(f FieldState) string {
 	if f.RelOnDelete != orm.OnDeleteDoNothing {
 		parts = append(parts, "RelOnDelete: "+onDeleteSource(f.RelOnDelete))
 	}
+	if f.RelThrough != "" {
+		parts = append(parts, fmt.Sprintf("RelThrough: %q", f.RelThrough))
+	}
+	if f.RelDBTable != "" {
+		parts = append(parts, fmt.Sprintf("RelDBTable: %q", f.RelDBTable))
+	}
+	flag(f.RelSymmetrical, "RelSymmetrical")
 	return strings.Join(parts, ", ")
 }
 
@@ -401,6 +412,8 @@ func relKindSource(k orm.RelKind) string {
 		return "orm.RelFK"
 	case orm.RelO2O:
 		return "orm.RelO2O"
+	case orm.RelM2M:
+		return "orm.RelM2M"
 	default:
 		return "orm.RelNone"
 	}

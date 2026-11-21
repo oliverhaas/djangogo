@@ -26,10 +26,16 @@ func (e *SchemaEditor) remakeTable(ctx context.Context, state *ProjectState, old
 	}
 	oldCols := map[string]bool{}
 	for _, f := range oldMS.Fields {
+		if f.IsManyToMany() {
+			continue
+		}
 		oldCols[f.Column] = true
 	}
 	var targets, sources []string
 	for _, f := range newMS.Fields {
+		if f.IsManyToMany() {
+			continue
+		}
 		switch expr, ok := exprs[f.Column]; {
 		case ok:
 			targets, sources = append(targets, e.q(f.Column)), append(sources, expr)

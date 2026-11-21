@@ -43,6 +43,13 @@ type FieldState struct {
 	RelTo string
 	// RelOnDelete is the ON DELETE action of a foreign key.
 	RelOnDelete orm.OnDelete
+	// RelThrough is the label of an explicit M2M through model ("app.Model"),
+	// or "" when the join table is auto-created.
+	RelThrough string
+	// RelDBTable overrides the auto-created M2M join table name when non-empty.
+	RelDBTable string
+	// RelSymmetrical records whether a self-referential M2M is symmetrical.
+	RelSymmetrical bool
 }
 
 // Equal reports whether two field states are identical.
@@ -66,8 +73,18 @@ func (f FieldState) sameDefinition(other FieldState) bool {
 	return f == other
 }
 
-// IsRelation reports whether the field is a foreign key.
+// IsRelation reports whether the field is a relation (FK, O2O, or M2M).
 func (f FieldState) IsRelation() bool { return f.RelKind != orm.RelNone && f.RelTo != "" }
+
+// IsManyToMany reports whether the field is a many-to-many relation.
+func (f FieldState) IsManyToMany() bool { return f.RelKind == orm.RelM2M }
+
+// IsConcrete reports whether the field corresponds to a column on its model's table.
+func (f FieldState) IsConcrete() bool { return f.RelKind != orm.RelM2M }
+
+// HasAutoThrough reports whether f is a many-to-many field with an auto-created
+// join table (no explicit through= model).
+func (f FieldState) HasAutoThrough() bool { return f.RelKind == orm.RelM2M && f.RelThrough == "" }
 
 // Attr returns the snake_case attribute name, the counterpart of Django's
 // field name: "created_at" for CreatedAt.
@@ -75,6 +92,22 @@ func (f FieldState) Attr() string { return snakeCase(f.Name) }
 
 // fieldStateFromField snapshots an orm field.
 func fieldStateFromField(f *orm.Field) FieldState {
+	if f.Rel != nil && f.Rel.Kind == orm.RelM2M {
+		fs := FieldState{
+			Name:           f.Name,
+			Blank:          f.Blank,
+			RelKind:        orm.RelM2M,
+			RelDBTable:     f.Rel.DBTable,
+			RelSymmetrical: f.Rel.Symmetrical,
+		}
+		if f.Rel.Target != nil {
+			fs.RelTo = ModelLabel(f.Rel.Target.App(), f.Rel.Target.Name())
+		}
+		if !f.Rel.AutoCreated && f.Rel.Through != nil {
+			fs.RelThrough = ModelLabel(f.Rel.Through.App(), f.Rel.Through.Name())
+		}
+		return fs
+	}
 	fs := FieldState{
 		Name:          f.Name,
 		Column:        f.Column,
@@ -316,14 +349,16 @@ func (ps *ProjectState) relatedTo(f FieldState) (*ModelState, error) {
 	return ms, nil
 }
 
-// referencing returns every (model, field) whose foreign key points to label.
+// referencing returns every (model, field) whose relation points to label
+// either as its target or as its explicit M2M through model.
 func (ps *ProjectState) referencing(label string) []fieldRef {
 	var out []fieldRef
 	for _, l := range ps.Order {
 		ms := ps.Models[l]
 		for i := range ms.Fields {
-			if ms.Fields[i].IsRelation() && ms.Fields[i].RelTo == label {
-				out = append(out, fieldRef{model: ms, field: &ms.Fields[i]})
+			f := &ms.Fields[i]
+			if f.IsRelation() && (f.RelTo == label || f.RelThrough == label) {
+				out = append(out, fieldRef{model: ms, field: f})
 			}
 		}
 	}
@@ -336,15 +371,20 @@ type fieldRef struct {
 	field *FieldState
 }
 
-// StateFromRegistry snapshots every model of r, including its Meta.Indexes and
-// Meta.UniqueTogether options. Models keep their registration order.
+// StateFromRegistry snapshots every model of r, including its M2M fields and
+// Meta.Indexes and Meta.UniqueTogether options. Models keep their registration
+// order.
 func StateFromRegistry(r *orm.Registry) *ProjectState {
 	ps := NewProjectState()
 	for _, m := range r.Models() {
 		raw := m.Fields()
-		fields := make([]FieldState, len(raw))
-		for i, f := range raw {
-			fields[i] = fieldStateFromField(f)
+		m2m := m.ManyToMany()
+		fields := make([]FieldState, 0, len(raw)+len(m2m))
+		for _, f := range raw {
+			fields = append(fields, fieldStateFromField(f))
+		}
+		for _, f := range m2m {
+			fields = append(fields, fieldStateFromField(f))
 		}
 		rawIndexes := m.Indexes()
 		var indexes []Index

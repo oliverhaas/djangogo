@@ -139,10 +139,13 @@ func (e *SchemaEditor) referencesClause(state *ProjectState, f FieldState) (stri
 func (e *SchemaEditor) createTableSQL(state *ProjectState, table string, fields []FieldState) (string, error) {
 	defs := make([]string, 0, len(fields))
 	for _, f := range fields {
+		if f.IsManyToMany() {
+			continue
+		}
 		defs = append(defs, e.columnDef(f))
 	}
 	for _, f := range fields {
-		if !f.IsRelation() {
+		if !f.IsRelation() || f.IsManyToMany() {
 			continue
 		}
 		ref, err := e.referencesClause(state, f)
@@ -155,9 +158,12 @@ func (e *SchemaEditor) createTableSQL(state *ProjectState, table string, fields 
 }
 
 // shouldIndex reports whether a field gets its own index. Foreign keys are
-// indexed by default, as in Django. A unique or primary-key column is indexed
-// by its constraint already.
+// indexed by default, as in Django. A unique, primary-key, or many-to-many
+// field does not get a single-column index on the declaring table.
 func shouldIndex(f FieldState) bool {
+	if f.IsManyToMany() {
+		return false
+	}
 	return (f.DBIndex || f.IsRelation()) && !f.Unique && !f.PrimaryKey
 }
 
@@ -242,7 +248,8 @@ func (e *SchemaEditor) executeAll(ctx context.Context, stmts ...string) error {
 	return nil
 }
 
-// createModel creates the table of ms with its indexes.
+// createModel creates the table of ms with its indexes and any auto-created
+// M2M join tables declared on ms.
 func (e *SchemaEditor) createModel(ctx context.Context, state *ProjectState, ms *ModelState) error {
 	create, err := e.createTableSQL(state, ms.Table, ms.Fields)
 	if err != nil {
@@ -252,22 +259,43 @@ func (e *SchemaEditor) createModel(ctx context.Context, state *ProjectState, ms 
 	if err != nil {
 		return err
 	}
-	return e.executeAll(ctx, append([]string{create}, indexes...)...)
+	if err := e.executeAll(ctx, append([]string{create}, indexes...)...); err != nil {
+		return err
+	}
+	return e.createAutoThroughTables(ctx, state, ms)
 }
 
-// deleteModel drops the table of ms. PostgreSQL needs CASCADE to drop the
-// foreign keys of other tables that point to it.
-func (e *SchemaEditor) deleteModel(ctx context.Context, ms *ModelState) error {
-	stmt := "DROP TABLE " + e.q(ms.Table)
+// deleteTable drops table. PostgreSQL needs CASCADE to drop the foreign keys
+// of other tables that point to it.
+func (e *SchemaEditor) deleteTable(ctx context.Context, table string) error {
+	stmt := "DROP TABLE " + e.q(table)
 	if !e.isSQLite() {
 		stmt += " CASCADE"
 	}
 	return e.Execute(ctx, stmt)
 }
 
-// addField adds the column of f to the table of newMS. oldMS is the model
-// without the field.
+// deleteModel drops any auto-created M2M join tables of ms and then drops ms's table.
+func (e *SchemaEditor) deleteModel(ctx context.Context, state *ProjectState, ms *ModelState) error {
+	if err := e.dropAutoThroughTables(ctx, state, ms); err != nil {
+		return err
+	}
+	return e.deleteTable(ctx, ms.Table)
+}
+
+// addField adds the column of f to the table of newMS (or creates its
+// auto-created M2M join table). oldMS is the model without the field.
 func (e *SchemaEditor) addField(ctx context.Context, state *ProjectState, oldMS, newMS *ModelState, f FieldState, oneOff any) error {
+	if f.IsManyToMany() {
+		if !f.HasAutoThrough() {
+			return nil
+		}
+		th, err := autoThroughModelState(state, newMS, f)
+		if err != nil {
+			return err
+		}
+		return e.createModel(ctx, state, th)
+	}
 	def := effectiveDefault(f, oneOff)
 	if !f.Null && def == nil && !e.collecting {
 		hasRows, err := e.tableHasRows(ctx, oldMS.Table)
@@ -329,10 +357,21 @@ func (e *SchemaEditor) addField(ctx context.Context, state *ProjectState, oldMS,
 	return nil
 }
 
-// removeField drops the column of f. newMS is the model without the field.
-func (e *SchemaEditor) removeField(ctx context.Context, state *ProjectState, oldMS, newMS *ModelState, f FieldState) error {
+// removeField drops the column of f (or its auto-created M2M join table).
+// newMS is the model without the field.
+func (e *SchemaEditor) removeField(ctx context.Context, from, to *ProjectState, oldMS, newMS *ModelState, f FieldState) error {
+	if f.IsManyToMany() {
+		if !f.HasAutoThrough() {
+			return nil
+		}
+		th, err := autoThroughModelState(from, oldMS, f)
+		if err != nil {
+			return err
+		}
+		return e.deleteTable(ctx, th.Table)
+	}
 	if e.isSQLite() {
-		return e.remakeTable(ctx, state, oldMS, newMS, nil)
+		return e.remakeTable(ctx, to, oldMS, newMS, nil)
 	}
 	return e.Execute(ctx, "ALTER TABLE "+e.q(oldMS.Table)+" DROP COLUMN "+e.q(f.Column))
 }
@@ -346,8 +385,12 @@ func schemaEqual(a, b FieldState) bool {
 		a.RelTo == b.RelTo && a.RelOnDelete == b.RelOnDelete
 }
 
-// alterField changes the column of oldF into the column of newF.
-func (e *SchemaEditor) alterField(ctx context.Context, state *ProjectState, oldMS, newMS *ModelState, oldF, newF FieldState, oneOff any) error {
+// alterField changes the column of oldF into the column of newF, or updates
+// the auto-created join table for a many-to-many field.
+func (e *SchemaEditor) alterField(ctx context.Context, from, to *ProjectState, oldMS, newMS *ModelState, oldF, newF FieldState, oneOff any) error {
+	if oldF.IsManyToMany() || newF.IsManyToMany() {
+		return e.alterM2MField(ctx, from, to, oldMS, newMS, oldF, newF)
+	}
 	same := schemaEqual(oldF, newF)
 	switch {
 	case same && oldF.Column == newF.Column:
@@ -369,9 +412,9 @@ func (e *SchemaEditor) alterField(ctx context.Context, state *ProjectState, oldM
 				exprs[newF.Column] = "coalesce(" + e.q(oldF.Column) + ", " + literal + ")"
 			}
 		}
-		return e.remakeTable(ctx, state, oldMS, newMS, exprs)
+		return e.remakeTable(ctx, to, oldMS, newMS, exprs)
 	default:
-		return e.alterFieldPostgres(ctx, state, oldMS, newMS, oldF, newF, oneOff)
+		return e.alterFieldPostgres(ctx, to, oldMS, newMS, oldF, newF, oneOff)
 	}
 }
 
@@ -384,10 +427,14 @@ type derivedName struct {
 }
 
 // derivedNames lists the computed names of a model in a fixed order: one per
-// field (empty when the field has no index), then one per unique-together set.
+// concrete field (empty when the field has no index), then one per
+// unique-together set.
 func (e *SchemaEditor) derivedNames(ms *ModelState) ([]derivedName, error) {
 	out := make([]derivedName, 0, len(ms.Fields)+len(ms.UniqueTogether))
 	for _, f := range ms.Fields {
+		if f.IsManyToMany() {
+			continue
+		}
 		d := derivedName{columns: []string{f.Column}}
 		if shouldIndex(f) {
 			d.name = e.fieldIndexName(ms.Table, f.Column)
@@ -443,15 +490,18 @@ func (e *SchemaEditor) renameDerived(ctx context.Context, oldMS, newMS *ModelSta
 }
 
 // alterTable renames the table of a model when its name differs between the
-// two states.
-func (e *SchemaEditor) alterTable(ctx context.Context, oldMS, newMS *ModelState) error {
-	if oldMS.Table == newMS.Table {
-		return nil
+// two states, and updates any auto-created M2M join tables affected by a table
+// or model rename.
+func (e *SchemaEditor) alterTable(ctx context.Context, from, to *ProjectState, oldMS, newMS *ModelState) error {
+	if oldMS.Table != newMS.Table {
+		if err := e.Execute(ctx, "ALTER TABLE "+e.q(oldMS.Table)+" RENAME TO "+e.q(newMS.Table)); err != nil {
+			return err
+		}
+		if err := e.renameDerived(ctx, oldMS, newMS); err != nil {
+			return err
+		}
 	}
-	if err := e.Execute(ctx, "ALTER TABLE "+e.q(oldMS.Table)+" RENAME TO "+e.q(newMS.Table)); err != nil {
-		return err
-	}
-	return e.renameDerived(ctx, oldMS, newMS)
+	return e.alterTableM2MTables(ctx, from, to, oldMS, newMS)
 }
 
 // alterUniqueTogether drops the constraints of the sets only oldMS has and

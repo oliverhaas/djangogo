@@ -312,7 +312,7 @@ func reduceAlterField(o AlterField, other Operation, app string) ([]Operation, i
 // operation of unknown effect counts as touching every model.
 func referencesModel(op Operation, name, app string) bool {
 	label := ModelLabel(app, name)
-	pointsTo := func(f FieldState) bool { return f.IsRelation() && f.RelTo == label }
+	pointsTo := func(f FieldState) bool { return f.IsRelation() && (f.RelTo == label || f.RelThrough == label) }
 	switch o := op.(type) {
 	case CreateModel:
 		return o.Name == name || slices.ContainsFunc(o.Fields, pointsTo)
@@ -343,7 +343,7 @@ func referencesModel(op Operation, name, app string) bool {
 // because the referenced column is not known here.
 func referencesField(op Operation, model, field, app string) bool {
 	label := ModelLabel(app, model)
-	pointsTo := func(f FieldState) bool { return f.IsRelation() && f.RelTo == label }
+	pointsTo := func(f FieldState) bool { return f.IsRelation() && (f.RelTo == label || f.RelThrough == label) }
 	switch o := op.(type) {
 	case AddField:
 		return (o.Model == model && o.Field.Name == field) || pointsTo(o.Field)
