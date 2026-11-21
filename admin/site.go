@@ -157,6 +157,12 @@ type AdminSite struct {
 	// index show, Django's AdminSite.get_log_entries. It receives the default
 	// entries and returns the ones to show. Nil shows all of them.
 	GetLogEntries func(r *http.Request, entries *orm.QuerySet[LogEntry]) *orm.QuerySet[LogEntry]
+	// ExtraContext returns values to add to the template context of a page
+	// of the site, Django's extra_context argument of the views of
+	// AdminSite. view is "index", "app_index", "login", "logout",
+	// "password_change" or "password_change_done". The values replace those
+	// of the page. ModelAdmin.ExtraContext covers the pages of a model.
+	ExtraContext func(r *http.Request, view string) map[string]any
 
 	actions   []Action
 	revMu     sync.RWMutex

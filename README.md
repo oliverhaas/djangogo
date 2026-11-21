@@ -208,9 +208,8 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   adds fields and options to the model form, and its exclusions add to
   `ExcludeFields` instead of being overridden by it. The date
   hierarchy reads a datetime in UTC. A search field with `@` uses
-  `icontains`, not full-text search. The views take no `extra_context`, and
-  a template option such as `ChangeFormTemplate` names one template, not a
-  list. Blocks that Django names with hyphens, such as `object-tools-items`,
+  `icontains`, not full-text search. A template option such as
+  `ChangeFormTemplate` names one template, not a list. Blocks that Django names with hyphens, such as `object-tools-items`,
   have underscores.
 - **Auth:** no custom user model. The login, logout and password change views
   are mounted by hand: there is no counterpart of `django.contrib.auth.urls`. No

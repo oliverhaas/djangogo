@@ -514,6 +514,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   error of a method fails the changelist with 500 Internal Server Error,
   except `orm.ErrDoesNotExist`, which shows the empty value. A read-only
   field shows the empty value for any error.
+- Admin: `ModelAdmin.ExtraContext` and `AdminSite.ExtraContext` add values to
+  the template context of a page, as Django's `extra_context` argument of the
+  views. The hook gets the request and the name of the view, such as
+  `"changelist"`, `"change"` or `"index"`. On the add and change pages the
+  values do not replace the permission flags and the buttons, and a false
+  `show_save`, `show_save_and_continue`, `show_save_and_add_another` or
+  `show_delete` hides that button, as Django's `submit_row` tag does.
 
 ### Changed
 

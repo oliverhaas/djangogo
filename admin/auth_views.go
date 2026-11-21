@@ -3,6 +3,7 @@ package admin
 import (
 	"cmp"
 	"errors"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -116,6 +117,7 @@ func (s *AdminSite) renderLogin(w http.ResponseWriter, r *http.Request, form *fo
 	ctx["redirect_field_name"] = auth.DefaultRedirectFieldName
 	ctx["form"] = form
 	ctx["action"] = r.URL.RequestURI()
+	maps.Copy(ctx, s.extraContext(r, "login"))
 	s.render(w, r, cmp.Or(s.LoginTemplate, "admin/login.html"), ctx)
 }
 
@@ -125,6 +127,7 @@ func (s *AdminSite) logout(w http.ResponseWriter, r *http.Request) {
 	ctx := s.EachContext(r)
 	// Override has_permission because the user is being logged out now.
 	ctx["has_permission"] = false
+	maps.Copy(ctx, s.extraContext(r, "logout"))
 	v := &auth.LogoutView{
 		Templates:    s.engine,
 		TemplateName: cmp.Or(s.LogoutTemplate, auth.LoggedOutTemplate),
@@ -136,12 +139,14 @@ func (s *AdminSite) logout(w http.ResponseWriter, r *http.Request) {
 // passwordChange handles /admin/password_change/ via auth.PasswordChangeView
 // using the admin's templates and site context.
 func (s *AdminSite) passwordChange(w http.ResponseWriter, r *http.Request) {
+	ctx := s.EachContext(r)
+	maps.Copy(ctx, s.extraContext(r, "password_change"))
 	v := &auth.PasswordChangeView{
 		DB:           s.db,
 		Templates:    s.engine,
 		TemplateName: cmp.Or(s.PasswordChangeTemplate, auth.PasswordChangeTemplate),
 		SuccessURL:   s.passwordChangeDoneURL(),
-		ExtraContext: s.EachContext(r),
+		ExtraContext: ctx,
 	}
 	v.ServeHTTP(w, r.WithContext(templates.WithCurrentApp(r.Context(), s.siteName())))
 }
@@ -149,10 +154,12 @@ func (s *AdminSite) passwordChange(w http.ResponseWriter, r *http.Request) {
 // passwordChangeDone handles /admin/password_change/done/ via
 // auth.PasswordChangeDoneView using the admin's templates and site context.
 func (s *AdminSite) passwordChangeDone(w http.ResponseWriter, r *http.Request) {
+	ctx := s.EachContext(r)
+	maps.Copy(ctx, s.extraContext(r, "password_change_done"))
 	v := &auth.PasswordChangeDoneView{
 		Templates:    s.engine,
 		TemplateName: cmp.Or(s.PasswordChangeDoneTemplate, auth.PasswordChangeDoneTemplate),
-		ExtraContext: s.EachContext(r),
+		ExtraContext: ctx,
 	}
 	v.ServeHTTP(w, r.WithContext(templates.WithCurrentApp(r.Context(), s.siteName())))
 }

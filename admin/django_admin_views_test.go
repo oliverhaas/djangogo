@@ -729,3 +729,91 @@ func TestChangeListFacetToggle(t *testing.T) {
 		djangotest.AssertNotContains(t, resp, "Hide counts")
 	})
 }
+
+// UndeletableObject is tests/admin_views/models.py::UndeletableObject, the
+// model whose admin hides the delete link of the change page.
+type UndeletableObject struct {
+	ID   int64
+	Name string `orm:"max_length=255"`
+}
+
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_change_view_with_show_delete_extra_context
+func TestChangeViewWithShowDeleteExtraContext(t *testing.T) {
+	models := append(adminViewsModels(), djangotest.App("admin_views", &UndeletableObject{}))
+	djangotest.EachDB(t, models, func(t *testing.T, db *orm.DB) {
+		// The 'show_delete' context variable in the admin's change view
+		// controls the display of the delete button.
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			// UndeletableObjectAdmin.
+			admin.Register[UndeletableObject](site, admin.ModelAdmin{
+				ExtraContext: func(_ *http.Request, view string) map[string]any {
+					if view == "change" {
+						return map[string]any{"show_delete": false}
+					}
+					return nil
+				},
+			})
+		})
+		env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+		instance := mustCreate(t, db, &UndeletableObject{Name: "foo"})
+		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_undeletableobject_change", instance.ID))
+		djangotest.AssertNotContains(t, resp, "deletelink")
+	})
+}
+
+// TestExtraContext checks that each page adds the values of the
+// ExtraContext of its ModelAdmin or AdminSite, and that the add and change
+// pages keep their own permission flags.
+//
+// No Django test exists: Django passes extra_context to each view method,
+// and its tests cover the changelist, change, index and password change
+// pages.
+func TestExtraContext(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		extra := func(_ *http.Request, view string) map[string]any {
+			return map[string]any{"extra_view": view, "title": "Extra " + view, "has_add_permission": false}
+		}
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			site.ExtraContext = extra
+			admin.Register[Section](site, admin.ModelAdmin{ExtraContext: extra})
+		})
+		env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+		section := mustCreate(t, db, &Section{Name: "s"})
+		for _, tc := range []struct {
+			view, url string
+			// addPermission is has_add_permission: the add and change pages
+			// set it after the extra context, as Django's render_change_form.
+			addPermission any
+		}{
+			{"index", mustReverse(t, env.router, "admin:index"), false},
+			{"app_index", mustReverse(t, env.router, "admin:app_list", "admin_views"), nil},
+			{"changelist", mustReverse(t, env.router, "admin:admin_views_section_changelist"), false},
+			{"add", mustReverse(t, env.router, "admin:admin_views_section_add"), true},
+			{"change", mustReverse(t, env.router, "admin:admin_views_section_change", section.ID), true},
+			{"delete", mustReverse(t, env.router, "admin:admin_views_section_delete", section.ID), false},
+			{"history", mustReverse(t, env.router, "admin:admin_views_section_history", section.ID), false},
+			{"password_change", mustReverse(t, env.router, "admin:password_change"), false},
+			{"password_change_done", mustReverse(t, env.router, "admin:password_change_done"), false},
+		} {
+			t.Run(tc.view, func(t *testing.T) {
+				resp := env.client.Get(tc.url)
+				djangotest.AssertStatus(t, resp, http.StatusOK)
+				djangotest.AssertEqual(t, ctxVal(t, resp, "extra_view"), any(tc.view))
+				djangotest.AssertEqual(t, ctxVal(t, resp, "title"), any("Extra "+tc.view))
+				if tc.addPermission != nil {
+					djangotest.AssertEqual(t, ctxVal(t, resp, "has_add_permission"), tc.addPermission)
+				}
+			})
+		}
+		t.Run("logout", func(t *testing.T) {
+			resp := env.client.Post(mustReverse(t, env.router, "admin:logout"), nil)
+			djangotest.AssertEqual(t, ctxVal(t, resp, "extra_view"), any("logout"))
+			djangotest.AssertEqual(t, ctxVal(t, resp, "title"), any("Extra logout"))
+		})
+		t.Run("login", func(t *testing.T) {
+			resp := env.client.Get(mustReverse(t, env.router, "admin:login"))
+			djangotest.AssertEqual(t, ctxVal(t, resp, "extra_view"), any("login"))
+			djangotest.AssertEqual(t, ctxVal(t, resp, "title"), any("Extra login"))
+		})
+	})
+}

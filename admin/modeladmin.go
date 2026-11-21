@@ -609,6 +609,15 @@ type ModelAdmin struct {
 	// compute the confirmation summary, deletable list, missing permissions,
 	// and protected objects (Django's get_deleted_objects).
 	GetDeletedObjects func(r *http.Request, objs []any) (*DeletedObjects, error)
+	// ExtraContext returns values to add to the template context of a page,
+	// Django's extra_context argument of the views. view is "changelist",
+	// "add", "change", "delete" or "history". The values replace those of
+	// the page, except on the add and change pages: there the permission
+	// flags, the URLs and the buttons win, as in Django's
+	// render_change_form. A false "show_save", "show_save_and_continue",
+	// "show_save_and_add_another" or "show_delete" hides that button of the
+	// add and change pages.
+	ExtraContext func(r *http.Request, view string) map[string]any
 
 	// HasAddPermission overrides the default "<app>.add_<model>" check
 	// (Django's ModelAdmin.has_add_permission).

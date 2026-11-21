@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -1140,6 +1141,7 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	ctx["show_all_url"] = showAllURL
 
 	ctx["includes"] = s.includes(e, "change_list_object_tools", "search_form", "date_hierarchy", "actions", "change_list_results", "pagination")
+	maps.Copy(ctx, e.extraContext(r, "changelist"))
 	s.renderPage(w, r, e, e.admin.ChangeListTemplate, "change_list.html", ctx)
 }
 

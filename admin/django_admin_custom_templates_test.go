@@ -21,13 +21,16 @@ type CustomArticle struct {
 	Date    time.Time
 }
 
-// customArticleAdmin is tests/admin_views/admin.py::CustomArticleAdmin.
-//
-// No Go counterpart: CustomArticleAdmin.changelist_view passes
-// extra_context={"extra_var": "Hello!"}. A ModelAdmin has no view methods to
-// override.
+// customArticleAdmin is tests/admin_views/admin.py::CustomArticleAdmin. Its
+// changelist_view passes extra_context={"extra_var": "Hello!"}.
 func customArticleAdmin() admin.ModelAdmin {
 	return admin.ModelAdmin{
+		ExtraContext: func(_ *http.Request, view string) map[string]any {
+			if view == "changelist" {
+				return map[string]any{"extra_var": "Hello!"}
+			}
+			return nil
+		},
 		ChangeListTemplate:                 "custom_admin/change_list.html",
 		ChangeFormTemplate:                 "custom_admin/change_form.html",
 		AddFormTemplate:                    "custom_admin/add_form.html",
@@ -202,11 +205,8 @@ func TestCustomModelAdminTemplates(t *testing.T) {
 	djangotest.EachDB(t, customTemplateModels(), func(t *testing.T, db *orm.DB) {
 		env, _ := customTemplateEnv(t, db)
 		// Test custom change list template.
-		// FIXME-PORT: Django also asserts "var hello = 'Hello!';", the
-		// extra_context of CustomArticleAdmin.changelist_view, which has no Go
-		// counterpart.
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_customarticle_changelist"))
-		djangotest.AssertContains(t, resp, "var hello = '';")
+		djangotest.AssertContains(t, resp, "var hello = 'Hello!';")
 		djangotest.AssertTemplateUsed(t, resp, "custom_admin/change_list.html")
 
 		// Test custom add form template.
@@ -376,11 +376,9 @@ func TestExtendedBodyclassTemplateDeleteSelectedConfirmation(t *testing.T) {
 
 // customAdminSiteEnv builds the site "admin2" of
 // tests/admin_views/customadmin.py: the custom templates of Admin2 and the
-// templates of tests/templates in front of the admin's.
-//
-// No Go counterpart: Admin2.index and Admin2.password_change pass the
-// extra_context {"foo": "*bar*"} and {"spam": "eggs"}. An AdminSite has no
-// view methods to override.
+// templates of tests/templates in front of the admin's. Admin2.index and
+// Admin2.password_change pass the extra_context {"foo": "*bar*"} and
+// {"spam": "eggs"}.
 func customAdminSiteEnv(t *testing.T, db *orm.DB) (*adminTestEnv, *auth.User) {
 	t.Helper()
 	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
@@ -392,6 +390,15 @@ func customAdminSiteEnv(t *testing.T, db *orm.DB) (*adminTestEnv, *auth.User) {
 		site.IndexTemplate = "custom_admin/index.html"
 		site.PasswordChangeTemplate = "custom_admin/password_change_form.html"
 		site.PasswordChangeDoneTemplate = "custom_admin/password_change_done.html"
+		site.ExtraContext = func(_ *http.Request, view string) map[string]any {
+			switch view {
+			case "index":
+				return map[string]any{"foo": "*bar*"}
+			case "password_change":
+				return map[string]any{"spam": "eggs"}
+			}
+			return nil
+		}
 		site.SetTemplateSources(
 			templates.MapSource("tests", customAdminTemplates),
 			templates.FSSource("admin", admin.Templates()),
@@ -430,9 +437,7 @@ func TestCustomAdminSiteIndexViewAndTemplate(t *testing.T) {
 		env, _ := customAdminSiteEnv(t, db)
 		resp := env.client.Get(mustReverse(t, env.router, "admin2:index"))
 		djangotest.AssertTemplateUsed(t, resp, "custom_admin/index.html")
-		// FIXME-PORT: Django asserts "... template *bar*", the extra_context
-		// of Admin2.index, which has no Go counterpart.
-		djangotest.AssertContains(t, resp, "Hello from a custom index template")
+		djangotest.AssertContains(t, resp, "Hello from a custom index template *bar*")
 	})
 }
 
@@ -456,9 +461,15 @@ func TestCustomAdminSitePasswordChangeTemplate(t *testing.T) {
 	})
 }
 
-// FIXME-PORT: tests/admin_views/tests.py::CustomModelAdminTest.test_custom_admin_site_password_change_with_extra_context
-// needs the extra_context of Admin2.password_change, which has no Go
-// counterpart.
+// Ported from Django: tests/admin_views/tests.py::CustomModelAdminTest.test_custom_admin_site_password_change_with_extra_context
+func TestCustomAdminSitePasswordChangeWithExtraContext(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		env, _ := customAdminSiteEnv(t, db)
+		resp := env.client.Get(mustReverse(t, env.router, "admin2:password_change"))
+		djangotest.AssertTemplateUsed(t, resp, "custom_admin/password_change_form.html")
+		djangotest.AssertContains(t, resp, "eggs")
+	})
+}
 
 // Ported from Django: tests/admin_views/tests.py::CustomModelAdminTest.test_custom_admin_site_password_change_done_template
 func TestCustomAdminSitePasswordChangeDoneTemplate(t *testing.T) {
@@ -492,15 +503,21 @@ func TestOverrideChangeFormTemplateTags(t *testing.T) {
 	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
 		// admin_modify template tags follow the standard search pattern
 		// admin/app_label/model/template.html.
-		env := templateTagsEnv(t, db, admin.ModelAdmin{})
+		env := templateTagsEnv(t, db, admin.ModelAdmin{
+			ExtraContext: func(_ *http.Request, view string) map[string]any {
+				if view == "change" {
+					return map[string]any{"show_publish": true, "extra": true}
+				}
+				return nil
+			},
+		})
 		article := mustCreate(t, db, &Article{Title: "Article"})
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_article_change", article.ID))
 		djangotest.AssertStatus(t, resp, http.StatusOK)
-		// FIXME-PORT: Django passes extra_context={"show_publish": True,
-		// "extra": True} to change_view and asserts both in the context and
-		// name="_publish" in the page. A change view has no extra_context in
-		// Go.
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_publish"), any(true))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "extra"), any(true))
 		djangotest.AssertContains(t, resp, `name="_save"`)
+		djangotest.AssertContains(t, resp, `name="_publish"`)
 		djangotest.AssertContains(t, resp, "override-change_form_object_tools")
 		djangotest.AssertContains(t, resp, "override-prepopulated_fields_js")
 	})
@@ -512,7 +529,7 @@ func TestOverrideChangeListTemplateTags(t *testing.T) {
 		// admin_list template tags follow the standard search pattern
 		// admin/app_label/model/template.html.
 		// FIXME-PORT: Django also sets date_hierarchy = "date" and asserts
-		// "override-date_hierarchy"; date_hierarchy is not implemented.
+		// "override-date_hierarchy"; the Go Article has no date field.
 		env := templateTagsEnv(t, db, admin.ModelAdmin{SearchFields: []string{"title"}})
 		mustCreate(t, db, &Article{Title: "Article"})
 		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_article_changelist"))

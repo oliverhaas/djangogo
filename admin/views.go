@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flosch/pongo2/v6"
+
 	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/messages"
 	"github.com/oliverhaas/djangogo/orm"
@@ -37,6 +39,7 @@ func (s *AdminSite) index(w http.ResponseWriter, r *http.Request) {
 		ctx["log_enabled"] = true
 		ctx["admin_log"] = recent
 	}
+	maps.Copy(ctx, s.extraContext(r, "index"))
 	s.render(w, r, cmp.Or(s.IndexTemplate, "admin/index.html"), ctx)
 }
 
@@ -55,6 +58,7 @@ func (s *AdminSite) appIndex(w http.ResponseWriter, r *http.Request) {
 	ctx["subtitle"] = ""
 	ctx["app_label"] = appLabel
 	ctx["app_list"] = appList
+	maps.Copy(ctx, s.extraContext(r, "app_index"))
 	names := []string{"admin/" + appLabel + "/app_index.html", "admin/app_index.html"}
 	if s.AppIndexTemplate != "" {
 		names = []string{s.AppIndexTemplate}
@@ -710,6 +714,7 @@ func (s *AdminSite) delete(w http.ResponseWriter, r *http.Request, e *entry) {
 	ctx["is_popup_var"] = isPopupVar
 	ctx["to_field"] = r.FormValue(toFieldVar)
 	ctx["to_field_var"] = toFieldVar
+	maps.Copy(ctx, e.extraContext(r, "delete"))
 	s.renderPage(w, r, e, e.admin.DeleteConfirmationTemplate, "delete_confirmation.html", ctx)
 }
 
@@ -751,7 +756,37 @@ func (s *AdminSite) history(w http.ResponseWriter, r *http.Request, e *entry) {
 		http.Error(w, "failed to load the history", http.StatusInternalServerError)
 		return
 	}
+	maps.Copy(ctx, e.extraContext(r, "history"))
 	s.renderPage(w, r, e, e.admin.ObjectHistoryTemplate, "object_history.html", ctx)
+}
+
+// extraContext returns the AdminSite.ExtraContext values of view for r.
+func (s *AdminSite) extraContext(r *http.Request, view string) map[string]any {
+	if s.ExtraContext == nil {
+		return nil
+	}
+	return s.ExtraContext(r, view)
+}
+
+// extraContext returns the ModelAdmin.ExtraContext values of view for r.
+func (e *entry) extraContext(r *http.Request, view string) map[string]any {
+	if e.admin.ExtraContext == nil {
+		return nil
+	}
+	return e.admin.ExtraContext(r, view)
+}
+
+// changeFormOwnKeys are the keys of the add and change pages that the extra
+// context does not replace: Django's render_change_form sets them after it
+// merges extra_context, and the submit_row tag computes the buttons.
+var changeFormOwnKeys = map[string]bool{
+	"add": true, "change": true, "app_label": true, "form_url": true,
+	"has_view_permission": true, "has_add_permission": true,
+	"has_change_permission": true, "has_delete_permission": true,
+	"has_absolute_url": true, "absolute_url": true, "save_on_top": true,
+	"to_field_var": true, "is_popup_var": true, "can_change": true,
+	"show_save": true, "show_save_as_new": true, "show_save_and_add_another": true,
+	"show_save_and_continue": true, "show_close": true, "show_delete_link": true,
 }
 
 // formMode is the kind of page renderChangeForm draws.
@@ -783,6 +818,11 @@ func (s *AdminSite) renderChangeForm(
 	mode formMode,
 ) {
 	isAdd := mode == formAdd
+	view := "add"
+	if r.PathValue("object_id") != "" {
+		view = "change"
+	}
+	extra := e.extraContext(r, view)
 	canChange := mode == formAdd || mode == formChange ||
 		mode == formSaveAsNew && e.hasChangePermission(s, r, nil)
 	singular, plural := modelVerboseNames(e.model)
@@ -852,21 +892,35 @@ func (s *AdminSite) renderChangeForm(
 		}
 	}
 
-	// Submit-row button visibility mirrors Django's submit_row template tag.
-	// A failed "Save as new" hides the buttons that save the original row.
+	// Submit-row button visibility mirrors Django's submit_row template tag,
+	// which reads the show_* flags of the extra context. A failed "Save as
+	// new" hides the buttons that save the original row.
+	flag := func(key string, def bool) bool {
+		if v, ok := extra[key]; ok {
+			return pongo2.AsValue(v).IsTrue()
+		}
+		return def
+	}
 	canSave := isAdd || canChange
-	showSave := canSave && mode != formSaveAsNew
+	showSave := canSave && flag("show_save", mode != formSaveAsNew)
 	ctx["save_on_top"] = e.admin.SaveOnTop
 	ctx["show_save"] = showSave
 	ctx["show_save_as_new"] = !popup && hasAdd && !isAdd && e.admin.SaveAs
-	ctx["show_save_and_add_another"] = !popup && hasAdd && canSave && (!e.admin.SaveAs || isAdd)
-	ctx["show_save_and_continue"] = !popup && showSave && (hasObjChange || hasObjView)
+	ctx["show_save_and_add_another"] = !popup && hasAdd && canSave && (!e.admin.SaveAs || isAdd) &&
+		flag("show_save_and_add_another", true)
+	ctx["show_save_and_continue"] = !popup && canSave && flag("show_save_and_continue", mode != formSaveAsNew) &&
+		(hasObjChange || hasObjView)
 	ctx["show_close"] = !showSave
-	ctx["show_delete_link"] = !popup && hasObjDelete
+	ctx["show_delete_link"] = !popup && hasObjDelete && flag("show_delete", true)
 
 	ctx["prepopulated_fields_json"] = prepopulatedJSON(r, e, obj, af, inlines, mode)
 
 	ctx["includes"] = s.includes(e, "submit_line", "change_form_object_tools", "prepopulated_fields_js")
+	for k, v := range extra {
+		if !changeFormOwnKeys[k] {
+			ctx[k] = v
+		}
+	}
 	custom := e.admin.ChangeFormTemplate
 	if isAdd && e.admin.AddFormTemplate != "" {
 		custom = e.admin.AddFormTemplate
