@@ -48,6 +48,8 @@ type Expr struct {
 	fn       string
 	arg      *Expr
 	distinct bool
+	// filter is the condition of an aggregate's Filter, nil without one.
+	filter *Cond
 }
 
 // F references a model field by key, like Django's F(): F("views") or, across
@@ -140,6 +142,17 @@ func (e Expr) Distinct() Expr {
 	return e
 }
 
+// Filter makes an aggregate consider only the rows that match the condition,
+// like Django's filter= argument: orm.Count("pk").Filter("rating__gt", 3)
+// counts the rows rated above 3. The arguments are those of Q. An aggregate
+// with a filter has no default alias. Filter is an error on an expression
+// that is not an aggregate, and on Count("*").
+func (e Expr) Filter(args ...any) Expr {
+	c := Q(args...)
+	e.filter = &c
+	return e
+}
+
 // aggregate builds a call of the aggregate function fn. arg is a field key or
 // an Expr.
 func aggregate(fn string, arg any) Expr {
@@ -180,9 +193,9 @@ func Max(arg any) Expr { return aggregate("MAX", arg) }
 
 // defaultAlias returns the name Django gives an aggregate that is passed
 // without one, "<key>__<function>" (for example "age__avg"). Only an aggregate
-// over a plain field reference has a default alias.
+// over a plain field reference without a filter has a default alias.
 func (e Expr) defaultAlias() (string, bool) {
-	if e.kind != exprAggregate || e.arg == nil || e.arg.kind != exprField {
+	if e.kind != exprAggregate || e.arg == nil || e.arg.kind != exprField || e.filter != nil {
 		return "", false
 	}
 	return e.arg.key + "__" + strings.ToLower(e.fn), true

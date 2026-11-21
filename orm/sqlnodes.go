@@ -329,14 +329,17 @@ func (likeExprNode) vtype() valueType { return typeString }
 // aggregate reports whether the expression holds an aggregate.
 func (n likeExprNode) aggregate() bool { return n.inner.aggregate() }
 
-// aggNode is an aggregate function call. arg is nil for COUNT(*).
+// aggNode is an aggregate function call. arg is nil for COUNT(*), and filter
+// is the condition of a Filter, nil without one.
 type aggNode struct {
 	fn       string
 	arg      sqlNode
 	distinct bool
+	filter   sqlNode
 }
 
-// render writes "FN(DISTINCT arg)" or "FN(*)".
+// render writes "FN(DISTINCT arg)" or "FN(*)", followed by
+// "FILTER (WHERE condition)" for a filter.
 func (n aggNode) render(w *sqlWriter) {
 	w.write(n.fn + "(")
 	if n.distinct {
@@ -348,6 +351,11 @@ func (n aggNode) render(w *sqlWriter) {
 		n.arg.render(w)
 	}
 	w.write(")")
+	if n.filter != nil {
+		w.write(" FILTER (WHERE ")
+		n.filter.render(w)
+		w.write(")")
+	}
 }
 
 // vtype is int64 for COUNT, float64 for AVG, and the argument's type for SUM,
@@ -368,6 +376,43 @@ func (n aggNode) vtype() valueType {
 
 // aggregate is true.
 func (aggNode) aggregate() bool { return true }
+
+// emptyAggNode is an aggregate whose filter no row can meet. It is the value
+// of the aggregate over no rows, 0 for COUNT and NULL for the others, as
+// Django compiles it from empty_result_set_value.
+type emptyAggNode struct {
+	agg aggNode
+}
+
+// render writes 0 or NULL.
+func (n emptyAggNode) render(w *sqlWriter) {
+	if n.agg.fn == "COUNT" {
+		w.write("0")
+	} else {
+		w.write("NULL")
+	}
+}
+
+// vtype is the type of the aggregate.
+func (n emptyAggNode) vtype() valueType { return n.agg.vtype() }
+
+// aggregate is true: the query still groups as for the aggregate.
+func (emptyAggNode) aggregate() bool { return true }
+
+// condNode is a condition used as a value: the filter of an aggregate, or the
+// column that an aggregate over a subquery filters on.
+type condNode struct {
+	where *whereNode
+}
+
+// render writes the condition.
+func (n condNode) render(w *sqlWriter) { n.where.render(w) }
+
+// vtype is bool.
+func (condNode) vtype() valueType { return typeBool }
+
+// aggregate reports whether the condition reads an aggregate.
+func (n condNode) aggregate() bool { return n.where.containsAggregate() }
 
 // subColNode is a column of a derived table, used by an aggregate computed
 // over a subquery.

@@ -25,6 +25,10 @@ type compiler struct {
 	// reuse tracks multi-valued joins reusable within the current Filter call;
 	// nil outside Filter/Exclude (OrderBy, Values, Annotate, SelectRelated).
 	reuse map[*join]bool
+	// noSplit keeps a negated condition across a multi-valued relation a
+	// join, as Django's split_subq=False does for the condition of an
+	// aggregate's Filter.
+	noSplit bool
 	// where and having are the resolved filter conditions.
 	where, having *whereNode
 	// empty reports that the filters can match no row. The statement builders
@@ -87,6 +91,9 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 	if e.distinct && e.kind != exprAggregate {
 		return nil, errors.New("orm: Distinct applies to aggregates only")
 	}
+	if e.filter != nil && e.kind != exprAggregate {
+		return nil, errors.New("orm: Filter applies to aggregates only")
+	}
 	switch e.kind {
 	case exprField:
 		if n, ok := c.annots[e.key]; ok {
@@ -122,11 +129,17 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 	}
 }
 
+// errStarFilter refuses Count("*") with a filter, as Django does.
+var errStarFilter = errors.New("orm: Star cannot be used with filter. Please specify a field.") //nolint:revive,staticcheck // Django's message
+
 // resolveAggregate binds an aggregate call. An aggregate of an aggregate is
 // refused here; Aggregate computes one over an annotated queryset through a
 // subquery instead.
 func (c *compiler) resolveAggregate(e Expr) (sqlNode, error) {
 	if e.arg.kind == exprStar {
+		if e.filter != nil {
+			return nil, errStarFilter
+		}
 		if e.fn != "COUNT" || e.distinct {
 			return nil, errors.New(`orm: "*" is only valid as the argument of a plain Count`)
 		}
@@ -148,7 +161,42 @@ func (c *compiler) resolveAggregate(e Expr) (sqlNode, error) {
 			Message: fmt.Sprintf("cannot compute %s(%s): %s is an aggregate", fn, name, name),
 		}
 	}
-	return aggNode{fn: e.fn, arg: arg, distinct: e.distinct}, nil
+	agg := aggNode{fn: e.fn, arg: arg, distinct: e.distinct}
+	where, match, err := c.aggregateFilter(e.filter)
+	switch {
+	case err != nil:
+		return nil, err
+	case match == matchNone:
+		return emptyAggNode{agg: agg}, nil
+	case match == matchSome:
+		agg.filter = condNode{where: where}
+	}
+	return agg, nil
+}
+
+// aggregateFilter resolves the condition of an aggregate's Filter and reports
+// what it is known to match. A condition that every row meets leaves the
+// aggregate plain, and one that no row meets makes it the value of the
+// aggregate over no rows, as Django compiles AggregateFilter. The condition
+// reuses any join of the query, and the joins it needs become LEFT OUTER, so
+// that it removes no row of the query. A negated condition across a
+// multi-valued relation stays a join. Django's Q.resolve_expression does both.
+func (c *compiler) aggregateFilter(cond *Cond) (*whereNode, matchKind, error) {
+	if cond == nil {
+		return nil, matchAll, nil
+	}
+	if cond.err != nil {
+		return nil, matchSome, cond.err
+	}
+	reuse, used, noSplit := c.reuse, c.used, c.noSplit
+	c.reuse, c.used, c.noSplit = nil, nil, true
+	where, inner, err := c.addQ(*cond, false)
+	c.reuse, c.used, c.noSplit = reuse, used, noSplit
+	if err != nil {
+		return nil, matchSome, err
+	}
+	c.joins.promote(inner)
+	return where, where.simplify(), nil
 }
 
 // selectItem is one entry of a SELECT list, with an optional output alias.

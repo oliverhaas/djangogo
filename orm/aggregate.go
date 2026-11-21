@@ -64,23 +64,48 @@ func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, err
 		}
 	}
 	outer := make([]selectItem, len(aggs))
+	// innerColumn selects n in the subquery and returns its column there,
+	// named "__col1", "__col2" and so on, as Django names them.
+	cols := 0
+	innerColumn := func(n sqlNode) subColNode {
+		cols++
+		col := "__col" + strconv.Itoa(cols)
+		inner = append(inner, selectItem{node: n, alias: col})
+		return subColNode{table: subqueryAlias, column: col, typ: n.vtype()}
+	}
 	for i, a := range aggs {
 		if a.expr.kind != exprAggregate {
 			return "", nil, nil, errors.New(
 				"orm: only a plain aggregate can be computed over an annotated, sliced, or distinct queryset")
 		}
 		agg := aggNode{fn: a.expr.fn, distinct: a.expr.distinct}
-		if a.expr.arg.kind != exprStar {
+		if a.expr.arg.kind == exprStar {
+			if a.expr.filter != nil {
+				return "", nil, nil, errStarFilter
+			}
+		} else {
 			arg, err := c.resolveExpr(*a.expr.arg)
 			if err != nil {
 				return "", nil, nil, err
 			}
-			col := "__col" + strconv.Itoa(i)
-			inner = append(inner, selectItem{node: arg, alias: col})
-			agg.arg = subColNode{table: subqueryAlias, column: col, typ: arg.vtype()}
+			agg.arg = innerColumn(arg)
 		}
-		outer[i] = selectItem{node: agg, alias: a.name}
-		types[i] = agg.vtype()
+		// The subquery selects the condition of a filter, and the outer
+		// aggregate filters on that column.
+		where, match, err := c.aggregateFilter(a.expr.filter)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		var n sqlNode = agg
+		switch match {
+		case matchNone:
+			n = emptyAggNode{agg: agg}
+		case matchSome:
+			agg.filter = innerColumn(condNode{where: where})
+			n = agg
+		}
+		outer[i] = selectItem{node: n, alias: a.name}
+		types[i] = n.vtype()
 	}
 	// The order of the inner rows only matters when the query is sliced.
 	sub, err := c.build(inner, q.sliced())

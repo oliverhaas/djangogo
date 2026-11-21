@@ -337,7 +337,7 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 	// A negated condition across a relation that can match several rows has to
 	// be a correlated EXISTS subquery (Django's split_exclude): as a join it
 	// would only drop the related rows that match, not the parent row itself.
-	if currentNegated {
+	if currentNegated && !c.noSplit {
 		for _, h := range path.hops {
 			if h.many {
 				node, err := c.splitExclude(path, transforms, lookup, value)
