@@ -118,16 +118,26 @@ list and detail pages and the admin together; run it with `go run ./examples/blo
 | `staticfiles`     | Static file finders, `collectstatic`, `findstatic` and debug serving.      |
 | `checks`          | The system check framework behind the `check` command.                     |
 | `djangotest`      | Django's test client, assertions and per-test databases.                   |
-| `fidelity`        | The Django-as-oracle template fidelity harness.                            |
+| `fidelity`        | Django-as-oracle harnesses for templates, query SQL and migration SQL.     |
 
 ## Django fidelity
 
-`fidelity/` holds a Django-as-oracle differential harness. Canonical
-template+context cases are rendered by Django's DTL (see `fidelity/oracle`) into
-committed golden files; the Go test renders the same cases with the project's
-pongo2 engine and asserts byte-equality. Twelve cases are byte-identical to
-Django 6.0.3. The one documented cosmetic divergence (apostrophe escaping) is
-skipped with a reason; divergences are catalogued in `fidelity/divergences.md`.
+`fidelity/` holds Django-as-oracle differential harnesses. Django 6.0.3
+writes committed golden files (see `fidelity/oracle`), and the Go tests compare
+against them without Python:
+
+- **Templates:** canonical template and context cases render with the pongo2
+  engine and must match Django's DTL output byte for byte.
+- **Query SQL:** canonical ORM queries run on SQLite and PostgreSQL. The tests
+  compare the normalized SQL and parameters with Django's compiler and the
+  results on a fixture dataset.
+- **Migration SQL:** canonical operations compile on both dialects and are
+  compared with Django's `sqlmigrate`. The tests also check the resulting SQLite
+  schema and run every case on a live PostgreSQL server.
+
+`go generate ./fidelity/...` regenerates all golden files. Known differences are
+skipped with a reason and listed in `fidelity/divergences.md`,
+`fidelity/query_sql_divergences.md` and `fidelity/migration_sql_divergences.md`.
 
 ## Known limitations
 
@@ -199,8 +209,6 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   no `--template`, `--extension`, `--name` or `--exclude`. `createsuperuser`
   does not suggest the system user name as the default, and it reads answers line
   by line when stdin is not a terminal.
-- **Fidelity:** the differential harness compares template output only. The
-  query SQL and the migration SQL are not compared with Django's.
 
 ## Testing
 

@@ -49,8 +49,8 @@ jobs:
         with:
           python-version: "3.x"
       - run: pip install "django==6.0.3"
-      - run: python3 fidelity/oracle/render.py
-      - name: Fail if golden files drift from a fresh Django render
+      - run: python3 fidelity/oracle/generate.py
+      - name: Fail if golden files drift from a fresh Django run
         run: git diff --exit-code fidelity/golden/
 
   test-postgres:
