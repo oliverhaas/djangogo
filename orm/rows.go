@@ -128,6 +128,16 @@ func LabeledRowsOrdered(ctx context.Context, db *DB, m *Model, ordering []string
 	return labelRows(ctx, db, m, objs)
 }
 
+// DistinctValues returns the distinct values of the field key over every row
+// of model m, ordered by key. It is
+// Query[T](db).ValuesList(key).Distinct().OrderBy(key).Flat(ctx) for code
+// that knows the model only at run time, such as the admin's
+// AllValuesFieldListFilter on a field of a related model.
+func DistinctValues(ctx context.Context, db *DB, m *Model, key string) ([]any, error) {
+	vl := &ValuesListQuerySet{q: newQuery(db, m).withValues([]string{key})}
+	return vl.Distinct().OrderBy(key).Flat(ctx)
+}
+
 // GetByPK returns the row of model m whose primary key is pk, as a pointer to
 // a new instance of m, or ErrDoesNotExist. It is Query[T](db).Get(ctx, "pk",
 // pk) for code that knows the model only at run time, such as Django's

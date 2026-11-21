@@ -698,3 +698,34 @@ func TestSaveOnTopRendersSubmitRowTwice(t *testing.T) {
 		djangotest.AssertContains(t, resp, `<div class="submit-row">`, djangotest.Count(1))
 	})
 }
+
+// The Go test registers Article and Section in place of Django's WorkHour
+// and FoodDelivery, each with a list filter, so that only ShowFacets hides
+// the toggle.
+//
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_change_list_facet_toggle
+func TestChangeListFacetToggle(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[Album](site, admin.ModelAdmin{ListFilter: []any{"title"}})
+			admin.Register[Article](site, admin.ModelAdmin{ListFilter: []any{"published"}, ShowFacets: admin.ShowFacetsAlways})
+			admin.Register[Section](site, admin.ModelAdmin{ListFilter: []any{"name"}, ShowFacets: admin.ShowFacetsNever})
+		})
+		env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+		// Toggle is visible when show_facet is the default of
+		// admin.ShowFacets.ALLOW.
+		adminURL := mustReverse(t, env.router, "admin:admin_views_album_changelist")
+		resp := env.client.Get(adminURL)
+		djangotest.AssertContains(t, resp, `<a href="?_facets=True" class="viewlink">Show counts</a>`)
+		resp = env.client.Get(adminURL + "?_facets=True")
+		djangotest.AssertContains(t, resp, `<a href="?" class="hidelink">Hide counts</a>`)
+		// Toggle is not visible when show_facet is admin.ShowFacets.ALWAYS.
+		resp = env.client.Get(mustReverse(t, env.router, "admin:admin_views_article_changelist"))
+		djangotest.AssertNotContains(t, resp, "Show counts")
+		djangotest.AssertNotContains(t, resp, "Hide counts")
+		// Toggle is not visible when show_facet is admin.ShowFacets.NEVER.
+		resp = env.client.Get(mustReverse(t, env.router, "admin:admin_views_section_changelist"))
+		djangotest.AssertNotContains(t, resp, "Show counts")
+		djangotest.AssertNotContains(t, resp, "Hide counts")
+	})
+}

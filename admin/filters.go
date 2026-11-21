@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,8 +36,69 @@ type filterChoice struct {
 type filterSpec interface {
 	Title() string
 	HasOutput() bool
-	Choices(cl *changeList) []filterChoice
+	// Choices returns the links of the filter. counts holds the facet counts
+	// by key, nil when the changelist shows no counts.
+	Choices(cl *changeList, counts map[string]int64) []filterChoice
 	Apply() (orm.Cond, bool, error)
+	// ExpectedParameters names the query parameters that the filter reads,
+	// Django's expected_parameters.
+	ExpectedParameters() []string
+	// Facets returns the counts that the filter shows next to its choices,
+	// Django's get_facet_counts.
+	Facets() []facet
+}
+
+// facet is one count of a filter choice: the rows of the facet query that
+// match cond. With subquery, cond filters the facet query, and the count is
+// of the rows whose primary key the filtered query selects, as Django counts
+// a SimpleListFilter choice.
+type facet struct {
+	key      string
+	cond     orm.Cond
+	subquery bool
+}
+
+// withCount appends the facet count of key to title, as Django shows it:
+// "title (3)". Without counts it returns title unchanged.
+func withCount(title string, counts map[string]int64, key string) string {
+	if counts == nil {
+		return title
+	}
+	return fmt.Sprintf("%s (%d)", title, counts[key])
+}
+
+// indexKey returns the facet key of the i-th choice, "<i>__c".
+func indexKey(i int) string { return strconv.Itoa(i) + "__c" }
+
+// appliedFilter is a filter that filters the changelist, with its condition.
+type appliedFilter struct {
+	spec filterSpec
+	cond orm.Cond
+}
+
+// filterResult is what buildFilters resolves from the query string.
+type filterResult struct {
+	// specs are the filters that the sidebar shows.
+	specs []filterSpec
+	// applied are the filters that filter the changelist.
+	applied []appliedFilter
+	// otherConds are the conditions of the date hierarchy and of the lookup
+	// parameters that no filter reads.
+	otherConds []orm.Cond
+	// remaining are the lookup parameters that no filter reads, with the
+	// bounds of the date hierarchy.
+	remaining         url.Values
+	mayHaveDuplicates bool
+	hasActiveFilters  bool
+}
+
+// conds returns the conditions of the applied filters and the others.
+func (fr *filterResult) conds() []orm.Cond {
+	out := make([]orm.Cond, 0, len(fr.applied)+len(fr.otherConds))
+	for _, a := range fr.applied {
+		out = append(out, a.cond)
+	}
+	return append(out, fr.otherConds...)
 }
 
 // lookupAllowed checks whether filtering by lookup (a query parameter key) is
@@ -139,8 +201,9 @@ func lookupAllowed(e *entry, lookup string, listFilter []any) bool {
 
 // buildFilters constructs all active filterSpecs for cl, consumes their query
 // parameters from a copy of filterParams, validates any remaining lookup
-// parameters, and returns the filter conditions, duplicate flag, remaining
-// lookup params, and whether any declared filter is active.
+// parameters, and returns the filters with their conditions, the remaining
+// lookup params, the duplicate flag, and whether any declared filter is
+// active.
 func (s *AdminSite) buildFilters(
 	ctx context.Context,
 	r *http.Request,
@@ -148,13 +211,13 @@ func (s *AdminSite) buildFilters(
 	cl *changeList,
 	listFilter []any,
 	baseSpec querySpec,
-) ([]filterSpec, []orm.Cond, url.Values, bool, bool, error) {
+) (*filterResult, error) {
 	lookupParams := cl.getFiltersParams()
 
 	// Security check: reject disallowed relational lookups with 400.
 	for key := range lookupParams {
 		if !lookupAllowed(e, key, listFilter) {
-			return nil, nil, nil, false, false, fmt.Errorf("%w: %s", errDisallowedLookup, key)
+			return nil, fmt.Errorf("%w: %s", errDisallowedLookup, key)
 		}
 	}
 
@@ -187,7 +250,7 @@ func (s *AdminSite) buildFilters(
 			continue
 		}
 		if err != nil {
-			return nil, nil, nil, false, false, err
+			return nil, err
 		}
 		if fieldPath != "" && len(lookupParams) < before {
 			if orm.LookupSpawnsDuplicates(e.model, fieldPath) {
@@ -202,14 +265,14 @@ func (s *AdminSite) buildFilters(
 		}
 	}
 
-	var conds []orm.Cond
+	fr := &filterResult{specs: specs}
 	for _, spec := range specs {
 		c, ok, err := spec.Apply()
 		if err != nil {
-			return nil, nil, nil, false, false, err
+			return nil, err
 		}
 		if ok {
-			conds = append(conds, c)
+			fr.applied = append(fr.applied, appliedFilter{spec: spec, cond: c})
 		}
 	}
 
@@ -217,10 +280,10 @@ func (s *AdminSite) buildFilters(
 	// database answers faster than the extracts.
 	hierarchyCond, hierarchyBounds, hasHierarchy, err := cl.dateHierarchyFilter(lookupParams)
 	if err != nil {
-		return nil, nil, nil, false, false, err
+		return nil, err
 	}
 	if hasHierarchy {
-		conds = append(conds, hierarchyCond)
+		fr.otherConds = append(fr.otherConds, hierarchyCond)
 	}
 
 	// Validate and apply any remaining lookup parameters not consumed by a filter.
@@ -234,19 +297,22 @@ func (s *AdminSite) buildFilters(
 		}
 		info, ok := orm.ResolveLookupPath(e.model, key)
 		if !ok {
-			return nil, nil, nil, false, false, fmt.Errorf("%w: unknown lookup %q", errIncorrectLookup, key)
+			return nil, fmt.Errorf("%w: unknown lookup %q", errIncorrectLookup, key)
 		}
 		if info.SpawnsDuplicates {
 			mayHaveDuplicates = true
 		}
 		c, err := buildRemainingParamCond(key, vals, info)
 		if err != nil {
-			return nil, nil, nil, false, false, err
+			return nil, err
 		}
-		conds = append(conds, c)
+		fr.otherConds = append(fr.otherConds, c)
 	}
 
-	return specs, conds, remainingCopy, mayHaveDuplicates, hasActiveFilters, nil
+	fr.remaining = remainingCopy
+	fr.mayHaveDuplicates = mayHaveDuplicates
+	fr.hasActiveFilters = hasActiveFilters
+	return fr, nil
 }
 
 // buildRemainingParamCond builds an OR-combined orm.Cond for one remaining
@@ -373,7 +439,7 @@ func (s *AdminSite) newFieldFilterSpec(
 	case FilterEmpty:
 		return newEmptyFilterSpec(fieldPath, title, info.Field, params), nil
 	default:
-		return newAllValuesFilterSpec(ctx, e, fieldPath, title, info, emptyVal, params, baseSpec)
+		return s.newAllValuesFilterSpec(ctx, e, fieldPath, title, info, emptyVal, params, baseSpec)
 	}
 }
 
@@ -419,18 +485,43 @@ func (f *simpleFilterSpec) Apply() (orm.Cond, bool, error) {
 	return c, ok, nil
 }
 
-func (f *simpleFilterSpec) Choices(cl *changeList) []filterChoice {
+func (f *simpleFilterSpec) ExpectedParameters() []string { return []string{f.def.ParameterName} }
+
+// Facets counts each lookup whose Filter returns a condition. A lookup that
+// filters nothing gets no count, as a Django queryset() that returns None.
+func (f *simpleFilterSpec) Facets() []facet {
+	if f.def.Filter == nil {
+		return nil
+	}
+	var out []facet
+	for i, lk := range f.lookups {
+		if c, ok := f.def.Filter(f.r, lk.Value, true); ok {
+			out = append(out, facet{key: indexKey(i), cond: c, subquery: true})
+		}
+	}
+	return out
+}
+
+func (f *simpleFilterSpec) Choices(cl *changeList, counts map[string]int64) []filterChoice {
 	out := make([]filterChoice, 0, len(f.lookups)+1)
 	out = append(out, filterChoice{
 		Selected:    !f.selected,
 		QueryString: cl.getQueryString(nil, []string{f.def.ParameterName}),
 		Display:     "All",
 	})
-	for _, lk := range f.lookups {
+	for i, lk := range f.lookups {
+		display := lk.Display
+		if counts != nil {
+			if n, ok := counts[indexKey(i)]; ok {
+				display = fmt.Sprintf("%s (%d)", display, n)
+			} else {
+				display += " (-)"
+			}
+		}
 		out = append(out, filterChoice{
 			Selected:    f.selected && f.val == lk.Value,
 			QueryString: cl.getQueryString(map[string]any{f.def.ParameterName: lk.Value}, nil),
-			Display:     lk.Display,
+			Display:     display,
 		})
 	}
 	return out
@@ -499,7 +590,19 @@ func (f *booleanFilterSpec) Apply() (orm.Cond, bool, error) {
 	return cond, has, nil
 }
 
-func (f *booleanFilterSpec) Choices(cl *changeList) []filterChoice {
+func (f *booleanFilterSpec) ExpectedParameters() []string {
+	return []string{f.lookupKwarg, f.lookupNull}
+}
+
+func (f *booleanFilterSpec) Facets() []facet {
+	return []facet{
+		{key: "true__c", cond: orm.Q(f.fieldPath, true)},
+		{key: "false__c", cond: orm.Q(f.fieldPath, false)},
+		{key: "null__c", cond: orm.Q(f.lookupNull, true)},
+	}
+}
+
+func (f *booleanFilterSpec) Choices(cl *changeList, counts map[string]int64) []filterChoice {
 	yesLabel, noLabel, unknownLabel := "Yes", "No", "Unknown"
 	if f.field != nil && f.field.HasChoices {
 		for _, ch := range f.field.FlatChoices() {
@@ -526,19 +629,19 @@ func (f *booleanFilterSpec) Choices(cl *changeList) []filterChoice {
 		{
 			Selected:    f.hasVal && f.val == "1" && !f.hasNull,
 			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: "1"}, []string{f.lookupNull}),
-			Display:     yesLabel,
+			Display:     withCount(yesLabel, counts, "true__c"),
 		},
 		{
 			Selected:    f.hasVal && f.val == "0" && !f.hasNull,
 			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: "0"}, []string{f.lookupNull}),
-			Display:     noLabel,
+			Display:     withCount(noLabel, counts, "false__c"),
 		},
 	}
 	if f.field != nil && f.field.Null {
 		out = append(out, filterChoice{
 			Selected:    f.hasNull && f.valNull == "True",
 			QueryString: cl.getQueryString(map[string]any{f.lookupNull: "True"}, []string{f.lookupKwarg}),
-			Display:     unknownLabel,
+			Display:     withCount(unknownLabel, counts, "null__c"),
 		})
 	}
 	return out
@@ -614,7 +717,39 @@ func (f *choicesFilterSpec) Apply() (orm.Cond, bool, error) {
 	return cond, has, nil
 }
 
-func (f *choicesFilterSpec) Choices(cl *changeList) []filterChoice {
+func (f *choicesFilterSpec) ExpectedParameters() []string {
+	return []string{f.lookupKwarg, f.lookupNull}
+}
+
+// Facets counts each choice, the None choice by isnull.
+func (f *choicesFilterSpec) Facets() []facet {
+	flat := f.field.FlatChoices()
+	out := make([]facet, len(flat))
+	for i, ch := range flat {
+		out[i] = facet{key: indexKey(i), cond: orm.Q(f.lookupNull, true)}
+		if !isNoneChoice(ch) {
+			out[i].cond = orm.Q(f.lookupKwarg, choiceValue(f.field, ch))
+		}
+	}
+	return out
+}
+
+// isNoneChoice reports whether ch is the choice of a NULL value, Django's
+// (None, label).
+func isNoneChoice(ch orm.Choice) bool { return ch.Raw == nil && ch.Value == "" }
+
+// choiceValue returns the value of ch for a lookup on f.
+func choiceValue(f *orm.Field, ch orm.Choice) any {
+	if ch.Raw != nil {
+		return ch.Raw
+	}
+	if v, ok := parseFieldValue(f, ch.Value, false); ok {
+		return v
+	}
+	return ch.Value
+}
+
+func (f *choicesFilterSpec) Choices(cl *changeList, counts map[string]int64) []filterChoice {
 	flat := f.field.FlatChoices()
 	out := make([]filterChoice, 0, len(flat)+1)
 	out = append(out, filterChoice{
@@ -623,15 +758,15 @@ func (f *choicesFilterSpec) Choices(cl *changeList) []filterChoice {
 		Display:     "All",
 	})
 	noneTitle := ""
-	for _, ch := range flat {
-		if ch.Raw == nil && ch.Value == "" {
-			noneTitle = ch.Label
+	for i, ch := range flat {
+		if isNoneChoice(ch) {
+			noneTitle = withCount(ch.Label, counts, indexKey(i))
 			continue
 		}
 		out = append(out, filterChoice{
 			Selected:    slices.Contains(f.vals, ch.Value),
 			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: ch.Value}, []string{f.lookupNull}),
-			Display:     ch.Label,
+			Display:     withCount(ch.Label, counts, indexKey(i)),
 		})
 	}
 	if noneTitle != "" {
@@ -767,7 +902,27 @@ func (f *relatedFilterSpec) Apply() (orm.Cond, bool, error) {
 	return cond, has, nil
 }
 
-func (f *relatedFilterSpec) Choices(cl *changeList) []filterChoice {
+func (f *relatedFilterSpec) ExpectedParameters() []string {
+	return []string{f.lookupKwarg, f.lookupNull}
+}
+
+// Facets counts each related object by its primary key, and the rows
+// without one.
+func (f *relatedFilterSpec) Facets() []facet {
+	pkField := f.targetModel.PrimaryKey()
+	out := make([]facet, 0, len(f.choices)+1)
+	for _, pair := range f.choices {
+		if v, ok := parseFieldValue(pkField, pair[0], false); ok {
+			out = append(out, facet{key: pair[0] + "__c", cond: orm.Q(f.lookupKwarg, v)})
+		}
+	}
+	if f.includeEmpty {
+		out = append(out, facet{key: "__c", cond: orm.Q(f.lookupNull, true)})
+	}
+	return out
+}
+
+func (f *relatedFilterSpec) Choices(cl *changeList, counts map[string]int64) []filterChoice {
 	out := make([]filterChoice, 0, len(f.choices)+2)
 	out = append(out, filterChoice{
 		Selected:    len(f.vals) == 0 && !f.hasNull,
@@ -779,14 +934,14 @@ func (f *relatedFilterSpec) Choices(cl *changeList) []filterChoice {
 		out = append(out, filterChoice{
 			Selected:    slices.Contains(f.vals, pkStr),
 			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: pkStr}, []string{f.lookupNull}),
-			Display:     label,
+			Display:     withCount(label, counts, pkStr+"__c"),
 		})
 	}
 	if f.includeEmpty {
 		out = append(out, filterChoice{
 			Selected:    f.hasNull && parseIsNullParam(f.valNull),
 			QueryString: cl.getQueryString(map[string]any{f.lookupNull: "True"}, []string{f.lookupKwarg}),
-			Display:     f.emptyDisplay,
+			Display:     withCount(f.emptyDisplay, counts, "__c"),
 		})
 	}
 	return out
@@ -907,9 +1062,34 @@ func (f *dateFilterSpec) Apply() (orm.Cond, bool, error) {
 	return cond, has, nil
 }
 
-func (f *dateFilterSpec) Choices(cl *changeList) []filterChoice {
+func (f *dateFilterSpec) ExpectedParameters() []string {
+	params := []string{f.sinceKwarg, f.untilKwarg}
+	if f.field != nil && f.field.Null {
+		params = append(params, f.nullKwarg)
+	}
+	return params
+}
+
+// Facets counts the rows that each link selects.
+func (f *dateFilterSpec) Facets() []facet {
+	out := make([]facet, len(f.links))
+	for i, lk := range f.links {
+		args := make([]any, 0, 2*len(lk.params))
+		for k, raw := range lk.params {
+			var v any = parseIsNullParam(raw)
+			if k != f.nullKwarg {
+				v, _ = parseFieldValue(f.field, raw, false)
+			}
+			args = append(args, k, v)
+		}
+		out[i] = facet{key: indexKey(i), cond: orm.Q(args...)}
+	}
+	return out
+}
+
+func (f *dateFilterSpec) Choices(cl *changeList, counts map[string]int64) []filterChoice {
 	out := make([]filterChoice, 0, len(f.links))
-	for _, lk := range f.links {
+	for i, lk := range f.links {
 		newParams := make(map[string]any, len(lk.params))
 		for k, v := range lk.params {
 			newParams[k] = v
@@ -917,7 +1097,7 @@ func (f *dateFilterSpec) Choices(cl *changeList) []filterChoice {
 		out = append(out, filterChoice{
 			Selected:    mapsEqualString(f.dateParams, lk.params),
 			QueryString: cl.getQueryString(newParams, []string{f.fieldGeneric}),
-			Display:     lk.title,
+			Display:     withCount(lk.title, counts, indexKey(i)),
 		})
 	}
 	return out
@@ -950,7 +1130,7 @@ type allValuesFilterSpec struct {
 	emptyDisplay string
 }
 
-func newAllValuesFilterSpec(
+func (s *AdminSite) newAllValuesFilterSpec(
 	ctx context.Context,
 	e *entry,
 	fieldPath, title string,
@@ -978,7 +1158,16 @@ func newAllValuesFilterSpec(
 		spec.hasNull = true
 		delete(params, kwargNull)
 	}
-	distinctVals, err := e.ops.distinctValues(ctx, baseSpec, fieldPath)
+	// A field of a related model lists the values of every related row.
+	var (
+		distinctVals []any
+		err          error
+	)
+	if strings.Contains(fieldPath, "__") && info.Model != nil && info.Field != nil {
+		distinctVals, err = orm.DistinctValues(ctx, s.db, info.Model, info.Field.Attr)
+	} else {
+		distinctVals, err = e.ops.distinctValues(ctx, baseSpec, fieldPath)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1021,7 +1210,23 @@ func (f *allValuesFilterSpec) Apply() (orm.Cond, bool, error) {
 	return cond, has, nil
 }
 
-func (f *allValuesFilterSpec) Choices(cl *changeList) []filterChoice {
+func (f *allValuesFilterSpec) ExpectedParameters() []string {
+	return []string{f.lookupKwarg, f.lookupNull}
+}
+
+// Facets counts each value, NULL by isnull.
+func (f *allValuesFilterSpec) Facets() []facet {
+	out := make([]facet, len(f.distinctVals))
+	for i, val := range f.distinctVals {
+		out[i] = facet{key: indexKey(i), cond: orm.Q(f.lookupNull, true)}
+		if val != nil {
+			out[i].cond = orm.Q(f.lookupKwarg, val)
+		}
+	}
+	return out
+}
+
+func (f *allValuesFilterSpec) Choices(cl *changeList, counts map[string]int64) []filterChoice {
 	out := make([]filterChoice, 0, len(f.distinctVals)+2)
 	out = append(out, filterChoice{
 		Selected:    len(f.vals) == 0 && !f.hasNull,
@@ -1029,23 +1234,25 @@ func (f *allValuesFilterSpec) Choices(cl *changeList) []filterChoice {
 		Display:     "All",
 	})
 	includeNone := false
-	for _, val := range f.distinctVals {
+	emptyTitle := f.emptyDisplay
+	for i, val := range f.distinctVals {
 		if val == nil {
 			includeNone = true
+			emptyTitle = withCount(emptyTitle, counts, indexKey(i))
 			continue
 		}
 		s := fmt.Sprint(val)
 		out = append(out, filterChoice{
 			Selected:    slices.Contains(f.vals, s),
 			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: s}, []string{f.lookupNull}),
-			Display:     s,
+			Display:     withCount(s, counts, indexKey(i)),
 		})
 	}
 	if includeNone {
 		out = append(out, filterChoice{
 			Selected:    f.hasNull && parseIsNullParam(f.valNull),
 			QueryString: cl.getQueryString(map[string]any{f.lookupNull: "True"}, []string{f.lookupKwarg}),
-			Display:     f.emptyDisplay,
+			Display:     emptyTitle,
 		})
 	}
 	return out
@@ -1088,6 +1295,15 @@ func (f *emptyFilterSpec) Apply() (orm.Cond, bool, error) {
 	if f.val != "0" && f.val != "1" {
 		return orm.Cond{}, false, fmt.Errorf("%w: invalid isempty value %q", errIncorrectLookup, f.val)
 	}
+	if f.val == "1" {
+		return f.lookupCondition(), true, nil
+	}
+	return orm.Not(f.lookupCondition()), true, nil
+}
+
+// lookupCondition matches the rows whose field is empty: the empty string
+// of a text field, or NULL, Django's get_lookup_condition.
+func (f *emptyFilterSpec) lookupCondition() orm.Cond {
 	var emptyCond orm.Cond
 	hasEmpty := false
 	if f.field != nil && isTextKind(f.field.Kind) {
@@ -1106,13 +1322,19 @@ func (f *emptyFilterSpec) Apply() (orm.Cond, bool, error) {
 	if !hasEmpty {
 		emptyCond = orm.Q(f.fieldPath+"__isnull", true)
 	}
-	if f.val == "1" {
-		return emptyCond, true, nil
-	}
-	return orm.Not(emptyCond), true, nil
+	return emptyCond
 }
 
-func (f *emptyFilterSpec) Choices(cl *changeList) []filterChoice {
+func (f *emptyFilterSpec) ExpectedParameters() []string { return []string{f.lookupKwarg} }
+
+func (f *emptyFilterSpec) Facets() []facet {
+	return []facet{
+		{key: "empty__c", cond: f.lookupCondition()},
+		{key: "not_empty__c", cond: orm.Not(f.lookupCondition())},
+	}
+}
+
+func (f *emptyFilterSpec) Choices(cl *changeList, counts map[string]int64) []filterChoice {
 	return []filterChoice{
 		{
 			Selected:    !f.hasVal,
@@ -1122,12 +1344,12 @@ func (f *emptyFilterSpec) Choices(cl *changeList) []filterChoice {
 		{
 			Selected:    f.hasVal && f.val == "1",
 			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: "1"}, nil),
-			Display:     "Empty",
+			Display:     withCount("Empty", counts, "empty__c"),
 		},
 		{
 			Selected:    f.hasVal && f.val == "0",
 			QueryString: cl.getQueryString(map[string]any{f.lookupKwarg: "0"}, nil),
-			Display:     "Not empty",
+			Display:     withCount("Not empty", counts, "not_empty__c"),
 		},
 	}
 }

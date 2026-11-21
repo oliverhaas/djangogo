@@ -234,6 +234,21 @@ const (
 	Vertical RadioStyle = 2
 )
 
+// ShowFacets controls the counts next to the choices of the changelist
+// filters, Django's admin.ShowFacets.
+type ShowFacets int
+
+// The ShowFacets values. The zero value is ShowFacetsAllow, Django's default.
+const (
+	// ShowFacetsAllow shows the counts when the query string has _facets,
+	// and links "Show counts" and "Hide counts" to toggle them.
+	ShowFacetsAllow ShowFacets = iota
+	// ShowFacetsAlways always shows the counts.
+	ShowFacetsAlways
+	// ShowFacetsNever never shows the counts.
+	ShowFacetsNever
+)
+
 // FieldClass names a Django model field class, a key of
 // ModelAdmin.FormfieldOverrides.
 type FieldClass int
@@ -358,6 +373,10 @@ type ModelAdmin struct {
 	// ShowFullResultCount controls whether the total unfiltered count is
 	// queried and displayed in the search bar (default true when nil).
 	ShowFullResultCount *bool
+	// ShowFacets controls the counts next to the filter choices. Each
+	// counted filter runs one more query, so ShowFacetsNever suits a large
+	// table.
+	ShowFacets ShowFacets
 	// ListSelectRelated names the relations that the changelist query joins
 	// (Django's list_select_related as a list). nil joins the foreign keys
 	// that the columns show, as Django's default does, and a non-nil empty

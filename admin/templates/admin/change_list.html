@@ -57,11 +57,15 @@
       {% if has_filters %}
       <search id="changelist-filter" aria-labelledby="changelist-filter-header">
         <h2 id="changelist-filter-header">Filter</h2>
-        {% if has_active_filters %}
-        <div id="changelist-filter-extra-actions">
-          <h3><a href="{{ clear_all_filters_qs }}">&#10006; Clear all filters</a></h3>
-        </div>
-        {% endif %}
+        {% if is_facets_optional or has_active_filters %}<div id="changelist-filter-extra-actions">
+          {% if is_facets_optional %}<h3>
+            {% if add_facets %}<a href="{{ remove_facet_link }}" class="hidelink">Hide counts</a>
+            {% else %}<a href="{{ add_facet_link }}" class="viewlink">Show counts</a>{% endif %}
+          </h3>{% endif %}
+          {% if has_active_filters %}<h3>
+            <a href="{{ clear_all_filters_qs }}">&#10006; Clear all filters</a>
+          </h3>{% endif %}
+        </div>{% endif %}
         {% for spec in filter_specs %}
         <details data-filter-title="{{ spec.title }}" open>
           <summary> By {{ spec.title }} </summary>

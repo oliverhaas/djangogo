@@ -70,12 +70,21 @@ type changeList struct {
 	params       map[string]string
 	filterParams url.Values
 
-	query             string
-	pageNum           int
-	showAll           bool
-	isPopup           bool
-	preservedFilters  string
-	filterSpecs       []filterSpec
+	query            string
+	pageNum          int
+	showAll          bool
+	isPopup          bool
+	preservedFilters string
+	filterSpecs      []filterSpec
+	// appliedFilters are the filters that filter the changelist, and
+	// otherConds the conditions of the date hierarchy, the other lookup
+	// parameters, and the search.
+	appliedFilters []appliedFilter
+	otherConds     []orm.Cond
+	// addFacets shows the facet counts, and isFacetsOptional the links
+	// that toggle them.
+	addFacets         bool
+	isFacetsOptional  bool
 	hasFilters        bool
 	hasActiveFilters  bool
 	clearAllFiltersQS string
@@ -310,16 +319,21 @@ func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action)
 		cl.dateHierarchyPath = normalizeFieldPath(e.model, e.admin.DateHierarchy)
 	}
 
+	_, hasFacetsVar := rawQuery[isFacetsVar]
+	cl.addFacets = e.admin.ShowFacets == ShowFacetsAlways || (e.admin.ShowFacets == ShowFacetsAllow && hasFacetsVar)
+	cl.isFacetsOptional = e.admin.ShowFacets == ShowFacetsAllow
+
 	// Build and apply filters.
-	filterSpecs, filterConds, remainingParams, filterDups, hasActiveFilters, err := s.buildFilters(
-		ctx, r, e, cl, listFilter, baseSpec,
-	)
+	fr, err := s.buildFilters(ctx, r, e, cl, listFilter, baseSpec)
 	if err != nil {
 		return nil, err
 	}
-	cl.filterSpecs = filterSpecs
-	cl.hasFilters = len(filterSpecs) > 0
-	cl.hasActiveFilters = hasActiveFilters
+	remainingParams := fr.remaining
+	cl.filterSpecs = fr.specs
+	cl.appliedFilters = fr.applied
+	cl.otherConds = fr.otherConds
+	cl.hasFilters = len(fr.specs) > 0
+	cl.hasActiveFilters = fr.hasActiveFilters
 
 	// Build clear-all-filters link preserving remaining params and non-filter params.
 	allFilterKeys := make([]string, 0, len(cl.getFiltersParams()))
@@ -337,14 +351,15 @@ func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action)
 		filters:         append([]orm.Cond(nil), baseSpec.filters...),
 		selectRelated:   joined,
 		prefetchRelated: loaded,
-		distinct:        filterDups,
+		distinct:        fr.mayHaveDuplicates,
 	}
-	spec.filters = append(spec.filters, filterConds...)
+	spec.filters = append(spec.filters, fr.conds()...)
 
 	// Apply search terms.
 	searchCond, searchDups, hasSearch := buildSearchCond(e.model, searchFields, searchTerm)
 	if hasSearch {
 		spec.filters = append(spec.filters, searchCond)
+		cl.otherConds = append(cl.otherConds, searchCond)
 	}
 	if searchDups {
 		spec.distinct = true
@@ -408,6 +423,50 @@ func (cl *changeList) loadResults(ctx context.Context) error {
 		cl.pageRange = pageRange
 	}
 	return nil
+}
+
+// facetSpec returns the query whose rows the facets of spec count, Django's
+// ChangeList.get_queryset with exclude_parameters: the changelist query
+// without the filters that read the same parameters as spec.
+func (cl *changeList) facetSpec(spec filterSpec) querySpec {
+	exclude := spec.ExpectedParameters()
+	filters := slices.Clone(cl.baseSpec.filters)
+	for _, a := range cl.appliedFilters {
+		if !slices.Equal(a.spec.ExpectedParameters(), exclude) {
+			filters = append(filters, a.cond)
+		}
+	}
+	filters = append(filters, cl.otherConds...)
+	return querySpec{filters: filters, distinct: cl.filteredSpec.distinct}
+}
+
+// filterContext returns the template context of the sidebar filters, with
+// the facet counts when the changelist shows them.
+func (cl *changeList) filterContext(ctx context.Context) ([]map[string]any, error) {
+	out := make([]map[string]any, 0, len(cl.filterSpecs))
+	for _, spec := range cl.filterSpecs {
+		var counts map[string]int64
+		if cl.addFacets {
+			var err error
+			if counts, err = cl.entry.ops.facetCounts(ctx, cl.facetSpec(spec), spec.Facets()); err != nil {
+				return nil, err
+			}
+		}
+		choices := spec.Choices(cl, counts)
+		chMaps := make([]map[string]any, len(choices))
+		for i, ch := range choices {
+			chMaps[i] = map[string]any{
+				"selected":     ch.Selected,
+				"query_string": ch.QueryString,
+				"display":      ch.Display,
+			}
+		}
+		out = append(out, map[string]any{
+			"title":   spec.Title(),
+			"choices": chMaps,
+		})
+	}
+	return out, nil
 }
 
 // changelistObjectList adapts modelOps + querySpec to views.ObjectList[any].
@@ -826,7 +885,7 @@ func (cl *changeList) resetSearchURL() string {
 	if cl.isPopup {
 		parts = append(parts, isPopupVar+"=1")
 	}
-	if _, hasFacets := cl.params[isFacetsVar]; hasFacets {
+	if cl.addFacets {
 		parts = append(parts, isFacetsVar)
 	}
 	return "?" + strings.Join(parts, "&")
@@ -941,22 +1000,10 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	headers, numSorted := cl.resultHeaders(r)
 	rows, pks, hiddenFields := cl.buildRows(rowForms)
 
-	// Build filter sidebar context.
-	filterContext := make([]map[string]any, 0, len(cl.filterSpecs))
-	for _, spec := range cl.filterSpecs {
-		choices := spec.Choices(cl)
-		chMaps := make([]map[string]any, len(choices))
-		for i, ch := range choices {
-			chMaps[i] = map[string]any{
-				"selected":     ch.Selected,
-				"query_string": ch.QueryString,
-				"display":      ch.Display,
-			}
-		}
-		filterContext = append(filterContext, map[string]any{
-			"title":   spec.Title(),
-			"choices": chMaps,
-		})
+	filterContext, err := cl.filterContext(r.Context())
+	if err != nil {
+		s.handleChangeListError(w, r, err)
+		return
 	}
 
 	// Build hidden inputs for the search form so filters/sort survive search.
@@ -1017,6 +1064,10 @@ func (s *AdminSite) changelist(w http.ResponseWriter, r *http.Request, e *entry)
 	ctx["has_filters"] = cl.hasFilters
 	ctx["has_active_filters"] = cl.hasActiveFilters
 	ctx["clear_all_filters_qs"] = cl.clearAllFiltersQS
+	ctx["is_facets_optional"] = cl.isFacetsOptional
+	ctx["add_facets"] = cl.addFacets
+	ctx["remove_facet_link"] = cl.getQueryString(nil, []string{isFacetsVar})
+	ctx["add_facet_link"] = cl.getQueryString(map[string]any{isFacetsVar: "True"}, nil)
 	if dateHierarchy != nil {
 		ctx["date_hierarchy"] = dateHierarchy
 	}

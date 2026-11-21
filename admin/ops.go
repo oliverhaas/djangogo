@@ -80,6 +80,9 @@ type modelOps struct {
 	// the rows matching spec, truncated to kind, ascending: orm.QuerySet.Dates,
 	// or DateTimes when datetimes is set.
 	dates func(ctx context.Context, spec querySpec, key, kind string, datetimes bool) ([]time.Time, error)
+	// facetCounts counts, for each facet, the rows matching spec that match
+	// the facet, by facet key, in one query: Django's get_facet_queryset.
+	facetCounts func(ctx context.Context, spec querySpec, facets []facet) (map[string]int64, error)
 	// get returns the row with the given primary key as a *T, or
 	// orm.ErrDoesNotExist when no such row exists.
 	get func(ctx context.Context, pk int64) (any, error)
@@ -187,6 +190,30 @@ func buildOps[T any](db *orm.DB, m *orm.Model) modelOps {
 			out := make([]time.Time, len(dates))
 			for i, d := range dates {
 				out[i] = d.Time()
+			}
+			return out, nil
+		},
+
+		facetCounts: func(ctx context.Context, spec querySpec, facets []facet) (map[string]int64, error) {
+			out := make(map[string]int64, len(facets))
+			if len(facets) == 0 {
+				return out, nil
+			}
+			qs := applySpec(orm.Query[T](db), querySpec{filters: spec.filters, distinct: spec.distinct})
+			args := make([]any, 0, 2*len(facets))
+			for _, f := range facets {
+				cond := f.cond
+				if f.subquery {
+					cond = orm.Q("pk__in", qs.Filter(f.cond).ValuesList("pk"))
+				}
+				args = append(args, f.key, orm.Count("pk").Filter(cond))
+			}
+			res, err := qs.Aggregate(ctx, args...)
+			if err != nil {
+				return nil, err
+			}
+			for k, v := range res {
+				out[k], _ = v.(int64)
 			}
 			return out, nil
 		},

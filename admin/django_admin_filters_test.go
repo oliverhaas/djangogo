@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,7 +47,7 @@ type AFBook struct {
 	Employee       orm.FK[AFEmployee] `orm:"null;blank"`
 	IsBestSeller   *bool              `orm:"null;blank"`
 	DateRegistered *orm.Date          `orm:"null;blank"`
-	Category       string             `orm:"max_length=50;blank"`
+	Category       *string            `orm:"max_length=20;null;blank"`
 	Status         string             `orm:"max_length=20;blank"`
 	Availability   *bool              `orm:"null;blank"`
 }
@@ -66,6 +67,12 @@ func (AFBook) Meta() orm.Meta {
 				orm.ChoiceOf(false, "Paid"),
 				orm.ChoiceOf(true, "Free"),
 				orm.ChoiceOf(nil, "Obscure"),
+			},
+			"Category": {
+				orm.ChoiceOf("non-fiction", "Non-Fictional"),
+				orm.ChoiceOf("fiction", "Fictional"),
+				orm.ChoiceOf(nil, "Not categorized"),
+				orm.ChoiceOf("", "We don't know"),
 			},
 		},
 	}
@@ -141,7 +148,7 @@ func setupAdminFiltersFixture(t *testing.T, db *orm.DB) *afFixture {
 		IsBestSeller:   boolPtr(true),
 		DateRegistered: &dToday,
 		Availability:   boolPtr(true),
-		Category:       "non-fiction",
+		Category:       strPtr("non-fiction"),
 		Status:         "pub",
 	}
 	b1.Author.SetPK(alfred.ID)
@@ -153,7 +160,7 @@ func setupAdminFiltersFixture(t *testing.T, db *orm.DB) *afFixture {
 		Year:         int64Ptr(1999),
 		IsBestSeller: boolPtr(false),
 		Availability: boolPtr(false),
-		Category:     "fiction",
+		Category:     strPtr("fiction"),
 		Status:       "draft",
 	}
 	b2.Author.SetPK(alfred.ID)
@@ -166,7 +173,6 @@ func setupAdminFiltersFixture(t *testing.T, db *orm.DB) *afFixture {
 		IsBestSeller:   nil,
 		DateRegistered: &dToday,
 		Availability:   boolPtr(true),
-		Category:       "non-fiction",
 		Status:         "pub",
 	}
 	b3.Author.SetPK(bob.ID)
@@ -179,7 +185,7 @@ func setupAdminFiltersFixture(t *testing.T, db *orm.DB) *afFixture {
 		IsBestSeller:   boolPtr(true),
 		DateRegistered: &dWeek,
 		Availability:   nil,
-		Category:       "",
+		Category:       strPtr(""),
 		Status:         "draft",
 	}
 	_ = orm.Query[AFBook](db).Create(ctx, b4)
@@ -470,39 +476,12 @@ func TestRelatedOnlyFieldListFilter(t *testing.T) {
 func TestSimpleEmptyAndInvalidListFilters(t *testing.T) {
 	djangotest.EachDB(t, adminFilterModels(), func(t *testing.T, db *orm.DB) {
 		f := setupAdminFiltersFixture(t, db)
-		decadeFilter := admin.SimpleListFilter{
-			Title:         "publication decade",
-			ParameterName: "publication-decade",
-			Lookups: func(*http.Request) []admin.FilterLookup {
-				return []admin.FilterLookup{
-					{Value: "the 80s", Display: "the 1980's"},
-					{Value: "the 90s", Display: "the 1990's"},
-					{Value: "the 00s", Display: "the 2000's"},
-				}
-			},
-			Filter: func(_ *http.Request, val string, selected bool) (orm.Cond, bool) {
-				if !selected {
-					return orm.Cond{}, false
-				}
-				switch val {
-				case "the 80s":
-					return orm.Q("year__gte", 1980, "year__lte", 1989), true
-				case "the 90s":
-					return orm.Q("year__gte", 1990, "year__lte", 1999), true
-				case "the 00s":
-					return orm.Q("year__gte", 2000, "year__lte", 2009), true
-				default:
-					return orm.Cond{}, false
-				}
-			},
-		}
-
 		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
 			admin.Register[AFBook](site, admin.ModelAdmin{
 				ListDisplay: []string{"title", "year"},
 				ListFilter: []any{
 					"author",
-					decadeFilter,
+					afDecadeFilter(),
 					admin.AllValuesFilter("author__email"),
 					admin.EmptyFilter("category"),
 				},
@@ -532,11 +511,11 @@ func TestSimpleEmptyAndInvalidListFilters(t *testing.T) {
 		resp = env.client.Get(bookURL, djangotest.Query(url.Values{"author__email": {"alfred@example.com"}}))
 		djangotest.AssertEqual(t, ctxVal(t, resp, "result_pks"), any([]int64{f.bio.ID, f.djangonaut.ID}))
 
-		// EmptyFieldListFilter on category (empty string).
+		// EmptyFieldListFilter on category (empty string or NULL).
 		resp = env.client.Get(bookURL, djangotest.Query(url.Values{"category__isempty": {"1"}}))
-		djangotest.AssertEqual(t, ctxVal(t, resp, "result_pks"), any([]int64{f.guitar.ID}))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "result_pks"), any([]int64{f.guitar.ID, f.djangoBook.ID}))
 		resp = env.client.Get(bookURL, djangotest.Query(url.Values{"category__isempty": {"0"}}))
-		djangotest.AssertEqual(t, ctxVal(t, resp, "result_pks"), any([]int64{f.djangoBook.ID, f.bio.ID, f.djangonaut.ID}))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "result_pks"), any([]int64{f.bio.ID, f.djangonaut.ID}))
 
 		// Invalid lookup value redirects to ?e=1.
 		resp = env.client.Get(bookURL, djangotest.Query(url.Values{"author__id__exact": {"StringNotInteger!"}}))
@@ -547,3 +526,260 @@ func TestSimpleEmptyAndInvalidListFilters(t *testing.T) {
 		djangotest.AssertStatus(t, resp, http.StatusBadRequest)
 	})
 }
+
+// afDecadeFilter is Django's DecadeListFilterWithTitleAndParameter. Its
+// "other" lookup filters nothing, so the filter shows no count for it.
+func afDecadeFilter() admin.SimpleListFilter {
+	return admin.SimpleListFilter{
+		Title:         "publication decade",
+		ParameterName: "publication-decade",
+		Lookups: func(*http.Request) []admin.FilterLookup {
+			return []admin.FilterLookup{
+				{Value: "the 80s", Display: "the 1980's"},
+				{Value: "the 90s", Display: "the 1990's"},
+				{Value: "the 00s", Display: "the 2000's"},
+				{Value: "other", Display: "other decades"},
+			}
+		},
+		Filter: func(_ *http.Request, val string, _ bool) (orm.Cond, bool) {
+			switch val {
+			case "the 80s":
+				return orm.Q("year__gte", 1980, "year__lte", 1989), true
+			case "the 90s":
+				return orm.Q("year__gte", 1990, "year__lte", 1999), true
+			case "the 00s":
+				return orm.Q("year__gte", 2000, "year__lte", 2009), true
+			default:
+				return orm.Cond{}, false
+			}
+		},
+	}
+}
+
+// afDepartmentOwnershipFilter is Django's DepartmentOwnershipListFilter. It
+// annotates the books with the count of their DEV department as Django's
+// does, and selects them with a pk__in subquery, since a Go filter returns a
+// condition and not a queryset.
+func afDepartmentOwnershipFilter(db *orm.DB) admin.SimpleListFilter {
+	return admin.SimpleListFilter{
+		Title:         "Department Ownership",
+		ParameterName: "department_ownership",
+		Lookups: func(*http.Request) []admin.FilterLookup {
+			return []admin.FilterLookup{
+				{Value: "DEV_OWNED", Display: "Owned by Dev Department"},
+				{Value: "OTHER", Display: "Other"},
+			}
+		},
+		Filter: func(_ *http.Request, val string, _ bool) (orm.Cond, bool) {
+			owned := orm.Query[AFBook](db).Annotate(
+				"owned_book_count",
+				orm.Count("employee__department").Filter("employee__department__code", "DEV"),
+			)
+			switch val {
+			case "DEV_OWNED":
+				return orm.Q("pk__in", owned.Filter("owned_book_count__gt", 0).ValuesList("pk")), true
+			case "OTHER":
+				return orm.Q("pk__in", owned.Filter("owned_book_count", 0).ValuesList("pk")), true
+			default:
+				return orm.Cond{}, false
+			}
+		},
+	}
+}
+
+// afDecadeFilterBookAdmin is Django's DecadeFilterBookAdmin with show_facets.
+func afDecadeFilterBookAdmin(db *orm.DB, show admin.ShowFacets) admin.ModelAdmin {
+	return admin.ModelAdmin{
+		EmptyValueDisplay: "???",
+		ListFilter: []any{
+			"author",
+			afDecadeFilter(),
+			"is_best_seller",
+			"category",
+			"date_registered",
+			admin.AllValuesFilter("author__email"),
+			admin.RelatedOnlyFilter("contributors"),
+			admin.EmptyFilter("category"),
+			afDepartmentOwnershipFilter(db),
+		},
+		Ordering:   []string{"-id"},
+		ShowFacets: show,
+	}
+}
+
+// afFilterChoices returns the displays and the query strings of the choices
+// of each filter of the changelist in resp.
+func afFilterChoices(t *testing.T, resp *djangotest.Response) (displays, queryStrings [][]string) {
+	t.Helper()
+	specs, ok := ctxVal(t, resp, "filter_specs").([]map[string]any)
+	if !ok {
+		t.Fatalf("filter_specs = %T, want []map[string]any", ctxVal(t, resp, "filter_specs"))
+	}
+	for _, spec := range specs {
+		var ds, qs []string
+		for _, ch := range spec["choices"].([]map[string]any) {
+			ds = append(ds, ch["display"].(string))
+			qs = append(qs, ch["query_string"].(string))
+		}
+		displays = append(displays, ds)
+		queryStrings = append(queryStrings, qs)
+	}
+	return displays, queryStrings
+}
+
+// afFacetsSetUp registers DecadeFilterBookAdmin with show and returns the
+// URL of its changelist, logged in as alfred.
+func afFacetsSetUp(t *testing.T, db *orm.DB, f *afFixture, show admin.ShowFacets) (*adminTestEnv, string) {
+	t.Helper()
+	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[AFBook](site, afDecadeFilterBookAdmin(db, show))
+	})
+	env.client.ForceLogin(f.alfred)
+	return env, mustReverse(t, env.router, "admin:admin_filters_afbook_changelist")
+}
+
+// assertFacets is Django's ListFiltersTests._test_facets: every filter counts
+// the four books, and each link keeps queryString when it is not empty.
+func assertFacets(t *testing.T, f *afFixture, resp *djangotest.Response, queryString string) {
+	t.Helper()
+	djangotest.AssertEqual(t, ctxVal(t, resp, "result_pks"), any([]int64{f.guitar.ID, f.djangoBook.ID, f.bio.ID, f.djangonaut.ID}))
+	expectedDateFilters := []string{"Any date (4)", "Today (2)", "Past 7 days (3)"}
+	switch {
+	case f.today.Month == f.oneWeekAgo.Month && f.today.Year == f.oneWeekAgo.Year:
+		expectedDateFilters = append(expectedDateFilters, "This month (3)", "This year (3)")
+	case f.today.Year == f.oneWeekAgo.Year:
+		expectedDateFilters = append(expectedDateFilters, "This month (2)", "This year (3)")
+	default:
+		expectedDateFilters = append(expectedDateFilters, "This month (2)", "This year (2)")
+	}
+	expectedDateFilters = append(expectedDateFilters, "No date (1)", "Has date (3)")
+	// No Go counterpart: connection.features.interprets_empty_strings_as_nulls
+	// (Oracle) is false on every supported database.
+	want := [][]string{
+		// RelatedFieldListFilter.
+		{"All", "alfred (2)", "bob (1)", "lisa (0)", "??? (1)"},
+		// SimpleListFilter.
+		{"All", "the 1980's (0)", "the 1990's (1)", "the 2000's (2)", "other decades (-)"},
+		// BooleanFieldListFilter.
+		{"All", "Yes (2)", "No (1)", "Unknown (1)"},
+		// ChoicesFieldListFilter.
+		{"All", "Non-Fictional (1)", "Fictional (1)", "We don't know (1)", "Not categorized (1)"},
+		// DateFieldListFilter.
+		expectedDateFilters,
+		// AllValuesFieldListFilter.
+		{"All", "alfred@example.com (2)", "bob@example.com (1)", "lisa@example.com (0)"},
+		// RelatedOnlyFieldListFilter.
+		{"All", "bob (1)", "lisa (1)", "??? (3)"},
+		// EmptyFieldListFilter.
+		{"All", "Empty (2)", "Not empty (2)"},
+		// SimpleListFilter with join relations.
+		{"All", "Owned by Dev Department (2)", "Other (2)"},
+	}
+	displays, queryStrings := afFilterChoices(t, resp)
+	djangotest.AssertEqual(t, displays, want)
+	if queryString != "" {
+		for _, qs := range queryStrings {
+			for _, q := range qs {
+				if !strings.Contains(q, queryString) {
+					t.Errorf("query string %q lacks %q", q, queryString)
+				}
+			}
+		}
+	}
+}
+
+// Ported from Django: tests/admin_filters/tests.py::ListFiltersTests.test_facets_always
+func TestFacetsAlways(t *testing.T) {
+	djangotest.EachDB(t, adminFilterModels(), func(t *testing.T, db *orm.DB) {
+		f := setupAdminFiltersFixture(t, db)
+		env, bookURL := afFacetsSetUp(t, db, f, admin.ShowFacetsAlways)
+		assertFacets(t, f, env.client.Get(bookURL), "")
+	})
+}
+
+// Ported from Django: tests/admin_filters/tests.py::ListFiltersTests.test_facets_no_filter
+func TestFacetsNoFilter(t *testing.T) {
+	djangotest.EachDB(t, adminFilterModels(), func(t *testing.T, db *orm.DB) {
+		f := setupAdminFiltersFixture(t, db)
+		env, bookURL := afFacetsSetUp(t, db, f, admin.ShowFacetsAllow)
+		assertFacets(t, f, env.client.Get(bookURL+"?_facets"), "_facets")
+	})
+}
+
+// Ported from Django: tests/admin_filters/tests.py::ListFiltersTests.test_facets_filter
+func TestFacetsFilter(t *testing.T) {
+	djangotest.EachDB(t, adminFilterModels(), func(t *testing.T, db *orm.DB) {
+		f := setupAdminFiltersFixture(t, db)
+		env, bookURL := afFacetsSetUp(t, db, f, admin.ShowFacetsAllow)
+		resp := env.client.Get(bookURL, djangotest.Query(url.Values{
+			"author__id__exact": {strconv.FormatInt(f.alfred.ID, 10)},
+			"_facets":           {""},
+		}))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "result_pks"), any([]int64{f.bio.ID, f.djangonaut.ID}))
+		want := [][]string{
+			// RelatedFieldListFilter.
+			{"All", "alfred (2)", "bob (1)", "lisa (0)", "??? (1)"},
+			// SimpleListFilter.
+			{"All", "the 1980's (0)", "the 1990's (1)", "the 2000's (1)", "other decades (-)"},
+			// BooleanFieldListFilter.
+			{"All", "Yes (1)", "No (1)", "Unknown (0)"},
+			// ChoicesFieldListFilter.
+			{"All", "Non-Fictional (1)", "Fictional (1)", "We don't know (0)", "Not categorized (0)"},
+			// DateFieldListFilter.
+			{"Any date (2)", "Today (1)", "Past 7 days (1)", "This month (1)", "This year (1)", "No date (1)", "Has date (1)"},
+			// AllValuesFieldListFilter.
+			{"All", "alfred@example.com (2)", "bob@example.com (0)", "lisa@example.com (0)"},
+			// RelatedOnlyFieldListFilter.
+			{"All", "bob (0)", "lisa (0)", "??? (2)"},
+			// EmptyFieldListFilter.
+			{"All", "Empty (0)", "Not empty (2)"},
+			// SimpleListFilter with join relations.
+			{"All", "Owned by Dev Department (2)", "Other (0)"},
+		}
+		displays, queryStrings := afFilterChoices(t, resp)
+		djangotest.AssertEqual(t, displays, want)
+		for _, qs := range queryStrings {
+			for _, q := range qs {
+				if !strings.Contains(q, "_facets") {
+					t.Errorf("query string %q lacks _facets", q)
+				}
+			}
+		}
+	})
+}
+
+// Ported from Django: tests/admin_filters/tests.py::ListFiltersTests.test_facets_disallowed
+func TestFacetsDisallowed(t *testing.T) {
+	djangotest.EachDB(t, adminFilterModels(), func(t *testing.T, db *orm.DB) {
+		f := setupAdminFiltersFixture(t, db)
+		env, bookURL := afFacetsSetUp(t, db, f, admin.ShowFacetsNever)
+		// Facets are not visible even when in the url query.
+		resp := env.client.Get(bookURL + "?_facets")
+		djangotest.AssertEqual(t, ctxVal(t, resp, "result_pks"), any([]int64{f.guitar.ID, f.djangoBook.ID, f.bio.ID, f.djangonaut.ID}))
+		want := [][]string{
+			// RelatedFieldListFilter.
+			{"All", "alfred", "bob", "lisa", "???"},
+			// SimpleListFilter.
+			{"All", "the 1980's", "the 1990's", "the 2000's", "other decades"},
+			// BooleanFieldListFilter.
+			{"All", "Yes", "No", "Unknown"},
+			// ChoicesFieldListFilter.
+			{"All", "Non-Fictional", "Fictional", "We don't know", "Not categorized"},
+			// DateFieldListFilter.
+			{"Any date", "Today", "Past 7 days", "This month", "This year", "No date", "Has date"},
+			// AllValuesFieldListFilter.
+			{"All", "alfred@example.com", "bob@example.com", "lisa@example.com"},
+			// RelatedOnlyFieldListFilter.
+			{"All", "bob", "lisa", "???"},
+			// EmptyFieldListFilter.
+			{"All", "Empty", "Not empty"},
+			// SimpleListFilter with join relations.
+			{"All", "Owned by Dev Department", "Other"},
+		}
+		displays, _ := afFilterChoices(t, resp)
+		djangotest.AssertEqual(t, displays, want)
+	})
+}
+
+// No Go counterpart: tests/admin_filters/tests.py::FacetsMixinTests.test_get_facet_counts
+// checks the NotImplementedError of an abstract Python method.

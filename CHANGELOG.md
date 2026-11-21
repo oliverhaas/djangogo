@@ -488,6 +488,15 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   months of a year and the days of a month, and each link shows the rows of
   its range. The field can be on a related model, such as
   `"question__posted"`. The checks report admin.E127 and admin.E128.
+- Admin: the changelist filters show facets, Django's `show_facets`: each
+  filter choice shows the count of the rows that it selects, as in
+  "Fiction (3)". The count applies the other filters, the date hierarchy and
+  the search. `ModelAdmin.ShowFacets` defaults to `admin.ShowFacetsAllow`,
+  which shows the counts after a click on "Show counts" in the filter
+  sidebar. `admin.ShowFacetsAlways` always shows them, and
+  `admin.ShowFacetsNever` hides the counts and the link. Each filter with
+  counts runs one more query. A choice of a `SimpleListFilter` whose `Filter`
+  returns no condition shows "(-)".
 
 ### Changed
 

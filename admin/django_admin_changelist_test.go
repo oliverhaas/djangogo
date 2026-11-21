@@ -233,6 +233,7 @@ func changelistModels() []any {
 
 func int64Ptr(v int64) *int64 { return &v }
 func boolPtr(v bool) *bool    { return &v }
+func strPtr(v string) *string { return &v }
 
 // Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_default_str_column_is_not_sortable
 func TestDefaultStrColumnIsNotSortable(t *testing.T) {
