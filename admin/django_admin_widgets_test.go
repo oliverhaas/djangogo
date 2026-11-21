@@ -107,10 +107,10 @@ func TestAdminFormfieldForDBFieldManyToMany(t *testing.T) {
 				"Hold down “Control”, or “Command” on a Mac, to select more than one.")
 		})
 
-		// FIXME-PORT: test_raw_id_many_to_many needs ModelAdmin.RawIDFields,
-		// test_formfield_overrides needs formfield_overrides, and
+		// test_raw_id_many_to_many is in TestAdminFormfieldForDBFieldRawID.
+		// FIXME-PORT: test_formfield_overrides needs formfield_overrides, and
 		// test_m2m_widgets_no_allow_multiple_selected needs a widget with
-		// allow_multiple_selected = False; the Go admin has none of them.
+		// allow_multiple_selected = False; the Go admin has neither.
 	})
 }
 

@@ -223,6 +223,15 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   The `check` command also reports Django's errors for `Fields`, `Fieldsets`,
   `ExcludeFields` and `ReadonlyFields` (`admin.E005`, `E006`, `E011`, `E012`,
   `E013`, `E015` and `E035`).
+- Admin: a large related table no longer has to fit into one `<select>`. A
+  foreign key or many-to-many field in `RawIDFields` is a text input for the
+  primary keys with a link to the related changelist and, for a foreign key,
+  the label of the selected row. A field in `AutocompleteFields` (or
+  `GetAutocompleteFields`) renders Django's `AutocompleteSelect` markup, and
+  the new `autocomplete/` view answers its search requests as Django's
+  `AutocompleteJsonView` does. Both kinds of field load only the related rows
+  they show or receive. The `check` command reports Django's errors for them
+  (`admin.E002`, `E003` and `E037` to `E040`).
 - `templates.Localize` formats a `time.Time`, `orm.Date` or `orm.Time` as a
   template prints it, and `orm.Model.ApplyDefaults` sets the field defaults on
   a new object.

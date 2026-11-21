@@ -19,7 +19,9 @@ func (o adminObject) Label() string { return "ModelAdmin of " + o.model.Label() 
 
 // Check runs the checks of Django's ModelAdminChecks that apply to the Go
 // ModelAdmin over every registered model and returns the problems, in the
-// order Django checks them: Fields (admin.E004, admin.E005, admin.E006,
+// order Django checks them: AutocompleteFields (admin.E037, admin.E038,
+// admin.E039, admin.E040), RawIDFields (admin.E002, admin.E003), Fields
+// (admin.E004, admin.E005, admin.E006,
 // admin.E013), Fieldsets (admin.E008, admin.E011, admin.E012, admin.E013),
 // ExcludeFields (admin.E015), FilterVertical and FilterHorizontal
 // (admin.E013, admin.E019, admin.E020), ReadonlyFields (admin.E035), then
@@ -28,6 +30,12 @@ func (s *AdminSite) Check() []checks.Message {
 	var out []checks.Message
 	for _, e := range s.entries {
 		obj := adminObject{model: e.model}
+		for i, name := range e.admin.AutocompleteFields {
+			out = append(out, s.checkAutocompleteItem(e, obj, name, fmt.Sprintf("autocomplete_fields[%d]", i))...)
+		}
+		for i, name := range e.admin.RawIDFields {
+			out = append(out, checkRawIDItem(e, obj, name, fmt.Sprintf("raw_id_fields[%d]", i))...)
+		}
 		out = append(out, checkFields(e, obj)...)
 		out = append(out, checkFieldsets(e, obj)...)
 		if dups := duplicates(e.model, e.admin.ExcludeFields); len(dups) > 0 {
@@ -48,6 +56,75 @@ func (s *AdminSite) Check() []checks.Message {
 		}
 	}
 	return out
+}
+
+// checkAutocompleteItem checks one entry of AutocompleteFields, Django's
+// _check_autocomplete_fields_item: the field exists, is a foreign key or a
+// many-to-many field, and its related model has an admin on s with search
+// fields. Django's messages name the ModelAdmin classes; a Go ModelAdmin has
+// no class name, so they name the type and the model.
+func (s *AdminSite) checkAutocompleteItem(e *entry, obj adminObject, name, label string) []checks.Message {
+	f, exists := relationOrField(e.model, name)
+	if !exists {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"The value of '%s' refers to '%s', which is not a field of '%s'.", label, name, e.model.Label()),
+			checks.Obj(obj), checks.ID("admin.E037"))}
+	}
+	if f == nil || f.Rel == nil || f.Rel.Target == nil {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"The value of '%s' must be a foreign key or a many-to-many field.", label),
+			checks.Obj(obj), checks.ID("admin.E038"))}
+	}
+	related := s.entryByModel(f.Rel.Target)
+	if related == nil {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"An admin for model %q has to be registered to be referenced by ModelAdmin.autocomplete_fields.",
+			f.Rel.Target.Name()), checks.Obj(obj), checks.ID("admin.E039"))}
+	}
+	if len(related.admin.SearchFields) == 0 && related.admin.GetSearchFields == nil {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"ModelAdmin of %s must define \"search_fields\", because it's referenced by ModelAdmin.autocomplete_fields.",
+			f.Rel.Target.Label()), checks.Obj(obj), checks.ID("admin.E040"))}
+	}
+	return nil
+}
+
+// checkRawIDItem checks one entry of RawIDFields, Django's
+// _check_raw_id_fields_item: the field exists under its name, not the
+// column name of a foreign key, and is a foreign key or a many-to-many field.
+func checkRawIDItem(e *entry, obj adminObject, name, label string) []checks.Message {
+	f, exists := relationOrField(e.model, name)
+	if !exists {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"The value of '%s' refers to '%s', which is not a field of '%s'.", label, name, e.model.Label()),
+			checks.Obj(obj), checks.ID("admin.E002"))}
+	}
+	if f == nil || f.Rel == nil || f.Rel.Target == nil {
+		return []checks.Message{checks.Error(fmt.Sprintf(
+			"The value of '%s' must be a foreign key or a many-to-many field.", label),
+			checks.Obj(obj), checks.ID("admin.E003"))}
+	}
+	return nil
+}
+
+// relationOrField looks up name on m as Django's _meta.get_field does for
+// the raw-id and autocomplete checks: a field or many-to-many field by its Go
+// name or attribute name, else a reverse relation, which exists but is no
+// field (f is nil).
+func relationOrField(m *orm.Model, name string) (f *orm.Field, exists bool) {
+	if f := manyToManyField(m, name); f != nil {
+		return f, true
+	}
+	if f, ok := m.FieldByName(name); ok {
+		return f, true
+	}
+	if f, ok := m.FieldByAttr(name); ok {
+		return f, true
+	}
+	if _, ok := m.ReverseRelation(name); ok {
+		return nil, true
+	}
+	return nil, false
 }
 
 // checkFields checks Fields, Django's _check_fields: not set together with

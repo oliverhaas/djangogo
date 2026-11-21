@@ -231,12 +231,7 @@ func (s *AdminSite) buildChangeList(r *http.Request, e *entry, actions []Action)
 		}
 	}
 
-	var searchFields []string
-	if e.admin.GetSearchFields != nil {
-		searchFields = e.admin.GetSearchFields(r)
-	} else {
-		searchFields = e.admin.SearchFields
-	}
+	searchFields := e.searchFields(r)
 
 	var listFilter []any
 	if e.admin.GetListFilter != nil {

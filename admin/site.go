@@ -298,6 +298,7 @@ func (s *AdminSite) buildRoutes() []urls.Route {
 		urls.Path("logout/", s.adminView(s.logout, false), "logout"),
 		urls.Path("password_change/", s.adminView(s.passwordChange, true), "password_change"),
 		urls.Path("password_change/done/", s.adminView(s.passwordChangeDone, true), "password_change_done"),
+		urls.Path("autocomplete/", s.adminView(s.autocompleteView, false), "autocomplete"),
 	}
 
 	var validApps []string

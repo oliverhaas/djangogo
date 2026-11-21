@@ -276,6 +276,20 @@ type ModelAdmin struct {
 	// FilteredSelectMultiple with the two lists stacked (Django's
 	// filter_vertical).
 	FilterVertical []string
+	// RawIDFields names foreign keys and many-to-many fields edited as a text
+	// input for the primary keys with a link to the related changelist
+	// (Django's raw_id_fields). The form loads only the related rows it
+	// shows or receives, not the whole table.
+	RawIDFields []string
+	// AutocompleteFields names foreign keys and many-to-many fields edited as
+	// a select that a script fills from the site's autocomplete view
+	// (Django's autocomplete_fields). The admin of the related model needs
+	// SearchFields. The form loads only the related rows it shows or
+	// receives.
+	AutocompleteFields []string
+	// GetAutocompleteFields returns the autocomplete fields for r in place of
+	// AutocompleteFields (Django's get_autocomplete_fields).
+	GetAutocompleteFields func(r *http.Request) []string
 
 	// Actions registers custom bulk actions on this ModelAdmin (appended after
 	// site-wide actions such as delete_selected; an action with the same Name

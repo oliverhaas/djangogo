@@ -37,10 +37,11 @@ type Song struct {
 // tests/modeladmin/models.py::ValidationTestModel, with the fields the ported
 // checks address.
 type ValidationTestModel struct {
-	ID    int64
-	Name  string             `orm:"max_length=100"`
-	Users orm.M2M[auth.User] `orm:"related_name=validationtestmodels"`
-	Band  orm.FK[Band]       `orm:"on_delete=cascade"`
+	ID         int64
+	Name       string             `orm:"max_length=100"`
+	Users      orm.M2M[auth.User] `orm:"related_name=validationtestmodels"`
+	Band       orm.FK[Band]       `orm:"on_delete=cascade"`
+	BestFriend orm.O2O[auth.User] `orm:"on_delete=cascade;related_name=best_friend"`
 }
 
 // Contact and Customer stand in for the models that
@@ -367,5 +368,127 @@ func TestFieldsCheck(t *testing.T) {
 		})
 		assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
 			"The value of 'fields' contains duplicate field(s).", "admin.E006", "Remove duplicates of 'name'.")
+	})
+}
+
+// Ported from Django: tests/modeladmin/test_checks.py::RawIdCheckTests.test_missing_field
+// Ported from Django: tests/modeladmin/test_checks.py::RawIdCheckTests.test_invalid_field_type
+// Ported from Django: tests/modeladmin/test_checks.py::RawIdCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::RawIdCheckTests.test_field_attname
+func TestRawIDCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		// FIXME-PORT: test_not_iterable (admin.E001) has no Go counterpart:
+		// RawIDFields is a []string. test_valid_case_stored_generated_field
+		// and test_valid_case_virtual_generated_field check date_hierarchy,
+		// which the Go admin does not have.
+
+		t.Run("test_missing_field", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{RawIDFields: []string{"non_existent_field"}})
+			})
+			assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+				"The value of 'raw_id_fields[0]' refers to 'non_existent_field', "+
+					"which is not a field of 'modeladmin.ValidationTestModel'.",
+				"admin.E002")
+		})
+
+		t.Run("test_invalid_field_type", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{RawIDFields: []string{"name"}})
+			})
+			assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+				"The value of 'raw_id_fields[0]' must be a foreign key or a many-to-many field.", "admin.E003")
+		})
+
+		t.Run("test_valid_case", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{RawIDFields: []string{"users"}})
+			})
+			assertIsValid(t, site)
+		})
+
+		t.Run("test_field_attname", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{RawIDFields: []string{"band_id"}})
+			})
+			assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+				"The value of 'raw_id_fields[0]' refers to 'band_id', "+
+					"which is not a field of 'modeladmin.ValidationTestModel'.",
+				"admin.E002")
+		})
+	})
+}
+
+// Ported from Django: tests/modeladmin/test_checks.py::AutocompleteFieldsTests.test_autocomplete_e037
+// Ported from Django: tests/modeladmin/test_checks.py::AutocompleteFieldsTests.test_autocomplete_e38
+// Ported from Django: tests/modeladmin/test_checks.py::AutocompleteFieldsTests.test_autocomplete_e039
+// Ported from Django: tests/modeladmin/test_checks.py::AutocompleteFieldsTests.test_autocomplete_e040
+// Ported from Django: tests/modeladmin/test_checks.py::AutocompleteFieldsTests.test_autocomplete_is_valid
+// Ported from Django: tests/modeladmin/test_checks.py::AutocompleteFieldsTests.test_autocomplete_is_onetoone
+//
+// Django's admin.E039 and admin.E040 messages name the ModelAdmin classes. A
+// Go ModelAdmin has no class name, so the messages say 'ModelAdmin' for the
+// referencing admin and name the model of the related one.
+func TestAutocompleteFieldsCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		// FIXME-PORT: test_autocomplete_e036 has no Go counterpart:
+		// AutocompleteFields is a []string. test_autocomplete_e039_unresolved_model
+		// needs a foreign key to a model that is not installed, which the Go
+		// registry rejects.
+
+		t.Run("test_autocomplete_e037", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{AutocompleteFields: []string{"nonexistent"}})
+			})
+			assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+				"The value of 'autocomplete_fields[0]' refers to 'nonexistent', "+
+					"which is not a field of 'modeladmin.ValidationTestModel'.",
+				"admin.E037")
+		})
+
+		t.Run("test_autocomplete_e38", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{AutocompleteFields: []string{"name"}})
+			})
+			assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+				"The value of 'autocomplete_fields[0]' must be a foreign key or a many-to-many field.",
+				"admin.E038")
+		})
+
+		t.Run("test_autocomplete_e039", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[Song](site, admin.ModelAdmin{AutocompleteFields: []string{"band"}})
+			})
+			assertIsInvalid(t, site, "modeladmin.Song",
+				`An admin for model "Band" has to be registered to be referenced by ModelAdmin.autocomplete_fields.`,
+				"admin.E039")
+		})
+
+		t.Run("test_autocomplete_e040", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[Band](site, admin.ModelAdmin{})
+				admin.Register[Song](site, admin.ModelAdmin{AutocompleteFields: []string{"featuring"}})
+			})
+			assertIsInvalid(t, site, "modeladmin.Song",
+				`ModelAdmin of modeladmin.Band must define "search_fields", `+
+					"because it's referenced by ModelAdmin.autocomplete_fields.",
+				"admin.E040")
+		})
+
+		t.Run("test_autocomplete_is_valid", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[Band](site, admin.ModelAdmin{SearchFields: []string{"name"}})
+				admin.Register[Song](site, admin.ModelAdmin{AutocompleteFields: []string{"featuring"}})
+			})
+			assertIsValid(t, site)
+		})
+
+		t.Run("test_autocomplete_is_onetoone", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[auth.User](site, admin.ModelAdmin{SearchFields: []string{"username"}})
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{AutocompleteFields: []string{"best_friend"}})
+			})
+			assertIsValid(t, site)
+		})
 	})
 }

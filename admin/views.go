@@ -121,8 +121,9 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj any, canChange boo
 		readonly = fields
 	}
 	opts := slices.Concat([]forms.ModelFormOption{forms.WithFields(fields...), forms.WithExclude(exclude...)},
-		manyToManyOptions(e), e.admin.FormOptions)
+		s.relationWidgets(r, e), e.admin.FormOptions)
 	form := forms.FromModel(e.model, opts...)
+	syncAutocompleteRequired(form)
 	s.populateChoices(r, form, e)
 	shown := obj
 	if shown == nil {
@@ -135,32 +136,6 @@ func (s *AdminSite) changeForm(r *http.Request, e *entry, obj any, canChange boo
 // multipleSelectHint is the help text Django's admin adds to a <select
 // multiple> of a many-to-many field.
 const multipleSelectHint = "Hold down “Control”, or “Command” on a Mac, to select more than one."
-
-// manyToManyOptions returns the form options of Django's
-// formfield_for_manytomany for the many-to-many fields of e: a
-// FilteredSelectMultiple for a field named in FilterHorizontal or
-// FilterVertical, and the multiple selection hint after the help text.
-func manyToManyOptions(e *entry) []forms.ModelFormOption {
-	var opts []forms.ModelFormOption
-	for _, mf := range e.model.ManyToMany() {
-		if mf.Rel == nil || !mf.Rel.AutoCreated {
-			continue
-		}
-		vertical := namesField(e.admin.FilterVertical, mf)
-		if vertical || namesField(e.admin.FilterHorizontal, mf) {
-			opts = append(opts, forms.WithWidget(mf.Attr, FilteredSelectMultiple{
-				VerboseName: fieldVerboseName(mf),
-				IsStacked:   vertical,
-			}))
-		}
-		help := multipleSelectHint
-		if mf.HelpText != "" {
-			help = mf.HelpText + " " + multipleSelectHint
-		}
-		opts = append(opts, forms.WithHelpText(mf.Attr, help))
-	}
-	return opts
-}
 
 // namesField reports whether names holds the Go name or the attribute name of
 // f.
@@ -193,11 +168,13 @@ func formFieldNames(form *forms.Form) map[string]bool {
 // populateChoices fills the list of every foreign-key and many-to-many field
 // of the form with the related model's (pk, label) rows, in the ordering of
 // the related model's admin (Django's get_field_queryset), else the related
-// model's Meta.Ordering.
+// model's Meta.Ordering. The raw-id and autocomplete fields are left out:
+// loadSelectedChoices loads only the rows they show.
 func (s *AdminSite) populateChoices(r *http.Request, form *forms.Form, e *entry) {
 	present := formFieldNames(form)
+	limited := e.limitedFields(r)
 	for _, mf := range slices.Concat(e.model.Relations(), e.model.ManyToMany()) {
-		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Attr] {
+		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Attr] || slices.Contains(limited, mf) {
 			continue
 		}
 		opts, err := orm.LabeledRowsOrdered(r.Context(), s.db, mf.Rel.Target, s.relatedOrdering(r, mf.Rel.Target), nil)
@@ -288,6 +265,10 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 		}
 		af.form = af.form.Bind(r.PostForm)
 		form := af.form
+		if err := s.loadSelectedChoices(r, e, form); err != nil {
+			http.Error(w, "failed to load related rows", http.StatusInternalServerError)
+			return
+		}
 		if form.IsValid() {
 			obj := e.ops.newPtr()
 			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
@@ -367,6 +348,10 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 		}
 		af.form = af.form.Bind(r.PostForm)
 		form := af.form
+		if err := s.loadSelectedChoices(r, e, form); err != nil {
+			http.Error(w, "failed to load related rows", http.StatusInternalServerError)
+			return
+		}
 		if form.IsValid() {
 			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
 				http.Error(w, "failed to populate object", http.StatusInternalServerError)
@@ -409,6 +394,10 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 	af.form.Initial = forms.InitialFromStruct(e.model, obj)
 	if err := s.manyInitial(r.Context(), af.form, e, obj); err != nil {
 		http.Error(w, "failed to load row", http.StatusInternalServerError)
+		return
+	}
+	if err := s.loadSelectedChoices(r, e, af.form); err != nil {
+		http.Error(w, "failed to load related rows", http.StatusInternalServerError)
 		return
 	}
 	s.renderChangeForm(w, r, e, "Change "+singular, obj, af, false, true)
