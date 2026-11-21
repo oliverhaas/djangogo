@@ -316,6 +316,17 @@ type ModelAdmin struct {
 	// Media adds stylesheets and scripts to the add and change pages
 	// (Django's ModelAdmin Media class).
 	Media forms.Media
+	// SaveAs shows a "Save as new" button on the change page in place of
+	// "Save and add another" (Django's save_as). The button saves the form
+	// and the inlines as a new row and needs the add permission.
+	SaveAs bool
+	// SaveAsContinue redirects to the change page of the new row after
+	// "Save as new" (Django's save_as_continue, default true when nil); false
+	// redirects to the changelist.
+	SaveAsContinue *bool
+	// SaveOnTop shows the save buttons above the form as well as below it
+	// (Django's save_on_top).
+	SaveOnTop bool
 
 	// Actions registers custom bulk actions on this ModelAdmin (appended after
 	// site-wide actions such as delete_selected; an action with the same Name

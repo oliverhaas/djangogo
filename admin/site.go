@@ -626,6 +626,14 @@ func (s *AdminSite) changeURL(e *entry, pk int64) string {
 	return fmt.Sprintf("%s/%s%d/change/", s.prefix(), e.routePrefix(), pk)
 }
 
+// historyURL returns the URL of e's history view for pk.
+func (s *AdminSite) historyURL(e *entry, pk int64) string {
+	if u := s.reverse(e.urlName("history"), pk); u != "" {
+		return u
+	}
+	return fmt.Sprintf("%s/%s%d/history/", s.prefix(), e.routePrefix(), pk)
+}
+
 // deleteURL returns the URL of e's delete view for pk.
 func (s *AdminSite) deleteURL(e *entry, pk int64) string {
 	if u := s.reverse(e.urlName("delete"), pk); u != "" {

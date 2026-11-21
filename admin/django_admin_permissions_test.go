@@ -990,3 +990,90 @@ func TestModelAdminPermissionOverrides(t *testing.T) {
 		djangotest.AssertRedirects(t, env.client.Post(delURL, url.Values{"post": {"yes"}}), mustReverse(t, env.router, "admin:index"))
 	})
 }
+
+// Ported from Django: tests/admin_views/tests.py::AdminViewPermissionsTest.test_change_view_save_as_new
+func TestChangeViewSaveAsNew(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		env := newAdminTestEnv(t, db, registerPermModels)
+		u := setupPermFixture(t, db, env)
+		changeDictSaveAsNew := url.Values{
+			"_saveasnew": {"Save as new"},
+			"title":      {"Ikke fordømt"},
+			"views":      {"99"},
+			"published":  {"on"},
+		}
+		articleChangeURL := mustReverse(t, env.router, "admin:admin_views_article_change", u.a1.ID)
+		indexURL := mustReverse(t, env.router, "admin:index")
+		count := func() int64 {
+			n, err := orm.Query[Article](db).Count(ctx)
+			if err != nil {
+				t.Fatalf("count articles: %v", err)
+			}
+			return n
+		}
+
+		// Add user can perform "Save as new".
+		articleCount := count()
+		env.client.ForceLogin(u.addUser)
+		post := env.client.Post(articleChangeURL, changeDictSaveAsNew)
+		djangotest.AssertRedirects(t, post, indexURL)
+		djangotest.AssertEqual(t, count(), articleCount+1)
+		env.client.Logout()
+
+		// Change user cannot perform "Save as new" (no 'add' permission).
+		articleCount = count()
+		env.client.ForceLogin(u.changeUser)
+		post = env.client.Post(articleChangeURL, changeDictSaveAsNew)
+		djangotest.AssertStatus(t, post, http.StatusForbidden)
+		djangotest.AssertEqual(t, count(), articleCount)
+
+		// User with both add and change permissions should be redirected to the
+		// change page for the newly created object.
+		articleCount = count()
+		env.client.ForceLogin(u.super)
+		post = env.client.Post(articleChangeURL, changeDictSaveAsNew)
+		djangotest.AssertEqual(t, count(), articleCount+1)
+		newArticle, err := orm.Query[Article](db).OrderBy("-id").First(ctx)
+		if err != nil {
+			t.Fatalf("latest article: %v", err)
+		}
+		djangotest.AssertRedirects(t, post, mustReverse(t, env.router, "admin:admin_views_article_change", newArticle.ID))
+	})
+}
+
+// The Go Article has no section, so SectionedPost stands in for Article in
+// the inline of Section. Django patches get_formset_kwargs to pass the
+// immutable request.POST; the Go admin always copies the data it changes.
+//
+// Ported from Django: tests/admin_views/tests.py::AdminViewPermissionsTest.test_save_as_new_with_view_only_inlines
+func TestSaveAsNewWithViewOnlyInlines(t *testing.T) {
+	models := append(adminViewsModels(), djangotest.App("blog", &SectionedPost{}))
+	djangotest.EachDB(t, models, func(t *testing.T, db *orm.DB) {
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[Section](site, admin.ModelAdmin{
+				Inlines: []admin.Inline{admin.TabularInline[Section, SectionedPost](admin.InlineModelAdmin{})},
+			})
+		})
+		u := setupPermFixture(t, db, env)
+		post := &SectionedPost{Title: "Middle content"}
+		post.Section.SetPK(u.s1.ID)
+		mustCreate(t, db, post)
+		grantPerm(t, db, u.viewUser, "blog", "view_sectionedpost")
+		grantPerm(t, db, u.viewUser, "admin_views", "add_section")
+		env.client.ForceLogin(u.viewUser)
+
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_views_section_change", u.s1.ID), url.Values{
+			"_saveasnew":                      {"Save as new"},
+			"name":                            {""},
+			"sectionedpost_set-TOTAL_FORMS":   {"1"},
+			"sectionedpost_set-INITIAL_FORMS": {"1"},
+		})
+		djangotest.AssertContains(t, resp, "Please correct the error below.")
+		// The template sees the forms of the formset, not its counts.
+		fs := inlineFormSet(t, resp, 0)
+		djangotest.AssertEqual(t, len(fs["forms"].([]any)), 0)
+		djangotest.AssertEqual(t, len(fs["initial_forms"].([]any)), 0)
+		djangotest.AssertNotContains(t, resp, "Middle content")
+	})
+}

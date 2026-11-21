@@ -382,6 +382,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `GetAdminURL` read them.
 - ORM: `orm.GetByPK` loads an instance of a registered model by its primary
   key when only the model metadata is known.
+- Admin: the change page links the history of the object, Django's "History"
+  object tool. `ModelAdmin.SaveAs` replaces "Save and add another" on the
+  change page with "Save as new", which saves the form and the inlines as a
+  new row and needs the add permission. `ModelAdmin.SaveAsContinue` (default
+  true) opens the new row after the save; false returns to the changelist.
+  `ModelAdmin.SaveOnTop` shows the save buttons above the form as well. The
+  submit row is in its own template, `admin/submit_line.html`, as in Django.
 
 ### Changed
 

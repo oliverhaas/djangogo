@@ -642,3 +642,7 @@ func TestAutocompleteFieldsCheck(t *testing.T) {
 		})
 	})
 }
+
+// No Go counterpart: tests/modeladmin/test_checks.py::SaveAsCheckTests and
+// SaveOnTopCheckTests check that save_as and save_on_top are booleans, which
+// Go fixes at compile time: ModelAdmin.SaveAs and SaveOnTop are bools.

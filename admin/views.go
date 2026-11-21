@@ -291,6 +291,27 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 	if hooks != nil && hooks.allowAdd != nil && !hooks.allowAdd(s, w, r, e) {
 		return
 	}
+	s.addForm(w, r, e)
+}
+
+// saveAsNewVar is the name of the "Save as new" button.
+const saveAsNewVar = "_saveasnew"
+
+// saveAsContinue returns e's SaveAsContinue (default true).
+func (e *entry) saveAsContinue() bool {
+	if e.admin.SaveAsContinue != nil {
+		return *e.admin.SaveAsContinue
+	}
+	return true
+}
+
+// addForm shows and saves the add form of e for a user with the add
+// permission. A submission of "Save as new", from the add or the change
+// page, saves the inlines as new rows too, and a failed one shows the form
+// as a change form with only the "Save as new" button, as Django's
+// _changeform_view does.
+func (s *AdminSite) addForm(w http.ResponseWriter, r *http.Request, e *entry) {
+	hooks := e.admin.hooks
 	singular, _ := modelVerboseNames(e.model)
 	title := "Add " + singular
 	// The form fills the new row and the inlines point at it; the save gives
@@ -306,6 +327,7 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 	if !ok {
 		return
 	}
+	saveAsNew := data.Has(saveAsNewVar)
 	inlines, err := s.inlineFormSets(r, e, obj, nil, data)
 	if err != nil {
 		http.Error(w, "invalid admin inline: "+err.Error(), http.StatusInternalServerError)
@@ -361,6 +383,7 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 			msg := fmt.Sprintf("The %s “%s” was added successfully.",
 				forms.Escape(singular), objectHTML(displayLabel(e.model, obj), objURL))
 			continueEditing := r.PostForm.Has("_continue") ||
+				saveAsNew && e.saveAsContinue() && objURL != "" ||
 				hooks != nil && hooks.continueAfterAdd && !r.PostForm.Has("_addanother")
 			if continueEditing && e.hasViewOrChangePermission(s, r, obj) {
 				if objURL != "" {
@@ -381,7 +404,13 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 			return
 		}
 	}
-	s.renderChangeForm(w, r, e, title, nil, af, inlines, true, true)
+	if saveAsNew {
+		// Show the change form with only "Save as new", so that the page
+		// does not offer to save the original row.
+		s.renderChangeForm(w, r, e, title, nil, af, inlines, formSaveAsNew)
+		return
+	}
+	s.renderChangeForm(w, r, e, title, nil, af, inlines, formAdd)
 }
 
 // postData parses the body of a POST request and returns its form data, nil
@@ -419,6 +448,22 @@ func validChangeForm(form *forms.Form, inlines []*inlineFormSet) (bool, error) {
 func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 	if e.rejectToField(w, r.FormValue(toFieldVar)) {
 		return
+	}
+	if r.Method == http.MethodPost {
+		data, ok := postData(w, r)
+		if !ok {
+			return
+		}
+		// "Save as new" adds a row, as Django's _changeform_view drops the
+		// object ID: it needs the add permission, not the change permission.
+		if data.Has(saveAsNewVar) {
+			if !e.hasAddPermission(s, r) {
+				forbidden(w)
+				return
+			}
+			s.addForm(w, r, e)
+			return
+		}
 	}
 	objectID := r.PathValue("object_id")
 	obj, pk, err := s.loadObject(r.Context(), e, objectID)
@@ -516,19 +561,19 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 			s.redirectPostSave(w, r, e)
 			return
 		}
-		s.renderChangeForm(w, r, e, "Change "+singular, obj, af, inlines, false, true)
+		s.renderChangeForm(w, r, e, "Change "+singular, obj, af, inlines, formChange)
 		return
 	}
 
 	if !canChange {
-		s.renderChangeForm(w, r, e, "View "+singular, obj, af, inlines, false, false)
+		s.renderChangeForm(w, r, e, "View "+singular, obj, af, inlines, formView)
 		return
 	}
 	if err := s.loadSelectedChoices(r, e, af.form); err != nil {
 		http.Error(w, "failed to load related rows", http.StatusInternalServerError)
 		return
 	}
-	s.renderChangeForm(w, r, e, "Change "+singular, obj, af, inlines, false, true)
+	s.renderChangeForm(w, r, e, "Change "+singular, obj, af, inlines, formChange)
 }
 
 // delete handles the delete page, Django's ModelAdmin._delete_view: it
@@ -673,10 +718,24 @@ func (s *AdminSite) history(w http.ResponseWriter, r *http.Request, e *entry) {
 	s.render(w, r, "admin/object_history.html", ctx)
 }
 
-// renderChangeForm renders admin/change_form.html for add, change, or
-// view-only change requests. errors in the context is the number of fields
-// with errors, counting the errors of the whole form as one, as the length of
-// Django's AdminErrorList.
+// formMode is the kind of page renderChangeForm draws.
+type formMode int
+
+const (
+	// formAdd is the add page.
+	formAdd formMode = iota
+	// formChange is the change page of a user who may change the object.
+	formChange
+	// formView is the change page of a user who may only view the object.
+	formView
+	// formSaveAsNew is a failed "Save as new": a change page without an
+	// object that offers only "Save as new".
+	formSaveAsNew
+)
+
+// renderChangeForm renders admin/change_form.html for the page of mode.
+// errors in the context is the number of fields with errors, counting the
+// errors of the whole form as one, as the length of Django's AdminErrorList.
 func (s *AdminSite) renderChangeForm(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -685,9 +744,11 @@ func (s *AdminSite) renderChangeForm(
 	obj any,
 	af *adminForm,
 	inlines []*inlineFormSet,
-	isAdd bool,
-	canChange bool,
+	mode formMode,
 ) {
+	isAdd := mode == formAdd
+	canChange := mode == formAdd || mode == formChange ||
+		mode == formSaveAsNew && e.hasChangePermission(s, r, nil)
 	singular, plural := modelVerboseNames(e.model)
 	ctx := s.EachContext(r)
 	ctx["title"] = title
@@ -737,17 +798,27 @@ func (s *AdminSite) renderChangeForm(
 		ctx["errors"] = af.form.Errors().Len() + inlineErrorCount(inlines)
 		ctx["non_field_errors"] = templates.MarkSafe(af.form.NonFieldErrors().AsUL())
 	}
-	if hasObjDelete {
+	// The object tools link the history; a failed "Save as new" has no
+	// object, and its link is empty, as Django's url tag leaves it.
+	ctx["history_url"] = ""
+	if obj != nil {
 		pk := pkOf(reflect.ValueOf(obj).Elem(), e)
-		ctx["delete_url"] = s.deleteURL(e, pk)
+		ctx["history_url"] = s.historyURL(e, pk)
+		if hasObjDelete {
+			ctx["delete_url"] = s.deleteURL(e, pk)
+		}
 	}
 
 	// Submit-row button visibility mirrors Django's submit_row template tag.
-	showSave := isAdd || canChange
+	// A failed "Save as new" hides the buttons that save the original row.
+	canSave := isAdd || canChange
+	showSave := canSave && mode != formSaveAsNew
+	ctx["save_on_top"] = e.admin.SaveOnTop
 	ctx["show_save"] = showSave
-	ctx["show_save_and_add_another"] = !popup && hasAdd && showSave
+	ctx["show_save_as_new"] = !popup && hasAdd && !isAdd && e.admin.SaveAs
+	ctx["show_save_and_add_another"] = !popup && hasAdd && canSave && (!e.admin.SaveAs || isAdd)
 	ctx["show_save_and_continue"] = !popup && showSave && (hasObjChange || hasObjView)
-	ctx["show_close"] = !showSave && hasModelView
+	ctx["show_close"] = !showSave
 	ctx["show_delete_link"] = !popup && hasObjDelete
 
 	name := "admin/change_form.html"

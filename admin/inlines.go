@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -172,7 +173,7 @@ func newInline[P, T any](cfg InlineModelAdmin, template string) Inline {
 				return in, err
 			}
 			in.fk = probe.FK()
-			in.newFormSet = func(parent any, ordering []string, none bool, opts []forms.ModelFormOption) inlineSet {
+			in.newFormSet = func(parent any, ordering []string, none, saveAsNew bool, opts []forms.ModelFormOption) inlineSet {
 				fs := forms.NewInlineFormSet[P, T](db, cfg.FKName, opts...)
 				qs := orm.Query[T](db)
 				if len(ordering) > 0 {
@@ -183,7 +184,9 @@ func newInline[P, T any](cfg InlineModelAdmin, template string) Inline {
 				}
 				fs.QuerySet = qs
 				p, _ := parent.(*P)
-				return &typedInlineSet[P, T]{fs: fs.WithInstance(p)}
+				set := fs.WithInstance(p)
+				set.SaveAsNew = saveAsNew
+				return &typedInlineSet[P, T]{fs: set}
 			}
 			return in, nil
 		},
@@ -223,8 +226,9 @@ type inlineAdmin struct {
 	fk       *orm.Field
 	entry    *entry
 	// newFormSet returns the formset of the rows of parent, ordered by
-	// ordering, empty when none is true.
-	newFormSet func(parent any, ordering []string, none bool, opts []forms.ModelFormOption) inlineSet
+	// ordering, empty when none is true. saveAsNew makes every form add a
+	// row, Django's save_as_new.
+	newFormSet func(parent any, ordering []string, none, saveAsNew bool, opts []forms.ModelFormOption) inlineSet
 }
 
 // inlineSet is the type-independent view of a forms.InlineFormSet.
@@ -436,6 +440,7 @@ func (s *AdminSite) inlineFormSets(r *http.Request, e *entry, parent, obj any, d
 	if obj != nil {
 		canEditParent = e.hasChangePermission(s, r, obj)
 	}
+	saveAsNew := data.Has(saveAsNewVar)
 	prefixes := map[string]int{}
 	out := make([]*inlineFormSet, 0, len(ins))
 	for _, in := range ins {
@@ -449,7 +454,7 @@ func (s *AdminSite) inlineFormSets(r *http.Request, e *entry, parent, obj any, d
 		if !ifs.hasView && !ifs.hasChange && !ifs.hasAdd && !ifs.hasDelete {
 			continue
 		}
-		if err := s.buildInlineFormSet(r, ifs, parent, obj, prefixes); err != nil {
+		if err := s.buildInlineFormSet(r, ifs, parent, obj, prefixes, saveAsNew); err != nil {
 			return nil, err
 		}
 		if !canEditParent {
@@ -458,7 +463,16 @@ func (s *AdminSite) inlineFormSets(r *http.Request, e *entry, parent, obj any, d
 			ifs.formSet().Extra, ifs.formSet().MaxNum = 0, 0
 		}
 		if data != nil {
-			ifs.set.bind(data)
+			bound := data
+			if saveAsNew && !ifs.hasAdd {
+				// A copy of the parent gets no rows of an inline the user
+				// may not add to, as in Django's _create_formsets.
+				prefix := ifs.formSet().Prefix
+				bound = maps.Clone(data)
+				bound.Set(prefix+"-TOTAL_FORMS", "0")
+				bound.Set(prefix+"-INITIAL_FORMS", "0")
+			}
+			ifs.set.bind(bound)
 		}
 		fs := ifs.formSet()
 		fs.SetContext(r.Context())
@@ -478,8 +492,9 @@ func (s *AdminSite) inlineFormSets(r *http.Request, e *entry, parent, obj any, d
 // buildInlineFormSet makes the unbound formset of ifs for parent, Django's
 // InlineModelAdmin.get_formset: the forms of the inline's layout without the
 // read-only fields, the admin's widgets, the counts of the inline, and the
-// guards of Django's DeleteProtectedModelForm.
-func (s *AdminSite) buildInlineFormSet(r *http.Request, ifs *inlineFormSet, parent, obj any, prefixes map[string]int) error {
+// guards of Django's DeleteProtectedModelForm. saveAsNew makes every form add
+// a row, for a parent saved as a new row.
+func (s *AdminSite) buildInlineFormSet(r *http.Request, ifs *inlineFormSet, parent, obj any, prefixes map[string]int, saveAsNew bool) error {
 	in, ie := ifs.in, ifs.in.entry
 	ifs.sets = s.fieldsets(r, ie, obj)
 	ifs.readonly = ie.readonlyFields(r, obj)
@@ -499,7 +514,7 @@ func (s *AdminSite) buildInlineFormSet(r *http.Request, ifs *inlineFormSet, pare
 	for i, o := range in.cfg.Ordering {
 		ordering[i] = normalizeFieldPath(ie.model, o)
 	}
-	ifs.set = in.newFormSet(parent, ordering, !ifs.hasView && !ifs.hasChange, opts)
+	ifs.set = in.newFormSet(parent, ordering, !ifs.hasView && !ifs.hasChange, saveAsNew, opts)
 	fs := ifs.formSet()
 	fs.Extra = in.extra(r, obj)
 	fs.MinNum = in.minNum(r, obj)

@@ -259,3 +259,309 @@ func TestChangeFormValidatesUnique(t *testing.T) {
 		djangotest.AssertEqual(t, n, int64(1))
 	})
 }
+
+// Person stands in for tests/admin_views/models.py::Person.
+type Person struct {
+	ID     int64
+	Name   string `orm:"max_length=100"`
+	Gender int64  `orm:"verbose_name=very very very very very very very very very loooooooooooooooooooooooooooooooooooooooooong name"`
+	Age    int64  `orm:"default=21"`
+	Alive  bool   `orm:"default=true"`
+}
+
+// Meta declares the choices of Gender.
+func (Person) Meta() orm.Meta {
+	return orm.Meta{Choices: map[string][]orm.Choice{
+		"Gender": {orm.ChoiceOf(int64(1), "Male"), orm.ChoiceOf(int64(2), "Female")},
+	}}
+}
+
+// String returns the name.
+func (p Person) String() string { return p.Name }
+
+// Parent stands in for tests/admin_views/models.py::Parent.
+type Parent struct {
+	ID   int64
+	Name string `orm:"max_length=128"`
+}
+
+// Clean rejects the name "_invalid".
+func (p Parent) Clean() error {
+	if p.Name == "_invalid" {
+		return orm.NewValidationError("invalid", "")
+	}
+	return nil
+}
+
+// Child stands in for tests/admin_views/models.py::Child.
+type Child struct {
+	ID     int64
+	Parent orm.FK[Parent] `orm:"on_delete=cascade;editable=false"`
+	Name   string         `orm:"max_length=30;blank"`
+}
+
+// Clean rejects the name "_invalid".
+func (c Child) Clean() error {
+	if c.Name == "_invalid" {
+		return orm.NewValidationError("invalid", "")
+	}
+	return nil
+}
+
+// saveAsModels returns the models of SaveAsTests.
+func saveAsModels() []any {
+	return append(adminViewsModels(), djangotest.App("admin_views", &Person{}, &Parent{}, &Child{}))
+}
+
+// saveAsEnv registers PersonAdmin and ParentAdmin of tests/admin_views/admin.py
+// on the site "admin" and Person with save_as_continue=False on the site
+// "namespaced_admin", Django's site2, creates per1 and logs in the
+// superuser, as SaveAsTests.setUpTestData and setUp do.
+func saveAsEnv(t *testing.T, db *orm.DB) (env, env2 *adminTestEnv, per1 *Person) {
+	t.Helper()
+	env = newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[Person](site, admin.ModelAdmin{SaveAs: true})
+		admin.Register[Parent](site, admin.ModelAdmin{
+			SaveAs:  true,
+			Inlines: []admin.Inline{admin.StackedInline[Parent, Child](admin.InlineModelAdmin{})},
+		})
+	})
+	continueFalse := false
+	env2 = newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		site.Name = "namespaced_admin"
+		site.Prefix = "/test_admin/admin2"
+		admin.Register[Person](site, admin.ModelAdmin{SaveAsContinue: &continueFalse})
+	})
+	super := createTestUser(t, db, "super", "secret", true, true)
+	env.client.ForceLogin(super)
+	env2.client.ForceLogin(super)
+	per1 = mustCreate(t, db, &Person{Name: "John Mauchly", Gender: 1, Alive: true})
+	return env, env2, per1
+}
+
+// Ported from Django: tests/admin_views/tests.py::SaveAsTests.test_save_as_duplication
+func TestSaveAsDuplication(t *testing.T) {
+	djangotest.EachDB(t, saveAsModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		env, _, per1 := saveAsEnv(t, db)
+		postData := url.Values{"_saveasnew": {""}, "name": {"John M"}, "gender": {"1"}, "age": {"42"}}
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_views_person_change", per1.ID), postData)
+		n, _ := orm.Query[Person](db).Filter("name", "John M").Count(ctx)
+		djangotest.AssertEqual(t, n, int64(1))
+		n, _ = orm.Query[Person](db).Filter("id", per1.ID).Count(ctx)
+		djangotest.AssertEqual(t, n, int64(1))
+		newPerson, err := orm.Query[Person](db).OrderBy("-id").First(ctx)
+		if err != nil {
+			t.Fatalf("latest person: %v", err)
+		}
+		djangotest.AssertRedirects(t, resp, mustReverse(t, env.router, "admin:admin_views_person_change", newPerson.ID))
+	})
+}
+
+// Ported from Django: tests/admin_views/tests.py::SaveAsTests.test_save_as_continue_false
+func TestSaveAsContinueFalse(t *testing.T) {
+	djangotest.EachDB(t, saveAsModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		_, env2, per1 := saveAsEnv(t, db)
+		postData := url.Values{"_saveasnew": {""}, "name": {"John M"}, "gender": {"1"}, "age": {"42"}}
+		u := mustReverse(t, env2.router, "namespaced_admin:admin_views_person_change", per1.ID)
+		resp := env2.client.Post(u, postData)
+		n, _ := orm.Query[Person](db).Filter("name", "John M").Count(ctx)
+		djangotest.AssertEqual(t, n, int64(1))
+		n, _ = orm.Query[Person](db).Filter("id", per1.ID).Count(ctx)
+		djangotest.AssertEqual(t, n, int64(1))
+		djangotest.AssertRedirects(t, resp, mustReverse(t, env2.router, "namespaced_admin:admin_views_person_changelist"))
+	})
+}
+
+// When you click "Save as new" and have a validation error, you only see the
+// "Save as new" button and not the other save buttons.
+//
+// Ported from Django: tests/admin_views/tests.py::SaveAsTests.test_save_as_new_with_validation_errors
+func TestSaveAsNewWithValidationErrors(t *testing.T) {
+	djangotest.EachDB(t, saveAsModels(), func(t *testing.T, db *orm.DB) {
+		env, _, per1 := saveAsEnv(t, db)
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_views_person_change", per1.ID), url.Values{
+			"_saveasnew":  {""},
+			"gender":      {"invalid"},
+			"_addanother": {"fail"},
+		})
+		djangotest.AssertContains(t, resp, "Please correct the errors below.")
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_and_add_another"), any(false))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_and_continue"), any(false))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_as_new"), any(true))
+	})
+}
+
+// saveAsParentData returns the data of SaveAsTests that saves parent with
+// child as new, with the names of the parent and the child.
+func saveAsParentData(parent *Parent, child *Child, parentName, childName string) url.Values {
+	return url.Values{
+		"_saveasnew":              {"Save as new"},
+		"child_set-0-parent":      {fmt.Sprint(parent.ID)},
+		"child_set-0-id":          {fmt.Sprint(child.ID)},
+		"child_set-0-name":        {childName},
+		"child_set-INITIAL_FORMS": {"1"},
+		"child_set-MAX_NUM_FORMS": {"1000"},
+		"child_set-MIN_NUM_FORMS": {"0"},
+		"child_set-TOTAL_FORMS":   {"4"},
+		"name":                    {parentName},
+	}
+}
+
+// Ported from Django: tests/admin_views/tests.py::SaveAsTests.test_save_as_new_with_validation_errors_with_inlines
+func TestSaveAsNewWithValidationErrorsWithInlines(t *testing.T) {
+	djangotest.EachDB(t, saveAsModels(), func(t *testing.T, db *orm.DB) {
+		env, _, _ := saveAsEnv(t, db)
+		parent := mustCreate(t, db, &Parent{Name: "Father"})
+		child := &Child{Name: "Child"}
+		child.Parent.SetPK(parent.ID)
+		mustCreate(t, db, child)
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_views_parent_change", parent.ID),
+			saveAsParentData(parent, child, "_invalid", "Child"))
+		djangotest.AssertContains(t, resp, "Please correct the error below.")
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_and_add_another"), any(false))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_and_continue"), any(false))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_as_new"), any(true))
+	})
+}
+
+// Ported from Django: tests/admin_views/tests.py::SaveAsTests.test_save_as_new_with_inlines_with_validation_errors
+func TestSaveAsNewWithInlinesWithValidationErrors(t *testing.T) {
+	djangotest.EachDB(t, saveAsModels(), func(t *testing.T, db *orm.DB) {
+		env, _, _ := saveAsEnv(t, db)
+		parent := mustCreate(t, db, &Parent{Name: "Father"})
+		child := &Child{Name: "Child"}
+		child.Parent.SetPK(parent.ID)
+		mustCreate(t, db, child)
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_views_parent_change", parent.ID),
+			saveAsParentData(parent, child, "Father", "_invalid"))
+		djangotest.AssertContains(t, resp, "Please correct the error below.")
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_and_add_another"), any(false))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_and_continue"), any(false))
+		djangotest.AssertEqual(t, ctxVal(t, resp, "show_save_as_new"), any(true))
+	})
+}
+
+// The Go Article has no section, so SectionedPost stands in for Article in
+// the inline of Section.
+//
+// saveAsSectionEnv registers Section with the inline of SectionedPost and
+// save_as, as tests/admin_views/admin.py registers Section with
+// ArticleInline, creates s1 with three posts and logs in the superuser. It
+// returns the data of AdminViewBasicTestCase.inline_post_data for the posts.
+func saveAsSectionEnv(t *testing.T, db *orm.DB) (*adminTestEnv, *Section, url.Values) {
+	t.Helper()
+	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[Section](site, admin.ModelAdmin{
+			SaveAs:  true,
+			Inlines: []admin.Inline{admin.TabularInline[Section, SectionedPost](admin.InlineModelAdmin{})},
+		})
+		admin.Register[SectionedPost](site, admin.ModelAdmin{})
+	})
+	env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+	s1 := mustCreate(t, db, &Section{Name: "Test section"})
+	posts := make([]*SectionedPost, 3)
+	for i, title := range []string{"", "Oldest", "Newest"} {
+		p := &SectionedPost{Title: title}
+		p.Section.SetPK(s1.ID)
+		posts[i] = mustCreate(t, db, p)
+	}
+	data := url.Values{
+		"name":                            {"Test section"},
+		"sectionedpost_set-TOTAL_FORMS":   {"6"},
+		"sectionedpost_set-INITIAL_FORMS": {"3"},
+		"sectionedpost_set-MAX_NUM_FORMS": {"0"},
+		"sectionedpost_set-0-id":          {fmt.Sprint(posts[0].ID)},
+		"sectionedpost_set-0-title":       {"Norske bostaver æøå skaper problemer"},
+		"sectionedpost_set-0-section":     {fmt.Sprint(s1.ID)},
+		"sectionedpost_set-1-id":          {fmt.Sprint(posts[1].ID)},
+		"sectionedpost_set-1-title":       {"Need a title."},
+		"sectionedpost_set-2-id":          {fmt.Sprint(posts[2].ID)},
+		"sectionedpost_set-2-title":       {"Need a title."},
+	}
+	for i := 3; i < 6; i++ {
+		data.Set(fmt.Sprintf("sectionedpost_set-%d-id", i), "")
+		data.Set(fmt.Sprintf("sectionedpost_set-%d-title", i), "")
+	}
+	return env, s1, data
+}
+
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_edit_save_as
+func TestEditSaveAs(t *testing.T) {
+	models := append(adminViewsModels(), djangotest.App("blog", &SectionedPost{}))
+	djangotest.EachDB(t, models, func(t *testing.T, db *orm.DB) {
+		env, s1, postData := saveAsSectionEnv(t, db)
+		postData.Set("_saveasnew", "Save+as+new")
+		for i := 1; i <= 5; i++ {
+			postData.Set(fmt.Sprintf("sectionedpost_set-%d-section", i), "1")
+		}
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_views_section_change", s1.ID), postData)
+		djangotest.AssertStatus(t, resp, http.StatusFound)
+	})
+}
+
+// Should be able to "Save as new" while also deleting an inline.
+//
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_edit_save_as_delete_inline
+func TestEditSaveAsDeleteInline(t *testing.T) {
+	models := append(adminViewsModels(), djangotest.App("blog", &SectionedPost{}))
+	djangotest.EachDB(t, models, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		env, s1, postData := saveAsSectionEnv(t, db)
+		postData.Set("_saveasnew", "Save+as+new")
+		postData.Set("sectionedpost_set-1-section", "1")
+		postData.Set("sectionedpost_set-2-section", "1")
+		postData.Set("sectionedpost_set-2-DELETE", "1")
+		postData.Set("sectionedpost_set-3-section", "1")
+		resp := env.client.Post(mustReverse(t, env.router, "admin:admin_views_section_change", s1.ID), postData)
+		djangotest.AssertStatus(t, resp, http.StatusFound)
+		// started with 3 articles, one was deleted.
+		latest, err := orm.Query[Section](db).OrderBy("-id").First(ctx)
+		if err != nil {
+			t.Fatalf("latest section: %v", err)
+		}
+		n, _ := orm.Query[SectionedPost](db).Filter("section", latest.ID).Count(ctx)
+		djangotest.AssertEqual(t, n, int64(2))
+	})
+}
+
+// The admin URLs take an integer primary key, so Section stands in for
+// ModelWithStringPrimaryKey and the primary key needs no quoting.
+//
+// Ported from Django: tests/admin_views/tests.py::AdminViewStringPrimaryKeyTest.test_change_view_history_link
+func TestChangeViewHistoryLink(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[Section](site, admin.ModelAdmin{})
+		})
+		env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+		s := mustCreate(t, db, &Section{Name: "Test section"})
+		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_section_change", s.ID))
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		expectedLink := mustReverse(t, env.router, "admin:admin_views_section_history", s.ID)
+		djangotest.AssertContains(t, resp, fmt.Sprintf(`<a href="%s" class="historylink"`, expectedLink))
+	})
+}
+
+// No Django test exists: tests/admin_views registers admins with save_on_top
+// but checks the buttons above the form only in Selenium tests. The test
+// checks that SaveOnTop renders the submit row above the form as well, and
+// that the add page has no History link.
+func TestSaveOnTopRendersSubmitRowTwice(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[Section](site, admin.ModelAdmin{SaveOnTop: true})
+			admin.Register[Actor](site, admin.ModelAdmin{})
+		})
+		env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
+		s := mustCreate(t, db, &Section{Name: "Test section"})
+		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_views_section_change", s.ID))
+		djangotest.AssertContains(t, resp, `<div class="submit-row">`, djangotest.Count(2))
+		resp = env.client.Get(mustReverse(t, env.router, "admin:admin_views_section_add"))
+		djangotest.AssertContains(t, resp, `<div class="submit-row">`, djangotest.Count(2))
+		djangotest.AssertNotContains(t, resp, `class="historylink"`)
+		resp = env.client.Get(mustReverse(t, env.router, "admin:admin_views_actor_add"))
+		djangotest.AssertContains(t, resp, `<div class="submit-row">`, djangotest.Count(1))
+	})
+}

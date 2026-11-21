@@ -1,0 +1,10 @@
+<div class="submit-row">
+{% block submit_row %}
+{% if show_save %}<input type="submit" value="Save" class="default" name="_save">{% endif %}
+{% if show_save_as_new %}<input type="submit" value="Save as new" name="_saveasnew">{% endif %}
+{% if show_save_and_add_another %}<input type="submit" value="Save and add another" name="_addanother">{% endif %}
+{% if show_save_and_continue %}<input type="submit" value="{% if has_change_permission %}Save and continue editing{% else %}Save and view{% endif %}" name="_continue">{% endif %}
+{% if show_close %}<a role="button" href="{{ changelist_url }}" class="closelink">Close</a>{% endif %}
+{% if show_delete_link and delete_url %}<a role="button" href="{{ delete_url }}" class="deletelink">Delete</a>{% endif %}
+{% endblock %}
+</div>

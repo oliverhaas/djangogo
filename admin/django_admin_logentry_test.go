@@ -584,6 +584,8 @@ func TestHookGetLogEntries(t *testing.T) {
 // FIXME-PORT: tests/admin_views/tests.py::AdminViewStringPrimaryKeyTest.test_get_history_view
 // and the other tests of the class need a model with a string primary key,
 // which the admin does not support: its URLs take an integer primary key.
+// TestChangeViewHistoryLink ports test_change_view_history_link with an
+// integer primary key.
 
 // No Go counterpart: tests/admin_views/tests.py::AdminViewBasicTest.test_history_view_custom_qs
 // checks that the history view uses ModelAdmin.get_queryset() instead of a
