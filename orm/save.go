@@ -324,6 +324,14 @@ func applyDefaults(v reflect.Value, fields []*Field) {
 	}
 }
 
+// ApplyDefaults sets every field of obj, a *T of m, that carries a default=
+// and holds its zero value to the default, the values Django's Model() gives
+// a new instance. Create does this itself; the admin calls it to show the
+// read-only fields of an unsaved object.
+func (m *Model) ApplyDefaults(obj any) {
+	applyDefaults(reflect.ValueOf(obj).Elem(), m.fields)
+}
+
 // setDefaultValue assigns a parsed default value onto a struct field, matching
 // the field's Go kind. Unhandled kinds leave the field untouched.
 func setDefaultValue(fv reflect.Value, def any) {

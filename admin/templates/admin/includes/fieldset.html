@@ -1,0 +1,43 @@
+<fieldset class="module aligned {{ fieldset.classes }}"{% if fieldset.name %} aria-labelledby="{{ prefix }}-{{ id_prefix }}-{{ id_suffix }}-heading"{% endif %}>
+    {% if fieldset.name %}
+        {% if fieldset.is_collapsible %}<details><summary>{% endif %}
+        <h{{ heading_level|default:2 }} id="{{ prefix }}-{{ id_prefix }}-{{ id_suffix }}-heading" class="fieldset-heading">{{ fieldset.name }}</h{{ heading_level|default:2 }}>
+        {% if fieldset.is_collapsible %}</summary>{% endif %}
+    {% endif %}
+    {% if fieldset.description %}
+        <div class="description">{{ fieldset.description }}</div>
+    {% endif %}
+    {% for line in fieldset.lines %}
+        <div class="form-row{% if line.multi %} flex-container form-multiline{% endif %}{% if not line.has_visible_field %} hidden{% endif %}{% for field in line.items %}{% if field.name %} field-{{ field.name }}{% endif %}{% endfor %}">
+            {% for field in line.items %}
+                {% if field.is_fieldset %}<fieldset{% if field.help_text %} aria-describedby="{{ field.id_for_label }}_helptext"{% endif %}>{{ field.label_tag }}{% endif %}
+                <div class="flex-container{% if field.errors_class %} errors{% endif %}{% if line.multi %} fieldBox{% if field.name %} field-{{ field.name }}{% endif %}{% if field.is_hidden %} hidden{% endif %}{% endif %}{% if field.is_checkbox %} checkbox-row{% endif %}">
+                    {% if field.is_checkbox %}
+                        <div class="checkbox">
+                        {{ field.html }}
+                        {% if not field.is_fieldset %}{{ field.label_tag }}{% endif %}
+                        </div>
+                    {% else %}
+                        {% if not field.is_fieldset %}{{ field.label_tag }}{% endif %}
+                    {% endif %}
+                    {% if field.help_text %}
+                        <div class="help{% if field.is_hidden %} hidden{% endif %}"{% if field.id_for_label %} id="{{ field.id_for_label }}_helptext"{% endif %}>
+                            <div>{{ field.help_text }}</div>
+                        </div>
+                    {% endif %}
+                    {% if not line.multi %}{{ line.errors }}{% endif %}
+                    {% if line.multi and not field.is_readonly %}{{ field.errors }}{% endif %}
+                        {% if not field.is_checkbox %}
+                        {% if field.is_readonly %}
+                            <div class="readonly">{{ field.contents }}</div>
+                        {% else %}
+                            {{ field.html }}
+                        {% endif %}
+                    {% endif %}
+                </div>
+                {% if field.is_fieldset %}</fieldset>{% endif %}
+            {% endfor %}
+        </div>
+    {% endfor %}
+    {% if fieldset.name and fieldset.is_collapsible %}</details>{% endif %}
+</fieldset>

@@ -198,16 +198,18 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `ModelChoiceField` and `ModelMultipleChoiceField` have no `to_field_name` or
   `label_from_instance`, and they load their options once per form, where
   Django loads them on each render.
-- **Admin:** no inlines, `fieldsets`, `list_editable`, `date_hierarchy` or
-  facets, no history (`LogEntry`) and no admin for users and groups. A foreign
-  key renders as a `<select>` of the whole related table, with no raw-id or
-  autocomplete widget. The admin ships no JavaScript: a field in
-  `FilterHorizontal` or `FilterVertical` stays a plain `<select multiple>`.
-  The system checks cover `FilterHorizontal`, `FilterVertical` and
-  `ListDisplay` only.
-  `ReadonlyFields` are left out of the change form instead of shown as
-  read-only values. A search field with `@` uses `icontains`, not full-text
-  search.
+- **Admin:** no inlines, `list_editable`, `date_hierarchy` or facets, no
+  history (`LogEntry`) and no admin for users and groups. A foreign key renders
+  as a `<select>` of the whole related table, with no raw-id or autocomplete
+  widget. The admin ships no JavaScript: a field in `FilterHorizontal` or
+  `FilterVertical` stays a plain `<select multiple>`. There is no custom form
+  class:
+  `FormOptions` adds fields and options to the model form, and its exclusions
+  add to `ExcludeFields` instead of being overridden by it. A read-only field
+  shows a model field or a `DisplayColumns` value, not a model method. The
+  system checks cover `Fields`, `Fieldsets`, `ExcludeFields`,
+  `FilterHorizontal`, `FilterVertical`, `ReadonlyFields` and `ListDisplay`
+  only. A search field with `@` uses `icontains`, not full-text search.
 - **Auth:** no custom user model. The login, logout and password change views
   are mounted by hand: there is no counterpart of `django.contrib.auth.urls`. No
   `LoginRequiredMiddleware`. A user row that Django wrote with a NULL

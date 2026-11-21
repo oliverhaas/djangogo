@@ -91,7 +91,13 @@ func setupPermFixture(t *testing.T, db *orm.DB, env *adminTestEnv) *permUsers {
 // registerPermModels registers the models used by AdminViewPermissionsTest,
 // including RowLevelChangePermissionModel with per-object permission hooks.
 func registerPermModels(site *admin.AdminSite) {
-	admin.Register[Article](site, admin.ModelAdmin{})
+	// The fieldsets of ArticleAdmin in tests/admin_views/admin.py over the
+	// fields of the Go Article.
+	admin.Register[Article](site, admin.ModelAdmin{Fieldsets: []admin.Fieldset{
+		{Name: "Some fields", Classes: []string{"collapse"}, Fields: []any{"title"}},
+		{Name: "Some other fields", Classes: []string{"wide"}, Fields: []any{"views"}},
+		{Name: "이름", Fields: []any{"published"}},
+	}})
 	admin.Register[Section](site, admin.ModelAdmin{})
 	admin.Register[RowLevelChangePermissionModel](site, admin.ModelAdmin{
 		ReadonlyFields: []string{"CanChange", "CanView"},
@@ -374,6 +380,10 @@ func TestAddViewPermissions(t *testing.T) {
 		djangotest.AssertEqual(t, ctxVal(t, resp, "title"), any("Add article"))
 		djangotest.AssertContains(t, resp, "<title>Add article | Django site admin</title>")
 		djangotest.AssertContains(t, resp, `<input type="submit" value="Save and view" name="_continue">`)
+		djangotest.AssertContains(t, resp, `<h2 id="fieldset-0-0-heading" class="fieldset-heading">Some fields</h2>`)
+		djangotest.AssertContains(t, resp,
+			`<h2 id="fieldset-0-1-heading" class="fieldset-heading">Some other fields</h2>`)
+		djangotest.AssertContains(t, resp, `<h2 id="fieldset-0-2-heading" class="fieldset-heading">이름</h2>`)
 
 		post := env.client.Post(addURL, addData)
 		djangotest.AssertStatus(t, post, http.StatusFound)
@@ -863,7 +873,7 @@ type SectionedPost struct {
 func (p SectionedPost) String() string { return p.Title }
 
 // TestViewOnlyChangeFormRendersReadonlyValuesAndFK verifies that a view-only
-// user sees scalar and FK values in <div class="readonly"> elements without
+// user sees scalar values and FK links in <div class="readonly"> elements without
 // editable inputs or save/delete buttons, and sees the Delete link once delete
 // permission is also granted.
 func TestViewOnlyChangeFormRendersReadonlyValuesAndFK(t *testing.T) {
@@ -892,7 +902,10 @@ func TestViewOnlyChangeFormRendersReadonlyValuesAndFK(t *testing.T) {
 		resp := env.client.Get(changeURL)
 		djangotest.AssertStatus(t, resp, http.StatusOK)
 		djangotest.AssertContains(t, resp, `<div class="readonly">Read Only Entry</div>`)
-		djangotest.AssertContains(t, resp, `<div class="readonly">Tech</div>`)
+		// The related model has an admin, so the value links to its change
+		// page, as Django's AdminReadonlyField.get_admin_url.
+		secURL := mustReverse(t, env.router, "admin:admin_views_section_change", sec.ID)
+		djangotest.AssertContains(t, resp, `<div class="readonly"><a href="`+secURL+`">Tech</a></div>`)
 		djangotest.AssertNotContains(t, resp, `<select`)
 		djangotest.AssertNotContains(t, resp, `name="title"`)
 		djangotest.AssertNotContains(t, resp, `name="_save"`)

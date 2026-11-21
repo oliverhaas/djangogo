@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/oliverhaas/djangogo/orm"
+	"github.com/oliverhaas/djangogo/templates"
 )
 
 // resolvedColumn describes one column in a changelist's ListDisplay after
@@ -393,6 +394,12 @@ func formatDisplayValueHTML(val any, emptyVal string, boolean bool) string {
 		}
 		return html.EscapeString(strings.TrimSpace(s))
 	}
+	if s, ok := templates.Localize(val); ok {
+		if s == "" {
+			return html.EscapeString(emptyVal)
+		}
+		return html.EscapeString(s)
+	}
 	return html.EscapeString(fmt.Sprint(val))
 }
 
@@ -450,37 +457,6 @@ func derefValue(v reflect.Value) (any, bool) {
 		return v.Elem().Interface(), false
 	}
 	return v.Interface(), false
-}
-
-// formatCell renders a single struct field value as a plain display string
-// (used by readonly fields on the change form).
-func formatCell(v reflect.Value) string {
-	if pk, ok := fkPK(v); ok {
-		return fmt.Sprint(pk)
-	}
-	val, isNil := derefValue(v)
-	if isNil {
-		return ""
-	}
-	return fmt.Sprint(val)
-}
-
-// fkCellLabel renders a foreign-key cell as the related object's label, looked up
-// by primary key in labels (a pk-string to label map for the related model). An
-// empty relation shows nothing; a key absent from labels falls back to the raw id.
-func fkCellLabel(v reflect.Value, labels map[string]string) string {
-	pk, ok := fkPK(v)
-	if !ok {
-		return formatCell(v)
-	}
-	if pk == 0 {
-		return ""
-	}
-	key := fmt.Sprint(pk)
-	if label, ok := labels[key]; ok {
-		return label
-	}
-	return key
 }
 
 // pkOf returns the primary-key value of the struct addressed by elem for model

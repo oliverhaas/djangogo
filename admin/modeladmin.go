@@ -8,6 +8,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -166,6 +167,21 @@ type Action struct {
 	Handler func(w http.ResponseWriter, r *http.Request, act *ActionContext) (handled bool, err error)
 }
 
+// Fieldset is one group of fields on the add and change forms, an entry of
+// Django's ModelAdmin.fieldsets.
+type Fieldset struct {
+	// Name is the heading of the group; empty shows none.
+	Name string
+	// Fields lists the field names: each entry is a name or a []string of
+	// names shown on one line.
+	Fields []any
+	// Classes are CSS classes of the group: "collapse" folds it while none
+	// of its fields has an error, "wide" gives it more room.
+	Classes []string
+	// Description is shown under the heading. It is HTML and not escaped.
+	Description string
+}
+
 // DeletedObjects holds the summary and display items rendered on the
 // delete_selected confirmation page (returned by ModelAdmin.GetDeletedObjects).
 type DeletedObjects struct {
@@ -232,11 +248,26 @@ type ModelAdmin struct {
 	// PreserveFilters preserves changelist query parameters across edits when
 	// true (default true when nil).
 	PreserveFilters *bool
-	// ReadonlyFields names fields the change form displays as read-only values
-	// and omits from editable inputs (preserving their stored values on save).
+	// ReadonlyFields names what the add and change forms show as values in
+	// place of inputs (Django's readonly_fields): model fields, whose stored
+	// values a save keeps, and keys of DisplayColumns.
 	ReadonlyFields []string
 	// ExcludeFields names fields omitted from the add and change forms.
 	ExcludeFields []string
+	// FormOptions customize the model form of the add and change pages, the
+	// counterpart of a ModelAdmin.form with Meta options and declared
+	// fields: forms.WithWidget, WithLabel, WithHelpText, WithFormField and
+	// the like. They apply after the admin's own widgets, so they win. The
+	// fields of the form come from Fields, Fieldsets and ExcludeFields, not
+	// from a forms.WithFields here.
+	FormOptions []forms.ModelFormOption
+	// Fields lays out the add and change forms (Django's fields). Each entry
+	// is a field name or a []string of names shown on one line. Empty shows
+	// the form fields in model order, then the ReadonlyFields.
+	Fields []any
+	// Fieldsets groups the add and change forms into fieldsets (Django's
+	// fieldsets). Set Fields or Fieldsets, not both.
+	Fieldsets []Fieldset
 	// FilterHorizontal names many-to-many fields whose list is a
 	// FilteredSelectMultiple with the two lists side by side (Django's
 	// filter_horizontal).
@@ -273,6 +304,15 @@ type ModelAdmin struct {
 	GetSearchFields func(r *http.Request) []string
 	// GetOrdering dynamically returns the default ordering for r.
 	GetOrdering func(r *http.Request) []string
+	// GetFields returns the layout of the form for r and obj, nil on the add
+	// page (Django's get_fields).
+	GetFields func(r *http.Request, obj any) []any
+	// GetFieldsets returns the fieldsets of the form for r and obj, nil on
+	// the add page (Django's get_fieldsets).
+	GetFieldsets func(r *http.Request, obj any) []Fieldset
+	// GetReadonlyFields returns the read-only fields for r and obj, nil on
+	// the add page (Django's get_readonly_fields).
+	GetReadonlyFields func(r *http.Request, obj any) []string
 	// GetQuerysetFilter returns an extra orm.Cond applied to the base
 	// changelist queryset for r (the Go analog of overriding ModelAdmin.get_queryset).
 	GetQuerysetFilter func(r *http.Request) orm.Cond

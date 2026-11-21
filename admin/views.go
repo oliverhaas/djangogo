@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -104,38 +103,33 @@ func (s *AdminSite) makeOldChangeRedirect(e *entry) http.HandlerFunc {
 	}
 }
 
-// loadFKLabels pre-loads related object labels for each foreign-key field in
-// fields, keyed by index into fields.
-func (s *AdminSite) loadFKLabels(ctx context.Context, fields []*orm.Field) map[int]map[string]string {
-	fkLabels := make(map[int]map[string]string)
-	for j, f := range fields {
-		if f.Rel == nil || f.Rel.Target == nil || f.Rel.Kind == orm.RelM2M {
-			continue
-		}
-		opts, err := orm.LabeledRowsOrdered(ctx, s.db, f.Rel.Target, nil, nil)
-		if err != nil {
-			continue
-		}
-		labels := make(map[string]string, len(opts))
-		for _, o := range opts {
-			labels[o[0]] = o[1]
-		}
-		fkLabels[j] = labels
+// changeForm returns the admin form of the add and change views for r and
+// obj, Django's ModelAdmin.get_form and helpers.AdminForm: the fieldsets, the
+// read-only fields, and the model form of the other fields of the layout with
+// the widgets and help texts of formfield_for_manytomany and the options of
+// its relations. obj is nil on the add page; the read-only fields then show a
+// new object with the field defaults. A user who cannot change obj sees every
+// field of the layout read-only. An unknown or non-editable name in the
+// layout is the Err of the form.
+func (s *AdminSite) changeForm(r *http.Request, e *entry, obj any, canChange bool) *adminForm {
+	sets := s.fieldsets(r, e, obj)
+	fields := formNames(e.model, flattenFieldsets(sets))
+	readonly := e.readonlyFields(r, obj)
+	exclude := slices.Concat(s.excluded(e), readonly)
+	if !canChange {
+		exclude = append(exclude, fields...)
+		readonly = fields
 	}
-	return fkLabels
-}
-
-// formFor builds the editable form for an entry: the model form minus the
-// admin's ExcludeFields and ReadonlyFields and the many-to-many fields with an
-// explicit through model (the auto primary key is already dropped by
-// forms.FromModel), with the widgets and help texts of Django's
-// formfield_for_manytomany. Each relation's list is then filled with the
-// related model's rows.
-func (s *AdminSite) formFor(r *http.Request, e *entry) *forms.Form {
-	opts := append([]forms.ModelFormOption{forms.WithExclude(s.excluded(e)...)}, manyToManyOptions(e)...)
+	opts := slices.Concat([]forms.ModelFormOption{forms.WithFields(fields...), forms.WithExclude(exclude...)},
+		manyToManyOptions(e), e.admin.FormOptions)
 	form := forms.FromModel(e.model, opts...)
 	s.populateChoices(r, form, e)
-	return form
+	shown := obj
+	if shown == nil {
+		shown = e.ops.newPtr()
+		e.model.ApplyDefaults(shown)
+	}
+	return &adminForm{form: form, sets: sets, readonly: readonly, obj: shown}
 }
 
 // multipleSelectHint is the help text Django's admin adds to a <select
@@ -175,13 +169,10 @@ func namesField(names []string, f *orm.Field) bool {
 }
 
 // excluded returns the field names the admin omits from a model's form: the
-// configured ExcludeFields, the ReadonlyFields and the many-to-many fields
-// with an explicit through model, which Django's formfield_for_manytomany
-// leaves out.
+// configured ExcludeFields and the many-to-many fields with an explicit
+// through model, which Django's formfield_for_manytomany leaves out.
 func (s *AdminSite) excluded(e *entry) []string {
-	out := make([]string, 0, len(e.admin.ExcludeFields)+len(e.admin.ReadonlyFields))
-	out = append(out, e.admin.ExcludeFields...)
-	out = append(out, e.admin.ReadonlyFields...)
+	out := formNames(e.model, e.admin.ExcludeFields)
 	for _, mf := range e.model.ManyToMany() {
 		if mf.Rel != nil && !mf.Rel.AutoCreated {
 			out = append(out, mf.Attr)
@@ -284,13 +275,19 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 	}
 	singular, _ := modelVerboseNames(e.model)
 	title := "Add " + singular
+	af := s.changeForm(r, e, nil, true)
+	if err := af.form.Err(); err != nil {
+		http.Error(w, "invalid admin form: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	if r.Method == http.MethodPost {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		form := s.formFor(r, e).Bind(r.PostForm)
+		af.form = af.form.Bind(r.PostForm)
+		form := af.form
 		if form.IsValid() {
 			obj := e.ops.newPtr()
 			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
@@ -327,11 +324,8 @@ func (s *AdminSite) add(w http.ResponseWriter, r *http.Request, e *entry) {
 			s.redirectPostSave(w, r, e)
 			return
 		}
-		s.renderChangeForm(w, r, e, title, nil, form, true, true)
-		return
 	}
-
-	s.renderChangeForm(w, r, e, title, nil, s.formFor(r, e), true, true)
+	s.renderChangeForm(w, r, e, title, nil, af, true, true)
 }
 
 // change handles the change/view form: checks view or change permission on the
@@ -356,17 +350,23 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 
 	canChange := e.hasChangePermission(s, r, obj)
 	singular, _ := modelVerboseNames(e.model)
+	if r.Method == http.MethodPost && !canChange {
+		forbidden(w)
+		return
+	}
+	af := s.changeForm(r, e, obj, canChange)
+	if err := af.form.Err(); err != nil {
+		http.Error(w, "invalid admin form: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	if r.Method == http.MethodPost {
-		if !canChange {
-			forbidden(w)
-			return
-		}
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		form := s.formFor(r, e).Bind(r.PostForm)
+		af.form = af.form.Bind(r.PostForm)
+		form := af.form
 		if form.IsValid() {
 			if err := forms.PopulateStruct(e.model, form.Cleaned(), obj); err != nil {
 				http.Error(w, "failed to populate object", http.StatusInternalServerError)
@@ -398,22 +398,20 @@ func (s *AdminSite) change(w http.ResponseWriter, r *http.Request, e *entry) {
 			s.redirectPostSave(w, r, e)
 			return
 		}
-		s.renderChangeForm(w, r, e, "Change "+singular, obj, form, false, true)
+		s.renderChangeForm(w, r, e, "Change "+singular, obj, af, false, true)
 		return
 	}
 
 	if !canChange {
-		s.renderChangeForm(w, r, e, "View "+singular, obj, nil, false, false)
+		s.renderChangeForm(w, r, e, "View "+singular, obj, af, false, false)
 		return
 	}
-
-	form := s.formFor(r, e)
-	form.Initial = forms.InitialFromStruct(e.model, obj)
-	if err := s.manyInitial(r.Context(), form, e, obj); err != nil {
+	af.form.Initial = forms.InitialFromStruct(e.model, obj)
+	if err := s.manyInitial(r.Context(), af.form, e, obj); err != nil {
 		http.Error(w, "failed to load row", http.StatusInternalServerError)
 		return
 	}
-	s.renderChangeForm(w, r, e, "Change "+singular, obj, form, false, true)
+	s.renderChangeForm(w, r, e, "Change "+singular, obj, af, false, true)
 }
 
 // delete handles the delete confirmation: checks delete permission on the
@@ -503,14 +501,16 @@ func (s *AdminSite) history(w http.ResponseWriter, r *http.Request, e *entry) {
 }
 
 // renderChangeForm renders admin/change_form.html for add, change, or
-// view-only change requests.
+// view-only change requests. errors in the context is the number of fields
+// with errors, counting the errors of the whole form as one, as the length of
+// Django's AdminErrorList.
 func (s *AdminSite) renderChangeForm(
 	w http.ResponseWriter,
 	r *http.Request,
 	e *entry,
 	title string,
 	obj any,
-	form *forms.Form,
+	af *adminForm,
 	isAdd bool,
 	canChange bool,
 ) {
@@ -546,24 +546,16 @@ func (s *AdminSite) renderChangeForm(
 	ctx["has_change_permission"] = hasObjChange
 	ctx["has_delete_permission"] = hasObjDelete
 
-	if form != nil {
-		ctx["form"] = form
-		ctx["form_html"] = form.Render()
-		errCount := countFormErrors(form)
-		ctx["error_count"] = errCount
-		ctx["has_errors"] = errCount > 0
-	} else {
-		ctx["form_html"] = ""
-		ctx["error_count"] = 0
-		ctx["has_errors"] = false
+	ctx["form"] = af.form
+	ctx["adminform"] = s.fieldsetContext(r.Context(), e, af)
+	ctx["errors"] = 0
+	if af.form.IsBound() {
+		ctx["errors"] = af.form.Errors().Len()
+		ctx["non_field_errors"] = templates.MarkSafe(af.form.NonFieldErrors().AsUL())
 	}
-
-	if obj != nil {
-		ctx["readonly_fields"] = s.readonlyFieldsFor(r.Context(), e, obj, !canChange)
-		if hasObjDelete {
-			pk := pkOf(reflect.ValueOf(obj).Elem(), e)
-			ctx["delete_url"] = s.deleteURL(e, pk)
-		}
+	if hasObjDelete {
+		pk := pkOf(reflect.ValueOf(obj).Elem(), e)
+		ctx["delete_url"] = s.deleteURL(e, pk)
 	}
 
 	// Submit-row button visibility mirrors Django's submit_row template tag.
@@ -575,69 +567,6 @@ func (s *AdminSite) renderChangeForm(
 	ctx["show_delete_link"] = hasObjDelete
 
 	s.render(w, r, "admin/change_form.html", ctx)
-}
-
-// readonlyFieldsFor returns display entries for fields rendered read-only on
-// the change form: every non-excluded non-PK field when allReadonly is true
-// (view-only user), or only e.admin.ReadonlyFields otherwise. A many-to-many
-// field shows the labels of its related rows separated by commas, as Django's
-// AdminReadonlyField.contents.
-func (s *AdminSite) readonlyFieldsFor(ctx context.Context, e *entry, obj any, allReadonly bool) []map[string]any {
-	var fields []*orm.Field
-	pkField := e.model.PrimaryKey()
-	for _, f := range e.model.Fields() {
-		if pkField != nil && f.Name == pkField.Name && f.PrimaryKey && !f.Editable {
-			continue
-		}
-		if pkField != nil && f.Name == pkField.Name && f.Kind == orm.KindAuto {
-			continue
-		}
-		if namesField(e.admin.ExcludeFields, f) {
-			continue
-		}
-		if !allReadonly && !namesField(e.admin.ReadonlyFields, f) {
-			continue
-		}
-		fields = append(fields, f)
-	}
-	for _, f := range e.model.ManyToMany() {
-		// A view-only form shows the fields of the change form, which has no
-		// many-to-many field with an explicit through model.
-		if namesField(e.admin.ExcludeFields, f) || f.Rel == nil || (allReadonly && !f.Rel.AutoCreated) {
-			continue
-		}
-		if !allReadonly && !namesField(e.admin.ReadonlyFields, f) {
-			continue
-		}
-		fields = append(fields, f)
-	}
-	if len(fields) == 0 {
-		return nil
-	}
-	slices.SortStableFunc(fields, func(a, b *orm.Field) int { return cmp.Compare(a.Index, b.Index) })
-	fkLabels := s.loadFKLabels(ctx, fields)
-	elem := reflect.ValueOf(obj).Elem()
-	out := make([]map[string]any, len(fields))
-	for i, f := range fields {
-		val := ""
-		switch {
-		case f.Rel != nil && f.Rel.Kind == orm.RelM2M:
-			val = s.manyLabels(ctx, obj, f)
-		case f.Rel != nil:
-			val = fkCellLabel(elem.Field(f.Index), fkLabels[i])
-		default:
-			val = formatCell(elem.Field(f.Index))
-		}
-		if val == "" {
-			val = emptyValueDisplay
-		}
-		out[i] = map[string]any{
-			"name":     f.Attr,
-			"label":    fieldLabel(f),
-			"contents": val,
-		}
-	}
-	return out
 }
 
 // manyLabels returns the labels of the rows obj is related to through the
@@ -657,18 +586,6 @@ func (s *AdminSite) manyLabels(ctx context.Context, obj any, f *orm.Field) strin
 		labels[i] = row[1]
 	}
 	return strings.Join(labels, ", ")
-}
-
-// countFormErrors returns the total number of error entries on a bound form.
-func countFormErrors(form *forms.Form) int {
-	if form == nil || !form.IsBound() {
-		return 0
-	}
-	n := form.NonFieldErrors().Len()
-	for _, fld := range form.Fields() {
-		n += fld.Errors().Len()
-	}
-	return n
 }
 
 // redirectPostSave redirects after a successful add or change save: to the

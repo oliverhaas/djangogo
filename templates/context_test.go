@@ -302,3 +302,27 @@ func TestRecorderKeepsCallerValues(t *testing.T) {
 		t.Errorf("recorded post = %#v, want the pointer the view passed", got)
 	}
 }
+
+// TestMarkSafeEmptyIsFalseInMap checks that an empty safe string is false in
+// {% if %} at the top of the context and inside a map, as Django's
+// mark_safe("") is. No Django test covers it: pongo2 sees a safe value in a map
+// as a pointer, which is always true.
+func TestMarkSafeEmptyIsFalseInMap(t *testing.T) {
+	e := templates.New()
+	ctx := map[string]any{
+		"top":  templates.MarkSafe(""),
+		"full": templates.MarkSafe("<b>x</b>"),
+		"m":    map[string]any{"empty": templates.MarkSafe(""), "full": templates.MarkSafe("<b>x</b>")},
+		"list": []any{templates.MarkSafe("")},
+	}
+	src := `{% if top %}T{% else %}F{% endif %}{% if m.empty %}T{% else %}F{% endif %}` +
+		`{% for x in list %}{% if x %}T{% else %}F{% endif %}{% endfor %}` +
+		`{% if m.full %}{{ m.full }}{% endif %}{{ full }}`
+	got, err := e.RenderString(src, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "FFF<b>x</b><b>x</b>"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

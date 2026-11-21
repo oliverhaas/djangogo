@@ -213,6 +213,19 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   including `SimpleListFilter`. Bulk actions: `delete_selected` with Django's
   confirmation page, custom actions on `ModelAdmin.Actions` or
   `AdminSite.AddAction`, and selection across pages.
+- Admin: `Fields` and `Fieldsets` lay out the add and change forms with
+  Django's markup: several fields on one line, named fieldsets with a
+  description, and the `collapse` and `wide` classes. `ReadonlyFields` shows
+  model fields and `DisplayColumns` values in the form, and a foreign key as a
+  link to the change page of the related object. `FormOptions` adds form
+  fields, widgets and labels to the model form of the admin. `GetFields`,
+  `GetFieldsets` and `GetReadonlyFields` choose them per request and object.
+  The `check` command also reports Django's errors for `Fields`, `Fieldsets`,
+  `ExcludeFields` and `ReadonlyFields` (`admin.E005`, `E006`, `E011`, `E012`,
+  `E013`, `E015` and `E035`).
+- `templates.Localize` formats a `time.Time`, `orm.Date` or `orm.Time` as a
+  template prints it, and `orm.Model.ApplyDefaults` sets the field defaults on
+  a new object.
 - The fidelity harness also compares query SQL (86 cases) and migration SQL (29
   operations) with Django 6.0.3 on SQLite and PostgreSQL, and
   `go generate ./fidelity/...` regenerates the golden files from Django.
@@ -285,6 +298,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `timesince` filters accept `orm.Date` and `orm.Time`.
 - `{% csrf_token %}` renders nothing when the request has no token, and escapes
   the token as Django does.
+- Admin: `ReadonlyFields` were left out of the change form. They now show as
+  values in the form. Dates and times in the changelist show as Django shows
+  them (`Jan. 1, 2000`), not in Go's format. A form with errors puts "Error: "
+  in the page title, also on the login and password change pages, and the
+  error note counts the fields with errors as Django does. Templates that
+  override `admin/change_form.html` and read `form_html`, `error_count`,
+  `has_errors` or `readonly_fields` must use `adminform` and `errors`.
 - A command error prints as `CommandError: ...` without a stack trace. Exit
   code 1 is a command error and 2 a usage error. The hints of `migrate` and
   `makemigrations` name the program that runs. `startproject` and `startapp`
@@ -317,6 +337,8 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   of `contains`, `startswith` or `endswith` matched any character; LIKE
   wildcards are now escaped.
 - A template that made pongo2 panic now returns an error.
+- `templates.MarkSafe("")` in a map or a slice was true in `{% if %}`. It is
+  now false, as an empty string is.
 - A savepoint that was rolled back was not released. It is now released.
 - On PostgreSQL, a larger `max_length` rewrote the whole table: `AlterField`
   now adds `USING` only when the base type changes. `RemoveField` no longer

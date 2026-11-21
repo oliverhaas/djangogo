@@ -28,6 +28,23 @@ var apMonths = [...]string{
 	"Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec.",
 }
 
+// Localize returns a date or time value as a template prints it, Django's
+// formats.localize for the English locale: a time.Time in DATETIME_FORMAT
+// ("Dec. 25, 2024, 3:30 p.m."), an orm.Date in DATE_FORMAT ("Dec. 25, 2024",
+// "" for the zero Date) and an orm.Time in TIME_FORMAT ("3:30 p.m."). ok is
+// false for any other value.
+func Localize(v any) (s string, ok bool) {
+	switch x := v.(type) {
+	case time.Time:
+		return templateTime{x}.String(), true
+	case orm.Date:
+		return templateDate{x}.String(), true
+	case orm.Time:
+		return templateTimeOfDay{x}.String(), true
+	}
+	return "", false
+}
+
 // templateTime is the form a time.Time has inside a render. Printed bare it
 // reads like Django prints a datetime ("Dec. 25, 2024, 3:30 p.m."), where Go's
 // own String gives "2024-12-25 15:30:00 +0000 UTC". The methods of time.Time

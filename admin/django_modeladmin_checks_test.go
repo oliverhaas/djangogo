@@ -13,8 +13,10 @@ import (
 
 // Band stands in for tests/modeladmin/models.py::Band.
 type Band struct {
-	ID   int64
-	Name string `orm:"max_length=100"`
+	ID       int64
+	Name     string `orm:"max_length=100"`
+	Bio      string `orm:"type=text"`
+	SignDate orm.Date
 }
 
 // String returns the band name.
@@ -93,17 +95,27 @@ func checkSite(t *testing.T, db *orm.DB, register func(site *admin.AdminSite)) *
 }
 
 // assertIsInvalid mirrors CheckTestCase.assertIsInvalid: the site reports
-// exactly one error, with the message and ID given, about the ModelAdmin of
-// model.
-func assertIsInvalid(t *testing.T, site *admin.AdminSite, model, msg, id string) {
+// exactly one error, with the message, ID and optional hint given, about the
+// ModelAdmin of model.
+func assertIsInvalid(t *testing.T, site *admin.AdminSite, model, msg, id string, hint ...string) {
 	t.Helper()
 	got := site.Check()
 	if len(got) != 1 {
 		t.Fatalf("Check() = %v, want one error %s %q", got, id, msg)
 	}
-	m := got[0]
-	if m.Level != checks.LevelError || m.Msg != msg || m.ID != id || m.Hint != "" {
-		t.Errorf("Check() = %+v, want error %s %q", m, id, msg)
+	assertCheckError(t, got[0], model, msg, id, hint...)
+}
+
+// assertCheckError asserts that m is an error with the message, ID and
+// optional hint given, about the ModelAdmin of model.
+func assertCheckError(t *testing.T, m checks.Message, model, msg, id string, hint ...string) {
+	t.Helper()
+	wantHint := ""
+	if len(hint) > 0 {
+		wantHint = hint[0]
+	}
+	if m.Level != checks.LevelError || m.Msg != msg || m.ID != id || m.Hint != wantHint {
+		t.Errorf("Check() = %+v, want error %s %q hint %q", m, id, msg, wantHint)
 	}
 	obj, ok := m.Obj.(interface{ Label() string })
 	if !ok || obj.Label() != "ModelAdmin of "+model {
@@ -268,5 +280,92 @@ func TestListDisplayCheck(t *testing.T) {
 			})
 			assertIsValid(t, site)
 		})
+	})
+}
+
+// Ported from Django: tests/modeladmin/test_checks.py::FieldsetsCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::FieldsetsCheckTests.test_missing_fields_key
+// Ported from Django: tests/modeladmin/test_checks.py::FieldsetsCheckTests.test_specified_both_fields_and_fieldsets
+// Ported from Django: tests/modeladmin/test_checks.py::FieldsetsCheckTests.test_duplicate_fields
+// Ported from Django: tests/modeladmin/test_checks.py::FieldsetsCheckTests.test_duplicate_fields_in_fieldsets
+// Ported from Django: tests/modeladmin/test_checks.py::FieldsetsCheckTests.test_fieldsets_with_custom_form_validation
+func TestFieldsetsCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		// FIXME-PORT: test_not_iterable (admin.E007), test_non_iterable_item
+		// (admin.E008), test_item_not_a_pair (admin.E009) and
+		// test_second_element_of_item_not_a_dict (admin.E010) have no Go
+		// counterpart: Fieldsets is a []Fieldset.
+		general := []admin.Fieldset{{Name: "General", Fields: []any{"name"}}}
+
+		t.Run("test_valid_case", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{Fieldsets: general})
+			})
+			assertIsValid(t, site)
+		})
+
+		t.Run("test_missing_fields_key", func(t *testing.T) {
+			// A Fieldset with nil Fields stands in for a fieldset without
+			// the "fields" key.
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{Fieldsets: []admin.Fieldset{{Name: "General"}}})
+			})
+			assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+				"The value of 'fieldsets[0][1]' must contain the key 'fields'.", "admin.E011")
+
+			site = checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{Fieldsets: general})
+			})
+			assertIsValid(t, site)
+		})
+
+		t.Run("test_specified_both_fields_and_fieldsets", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{Fieldsets: general, Fields: []any{"name"}})
+			})
+			assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+				"Both 'fieldsets' and 'fields' are specified.", "admin.E005")
+		})
+
+		t.Run("test_duplicate_fields", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{Fieldsets: []admin.Fieldset{
+					{Fields: []any{"name", "name"}},
+				}})
+			})
+			assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+				"There are duplicate field(s) in 'fieldsets[0][1]'.", "admin.E012", "Remove duplicates of 'name'.")
+		})
+
+		t.Run("test_duplicate_fields_in_fieldsets", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{Fieldsets: []admin.Fieldset{
+					{Fields: []any{"name"}},
+					{Fields: []any{"name"}},
+				}})
+			})
+			assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+				"There are duplicate field(s) in 'fieldsets[1][1]'.", "admin.E012", "Remove duplicates of 'name'.")
+		})
+
+		t.Run("test_fieldsets_with_custom_form_validation", func(t *testing.T) {
+			site := checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[Band](site, admin.ModelAdmin{Fieldsets: []admin.Fieldset{{Name: "Band", Fields: []any{"name"}}}})
+			})
+			assertIsValid(t, site)
+		})
+	})
+}
+
+// Ported from Django: tests/modeladmin/test_checks.py::FieldsCheckTests.test_duplicate_fields_in_fields
+func TestFieldsCheck(t *testing.T) {
+	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
+		// FIXME-PORT: test_inline (admin.E004) needs inlines, which the Go
+		// admin does not have yet.
+		site := checkSite(t, db, func(site *admin.AdminSite) {
+			admin.Register[ValidationTestModel](site, admin.ModelAdmin{Fields: []any{"name", "name"}})
+		})
+		assertIsInvalid(t, site, "modeladmin.ValidationTestModel",
+			"The value of 'fields' contains duplicate field(s).", "admin.E006", "Remove duplicates of 'name'.")
 	})
 }

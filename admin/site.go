@@ -34,7 +34,7 @@ const (
 // templateFS holds the admin's embedded pongo2 templates under templates/admin
 // and templates/registration.
 //
-//go:embed templates/admin/*.html templates/registration/*.html
+//go:embed templates/admin/*.html templates/admin/includes/*.html templates/registration/*.html
 var templateFS embed.FS
 
 // entryKey uniquely identifies a registered model within an AdminSite by app

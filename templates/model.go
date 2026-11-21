@@ -8,6 +8,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/flosch/pongo2/v6"
+
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -237,6 +239,14 @@ func (c converter) convert(v any, depth int) (any, bool) {
 		return c.fromModelMap(x, depth), true
 	case ContextValuer:
 		return c.value(x.TemplateValue(), depth+1), true
+	case *pongo2.Value:
+		// pongo2 treats a value it finds in a map or a slice as a pointer,
+		// so MarkSafe("") there would be true in {% if %}. An empty string
+		// needs no escaping and is false, as Django's mark_safe("") is.
+		if x != nil && x.IsString() && x.Len() == 0 {
+			return "", true
+		}
+		return v, false
 	case map[string]any:
 		return c.convertMap(x, depth)
 	}

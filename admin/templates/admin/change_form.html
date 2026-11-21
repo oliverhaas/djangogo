@@ -1,4 +1,5 @@
 {% extends "admin/base_site.html" %}
+{% block title %}{% if errors %}Error: {% endif %}{{ block.super }}{% endblock %}
 {% block bodyclass %}app-{{ app_label }} model-{{ model_name }} change-form{% endblock %}
 {% block breadcrumbs %}
 <ol class="breadcrumbs">
@@ -13,26 +14,15 @@
   <form method="post" action="{{ action }}" id="{{ model_name }}_form" novalidate>
     {% csrf_token %}
     <div>
-      {% if has_errors %}
-      <p class="errornote">{% if error_count == 1 %}Please correct the error below.{% else %}Please correct the errors below.{% endif %}</p>
+      {% if errors %}
+      <p class="errornote">
+      {% if errors == 1 %}Please correct the error below.{% else %}Please correct the errors below.{% endif %}
+      </p>
+      {{ non_field_errors }}
       {% endif %}
-      {% if form_html %}
-      <fieldset class="module aligned">
-        {{ form_html|safe }}
-      </fieldset>
-      {% endif %}
-      {% if readonly_fields %}
-      <fieldset class="module aligned">
-        {% for rf in readonly_fields %}
-        <div class="form-row field-{{ rf.name }}">
-          <div class="flex-container">
-            <label>{{ rf.label }}:</label>
-            <div class="readonly">{{ rf.contents }}</div>
-          </div>
-        </div>
-        {% endfor %}
-      </fieldset>
-      {% endif %}
+      {% for fieldset in adminform %}
+        {% include "admin/includes/fieldset.html" with heading_level=2 prefix="fieldset" id_prefix=0 id_suffix=forloop.counter0 %}
+      {% endfor %}
       <div class="submit-row">
         {% if show_save %}<input type="submit" value="Save" class="default" name="_save">{% endif %}
         {% if show_save_and_add_another %}<input type="submit" value="Save and add another" name="_addanother">{% endif %}
