@@ -81,6 +81,10 @@ func (q *query) clone() *query {
 	return &cp
 }
 
+// subquery implements subqueryer, so that a query can be the value of an
+// "in" lookup of another.
+func (q *query) subquery() *query { return q }
+
 // setErr records err unless an error is already recorded: the first error wins.
 func (q *query) setErr(err error) {
 	if q.err == nil {

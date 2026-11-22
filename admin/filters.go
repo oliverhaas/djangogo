@@ -101,14 +101,17 @@ func (fr *filterResult) conds() []orm.Cond {
 	return append(out, fr.otherConds...)
 }
 
-// lookupAllowed checks whether filtering by lookup (a query parameter key) is
-// permitted on e, matching Django's ModelAdmin.lookup_allowed.
-func lookupAllowed(e *entry, lookup string, listFilter []any) bool {
+// lookupAllowed checks whether filtering by lookup (a query parameter key)
+// with value is permitted on e, matching Django's ModelAdmin.lookup_allowed.
+func lookupAllowed(e *entry, lookup, value string, listFilter []any) bool {
 	if lookup == "" {
 		return true
 	}
 	if e.admin.hooks != nil && e.admin.hooks.lookupAllowed != nil && !e.admin.hooks.lookupAllowed(lookup) {
 		return false
+	}
+	if relatedLookupAllowed(e.model, lookup, value) {
+		return true
 	}
 
 	// Build set of valid relational paths and SimpleListFilter parameter names.
@@ -199,6 +202,23 @@ func lookupAllowed(e *entry, lookup string, listFilter []any) bool {
 	return validLookups[withLast]
 }
 
+// relatedLookupAllowed reports whether lookup=value is a parameter of the
+// lookup link of a raw-id widget for a foreign key to m, Django's
+// Options.related_fkey_lookups: the LimitChoicesTo of each foreign key to m
+// that has a reverse accessor.
+func relatedLookupAllowed(m *orm.Model, lookup, value string) bool {
+	for _, rev := range m.ReverseRelations() {
+		if rev.Field == nil || rev.Field.Rel == nil {
+			continue
+		}
+		params := urlParamsFromLookups(rev.Field.Rel.LimitChoicesTo())
+		if v, ok := params.values[lookup]; ok && v == value {
+			return true
+		}
+	}
+	return false
+}
+
 // buildFilters constructs all active filterSpecs for cl, consumes their query
 // parameters from a copy of filterParams, validates any remaining lookup
 // parameters, and returns the filters with their conditions, the remaining
@@ -215,9 +235,14 @@ func (s *AdminSite) buildFilters(
 	lookupParams := cl.getFiltersParams()
 
 	// Security check: reject disallowed relational lookups with 400.
-	for key := range lookupParams {
-		if !lookupAllowed(e, key, listFilter) {
-			return nil, fmt.Errorf("%w: %s", errDisallowedLookup, key)
+	for key, values := range lookupParams {
+		if len(values) == 0 {
+			values = []string{""}
+		}
+		for _, value := range values {
+			if !lookupAllowed(e, key, value, listFilter) {
+				return nil, fmt.Errorf("%w: %s", errDisallowedLookup, key)
+			}
 		}
 	}
 
@@ -851,7 +876,13 @@ func (s *AdminSite) newRelatedFilterSpec(
 		}
 	}
 
-	rows, err := orm.LabeledRowsOrdered(ctx, s.db, target, ordering, limitPKs)
+	// Like Django's Field.get_choices the choices of a forward relation are
+	// the rows that match its LimitChoicesTo; the rows in use replace them.
+	var where orm.Cond
+	if !onlyUsed && info.Field != nil {
+		where = info.Field.Rel.LimitChoicesTo()
+	}
+	rows, err := orm.LabeledRowsWhere(ctx, s.db, target, where, ordering, limitPKs)
 	if err != nil {
 		return nil, err
 	}

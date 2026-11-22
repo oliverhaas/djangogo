@@ -46,10 +46,10 @@ func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory, class fieldCl
 			field = factory(db, mf, opts)
 		}
 		if field == nil && isM2M(mf) {
-			field = newRelatedMultipleChoiceField(db, mf.Rel.Target, collectOptions(opts))
+			field = newRelatedMultipleChoiceField(db, mf.Rel, collectOptions(opts))
 		}
 		if field == nil {
-			field = newRelatedChoiceField(db, mf.Rel.Target, collectOptions(opts))
+			field = newRelatedChoiceField(db, mf.Rel, collectOptions(opts))
 		}
 		if choice, ok := field.(*ModelChoiceField); ok {
 			choice.Blank = mf.Blank

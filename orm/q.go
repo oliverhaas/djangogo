@@ -128,6 +128,24 @@ func formatCondValue(v any) string {
 	return fmt.Sprint(v)
 }
 
+// Pairs returns the alternating keys and values of c when c is a conjunction
+// of key/value pairs, such as orm.Q("warm", true, "age__gt", 3): the
+// counterpart of a Django lookup dict. It reports false for a negated, OR or
+// nested condition and for one with an error.
+func (c Cond) Pairs() ([]any, bool) {
+	if c.err != nil || c.negated || c.conn != connAnd {
+		return nil, false
+	}
+	out := make([]any, 0, 2*len(c.children))
+	for _, ch := range c.children {
+		if ch.sub != nil {
+			return nil, false
+		}
+		out = append(out, ch.key, ch.value)
+	}
+	return out, true
+}
+
 // empty reports whether the condition has no children, so it restricts nothing.
 func (c Cond) empty() bool { return len(c.children) == 0 }
 

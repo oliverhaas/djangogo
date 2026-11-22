@@ -161,9 +161,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   the explicit value. A Go field name that ends in digits snake-cases without an
   underscore (`Parent1` becomes `parent1`).
 - **Model options:** `orm.Meta` has `ordering`, `unique_together`, `indexes`,
-  verbose names, `db_table` and per-field choices, validators and error
-  messages. There is no `Meta.constraints`, no `unique_for_date`, no
-  `limit_choices_to`, no custom managers and no abstract, proxy or multi-table
+  verbose names, `db_table`, per-field choices, validators and error
+  messages, and `limit_choices_to`. There is no `Meta.constraints`, no
+  `unique_for_date`, no custom managers and no abstract, proxy or multi-table
   inheritance.
 - **Database:** one database per application. Two models with foreign keys to
   each other cannot be created on PostgreSQL.

@@ -637,15 +637,16 @@ func writeCleanedString(fv reflect.Value, norm string) {
 	}
 }
 
-// validateForeignKeyExists checks that a row with primary key pk exists in
-// f.Rel.Target, returning Django's verbatim ForeignKey invalid error if not.
+// validateForeignKeyExists checks that a row with primary key pk that matches
+// the relation's LimitChoicesTo exists in f.Rel.Target, returning Django's
+// verbatim ForeignKey invalid error if not.
 func validateForeignKeyExists(ctx context.Context, db *DB, f *Field, pk any) error {
 	target := f.Rel.Target
 	targetPK := target.PrimaryKey()
 	if targetPK == nil {
 		return nil
 	}
-	q := newQuery(db, target).filter([]any{targetPK.Column, pk}, false)
+	q := newQuery(db, target).filter([]any{targetPK.Column, pk, f.Rel.LimitChoicesTo()}, false)
 	exists, err := queryExists(ctx, q)
 	if err != nil {
 		return err

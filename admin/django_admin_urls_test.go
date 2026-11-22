@@ -33,9 +33,10 @@ func (s Section) String() string { return s.Name }
 
 // Actor stands in for tests/admin_views/models.py::Actor.
 type Actor struct {
-	ID   int64
-	Name string `orm:"max_length=50"`
-	Age  int64
+	ID    int64
+	Name  string `orm:"max_length=50"`
+	Age   int64
+	Title *string `orm:"max_length=50;null;blank"`
 }
 
 // String returns the actor name.

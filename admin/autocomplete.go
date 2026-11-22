@@ -88,6 +88,7 @@ func (s *AdminSite) autocompleteView(w http.ResponseWriter, r *http.Request) {
 			spec.filters = append(spec.filters, c)
 		}
 	}
+	spec.filters = append(spec.filters, f.Rel.LimitChoicesTo())
 	if cond, distinct, ok := buildSearchCond(target.model, searchFields, q.Get("term")); ok {
 		spec.filters = append(spec.filters, cond)
 		spec.distinct = distinct

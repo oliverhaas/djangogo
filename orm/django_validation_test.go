@@ -46,14 +46,15 @@ type modelToValidate struct {
 	Slug                 string                  `orm:"type=slug;blank"`
 }
 
-// Meta attaches the custom validator and verbose name matching Django's
-// ModelToValidate.
+// Meta attaches the custom validator, verbose name and limit_choices_to
+// matching Django's ModelToValidate.
 func (modelToValidate) Meta() orm.Meta {
 	return orm.Meta{
 		VerboseName: "model to validate",
 		Validators: map[string][]orm.Validator{
 			"FWithCustomValidator": {validateAnswerToUniverse},
 		},
+		LimitChoicesTo: map[string]orm.Cond{"Parent": orm.Q("number", 10)},
 	}
 }
 
@@ -201,6 +202,7 @@ func assertFieldFailsWithMessage(t *testing.T, err error, field string, wantMsgs
 // Ported from Django: tests/validation/tests.py::BaseModelValidationTests.test_custom_validate_method
 // Ported from Django: tests/validation/tests.py::BaseModelValidationTests.test_wrong_FK_value_raises_error
 // Ported from Django: tests/validation/tests.py::BaseModelValidationTests.test_correct_FK_value_validates
+// Ported from Django: tests/validation/tests.py::BaseModelValidationTests.test_limited_FK_raises_error
 // Ported from Django: tests/validation/tests.py::BaseModelValidationTests.test_wrong_email_value_raises_error
 // Ported from Django: tests/validation/tests.py::BaseModelValidationTests.test_correct_email_value_passes
 // Ported from Django: tests/validation/tests.py::BaseModelValidationTests.test_wrong_url_value_raises_error
@@ -240,6 +242,17 @@ func TestBaseModelValidation(t *testing.T) {
 		mtv = &modelToValidate{Number: valIntPtr(10), Name: "Some Name"}
 		mtv.Parent.SetPK(parent.ID)
 		djangotest.AssertEqual(t, orm.FullClean(ctx, db, mtv), nil)
+
+		// The limit_choices_to on the parent field says that a parent
+		// object's number attribute must be 10, so this should fail
+		// validation.
+		other := &modelToValidate{Number: valIntPtr(11), Name: "Other Name"}
+		if err := orm.Query[modelToValidate](db).Create(ctx, other); err != nil {
+			t.Fatalf("Create other parent: %v", err)
+		}
+		mtv = &modelToValidate{Number: valIntPtr(10), Name: "Some Name"}
+		mtv.Parent.SetPK(other.ID)
+		assertFailsValidation(t, orm.FullClean(ctx, db, mtv), []string{"parent"})
 
 		// Email validation.
 		mtv = &modelToValidate{Number: valIntPtr(10), Name: "Some Name", Email: "not-an-email"}

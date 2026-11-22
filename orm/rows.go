@@ -72,6 +72,13 @@ func labelRows(ctx context.Context, db *DB, m *Model, objs []reflect.Value) ([][
 // key). When pks is non-nil, only rows whose primary key is in pks are
 // returned.
 func LabeledRowsOrdered(ctx context.Context, db *DB, m *Model, ordering []string, pks []any) ([][2]string, error) {
+	return LabeledRowsWhere(ctx, db, m, Cond{}, ordering, pks)
+}
+
+// LabeledRowsWhere is LabeledRowsOrdered for the rows of m that match where,
+// such as the LimitChoicesTo of a relation to m. A row that matches through
+// several related rows is returned once.
+func LabeledRowsWhere(ctx context.Context, db *DB, m *Model, where Cond, ordering []string, pks []any) ([][2]string, error) {
 	pk := m.PrimaryKey()
 	if pk == nil {
 		return nil, fmt.Errorf("orm: model %s has no primary key", m.Name())
@@ -82,6 +89,9 @@ func LabeledRowsOrdered(ctx context.Context, db *DB, m *Model, ordering []string
 	q := newQuery(db, m)
 	if pks != nil {
 		q = q.filter([]any{"pk__in", pks}, false)
+	}
+	if !where.empty() || where.err != nil {
+		q = q.filter([]any{"pk__in", newQuery(db, m).filter([]any{where}, false)}, false)
 	}
 	switch {
 	case len(ordering) > 0:

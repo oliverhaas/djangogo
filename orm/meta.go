@@ -41,6 +41,15 @@ type Meta struct {
 	// ErrorMessages declares per-field error message overrides keyed by field
 	// name then error code (Django's Field(error_messages={...})).
 	ErrorMessages map[string]map[string]string
+	// LimitChoicesTo declares per-relation conditions keyed like Choices
+	// (Django's ForeignKey(limit_choices_to=...)): only the rows of the
+	// related model that match are choices of the field. The form fields and
+	// the admin offer only those rows, and FullClean rejects a foreign key to
+	// any other row.
+	LimitChoicesTo map[string]Cond
+	// LimitChoicesToFunc declares per-relation conditions that a function
+	// returns each time they apply (Django's limit_choices_to=callable).
+	LimitChoicesToFunc map[string]func() Cond
 }
 
 // withMeta is implemented by models that customize their Meta.

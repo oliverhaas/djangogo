@@ -414,24 +414,32 @@ func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model, key *or
 	}
 }
 
-// newRelatedChoiceField returns the field of a foreign key to target. With a
-// database the rows of target are the options; without one the options are
-// set with Form.SetChoices. The cleaned value is the primary key.
-func newRelatedChoiceField(db *orm.DB, target *orm.Model, o *fieldOptions) *ModelChoiceField {
+// newRelatedChoiceField returns the field of the foreign key rel. With a
+// database the rows of its target that match its LimitChoicesTo are the
+// options; without one the options are set with Form.SetChoices. The cleaned
+// value is the primary key.
+func newRelatedChoiceField(db *orm.DB, rel *orm.Relation, o *fieldOptions) *ModelChoiceField {
 	f := newModelChoiceField(o)
+	target := rel.Target
 	f.charKey = isStringField(keyField(target, ""))
 	f.keyOf = func(value any) (string, bool) { return instancePK(target, value) }
-	if db == nil || target == nil {
-		return f
+	if db != nil && target != nil {
+		f.load = relatedRows(db, rel)
 	}
-	f.load = func(ctx context.Context) ([]modelRow, error) {
-		pairs, err := orm.LabeledRowsOrdered(ctx, db, target, nil, nil)
+	return f
+}
+
+// relatedRows returns the loader of the options of a relation field: the rows
+// of the target of rel that match its LimitChoicesTo, which is evaluated on
+// each load.
+func relatedRows(db *orm.DB, rel *orm.Relation) func(context.Context) ([]modelRow, error) {
+	return func(ctx context.Context) ([]modelRow, error) {
+		pairs, err := orm.LabeledRowsWhere(ctx, db, rel.Target, rel.LimitChoicesTo(), nil, nil)
 		if err != nil {
 			return nil, err
 		}
 		return pairRows(pairs), nil
 	}
-	return f
 }
 
 // pairRows converts (primary key, label) pairs to rows whose cleaned value is

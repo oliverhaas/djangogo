@@ -167,7 +167,8 @@ func applyWithChoices(modelName string, byName, byAttr, byColumn map[string]*Fie
 }
 
 // applyMetaFieldHooks applies Meta.Choices, Meta.ChoicesFunc, Meta.Validators,
-// and Meta.ErrorMessages to the model's fields during registration.
+// Meta.ErrorMessages, Meta.LimitChoicesTo and Meta.LimitChoicesToFunc to the
+// model's fields during registration.
 func applyMetaFieldHooks(m *Model, meta Meta) error {
 	for fieldName, choices := range meta.Choices {
 		f, found := resolveMetaField(fieldName, m.byName, m.byAttr, m.byColumn)
@@ -217,7 +218,43 @@ func applyMetaFieldHooks(m *Model, meta Meta) error {
 			maps.Copy(f.ErrorMessages, msgs)
 		}
 	}
+	for fieldName, cond := range meta.LimitChoicesTo {
+		f, err := metaRelationField(m, "LimitChoicesTo", fieldName)
+		if err != nil {
+			return err
+		}
+		f.Rel.limitChoicesTo = func() Cond { return cond }
+	}
+	for fieldName, fn := range meta.LimitChoicesToFunc {
+		f, err := metaRelationField(m, "LimitChoicesToFunc", fieldName)
+		if err != nil {
+			return err
+		}
+		if fn == nil {
+			continue
+		}
+		if f.Rel.limitChoicesTo != nil {
+			return fmt.Errorf("orm: model %s: field %q cannot set both LimitChoicesTo and LimitChoicesToFunc", m.name, f.Name)
+		}
+		f.Rel.limitChoicesTo = fn
+	}
 	return nil
+}
+
+// metaRelationField returns the relation field, a many-to-many one included,
+// that the Meta option named option keys with name.
+func metaRelationField(m *Model, option, name string) (*Field, error) {
+	f, found := resolveMetaField(name, m.byName, m.byAttr, m.byColumn)
+	if !found {
+		f, found = m.ManyToManyField(name)
+	}
+	if !found {
+		return nil, fmt.Errorf("orm: model %s: Meta.%s names unknown field %q", m.name, option, name)
+	}
+	if f.Rel == nil {
+		return nil, fmt.Errorf("orm: model %s: Meta.%s names field %q, which is not a relation", m.name, option, name)
+	}
+	return f, nil
 }
 
 // cloneChoices returns a deep copy of choices so mutating caller slices cannot

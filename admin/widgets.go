@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
@@ -83,8 +84,12 @@ func NewForeignKeyRawIDWidget(ctx context.Context, site *AdminSite, f *orm.Field
 	target := f.Rel.Target
 	if rel := site.entryByModel(target); rel != nil {
 		w.RelatedURL = site.changelistURL(rel)
+		params := urlParamsFromLookups(f.Rel.LimitChoicesTo())
 		if pk := target.PrimaryKey(); pk != nil {
-			w.RelatedURL += "?" + url.Values{toFieldVar: {pk.Attr}}.Encode()
+			params.set(toFieldVar, pk.Attr)
+		}
+		if q := params.encode(); q != "" {
+			w.RelatedURL += "?" + q
 		}
 	}
 	w.Lookup = func(value string) (string, string) {
@@ -113,9 +118,9 @@ func (w ForeignKeyRawIDWidget) Render(name string, value any, attrs forms.Attrs)
 // changelist of the related model.
 type ManyToManyRawIDWidget struct {
 	forms.TextInput
-	// RelatedURL is the URL of the changelist of the related model, or ""
-	// when the related model has no admin on the site. Without it the
-	// widget has no lookup link and no class.
+	// RelatedURL is the URL of the changelist of the related model with its
+	// query string, or "" when the related model has no admin on the site.
+	// Without it the widget has no lookup link and no class.
 	RelatedURL string
 }
 
@@ -126,9 +131,60 @@ func NewManyToManyRawIDWidget(site *AdminSite, f *orm.Field) ManyToManyRawIDWidg
 	if f.Rel != nil {
 		if rel := site.entryByModel(f.Rel.Target); rel != nil {
 			w.RelatedURL = site.changelistURL(rel)
+			params := urlParamsFromLookups(f.Rel.LimitChoicesTo())
+			if q := params.encode(); q != "" {
+				w.RelatedURL += "?" + q
+			}
 		}
 	}
 	return w
+}
+
+// urlParamsFromLookups returns the lookups of cond as query parameters,
+// Django's url_params_from_lookup_dict: a slice or array joins its items with
+// commas, and a bool is "0" or "1". A condition that is not a conjunction of
+// key/value pairs has none, as a Django Q object has none.
+func urlParamsFromLookups(cond orm.Cond) queryDict {
+	var d queryDict
+	args, ok := cond.Pairs()
+	if !ok {
+		return d
+	}
+	for i := 0; i+1 < len(args); i += 2 {
+		key, _ := args[i].(string)
+		d.set(key, lookupParamText(args[i+1]))
+	}
+	return d
+}
+
+// lookupParamText returns the query parameter text of the lookup value v.
+func lookupParamText(v any) string {
+	switch x := v.(type) {
+	case bool:
+		if x {
+			return "1"
+		}
+		return "0"
+	case []byte:
+		return string(x)
+	}
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+		parts := make([]string, rv.Len())
+		for i := range parts {
+			parts[i] = lookupItemText(rv.Index(i).Interface())
+		}
+		return strings.Join(parts, ",")
+	}
+	return lookupItemText(v)
+}
+
+// lookupItemText returns the text of one lookup value, a time in the form
+// Python's str gives a datetime.
+func lookupItemText(v any) string {
+	if t, ok := v.(time.Time); ok {
+		return t.Format("2006-01-02 15:04:05.999999-07:00")
+	}
+	return keyText(v)
 }
 
 // Render renders the input with the keys joined by commas, the class

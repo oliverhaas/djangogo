@@ -598,6 +598,17 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `register_lookup`, makes a function a transform of a field kind:
   after `orm.RegisterTransform(orm.KindChar, "lower", orm.Lower)` the key
   `"name__lower"` works in `Filter`, `Values`, `OrderBy` and `F`.
+- ORM: `Meta.LimitChoicesTo`, Django's `limit_choices_to`, limits the rows
+  that a foreign key or many-to-many field can point to:
+  `LimitChoicesTo: map[string]orm.Cond{"Color": orm.Q("warm", true)}`. Model
+  forms and the admin offer only the matching rows, in the select, the
+  autocomplete and the list filter of the relation. The lookup link of a
+  raw-id field opens the changelist filtered by them. `FullClean` rejects a
+  foreign key to any other row. `Meta.LimitChoicesToFunc` calls a function
+  for the condition each time it applies. `Relation.LimitChoicesTo` returns
+  the condition, `orm.LabeledRowsWhere` loads the labeled rows that match a
+  condition, and `Cond.Pairs` returns the keys and values of a condition
+  built from them.
 
 ### Changed
 

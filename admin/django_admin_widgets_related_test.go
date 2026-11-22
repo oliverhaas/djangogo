@@ -127,12 +127,28 @@ type WidgetVideoStream struct {
 	ReleaseEvent orm.FK[WidgetReleaseEvent] `orm:"on_delete=cascade"`
 }
 
+// WidgetUnsafeLimitChoicesTo stands in for
+// tests/admin_widgets/models.py::UnsafeLimitChoicesTo, with a many-to-many
+// field that Django's model does not have.
+type WidgetUnsafeLimitChoicesTo struct {
+	ID    int64
+	Band  orm.FK[WidgetBand]  `orm:"on_delete=cascade"`
+	Bands orm.M2M[WidgetBand] `orm:"related_name=+"`
+}
+
+// Meta limits both relations to a band name that needs escaping in a URL.
+func (WidgetUnsafeLimitChoicesTo) Meta() orm.Meta {
+	unsafe := orm.Q("name", `"&><escapeme`)
+	return orm.Meta{LimitChoicesTo: map[string]orm.Cond{"Band": unsafe, "Bands": unsafe}}
+}
+
 // widgetRelatedModels returns the model set of the ported raw-id and
 // autocomplete widget tests.
 func widgetRelatedModels() []any {
 	return []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_widgets",
 		&Company{}, &Advisor{}, &WidgetMember{}, &WidgetBand{}, &WidgetAlbum{}, &WidgetReleaseEvent{},
 		&WidgetEvent{}, &Honeycomb{}, &Bee{}, &Individual{}, &WidgetVideoStream{}, &WidgetInventory{},
+		&WidgetUnsafeLimitChoicesTo{},
 	)}
 }
 
@@ -182,13 +198,13 @@ func create[T any](t *testing.T, db *orm.DB, obj *T) *T {
 // Ported from Django: tests/admin_widgets/tests.py::ForeignKeyRawIdWidgetTest.test_render
 // Ported from Django: tests/admin_widgets/tests.py::ForeignKeyRawIdWidgetTest.test_fk_related_model_not_in_admin
 // Ported from Django: tests/admin_widgets/tests.py::ForeignKeyRawIdWidgetTest.test_fk_to_self_model_not_in_admin
+// Ported from Django: tests/admin_widgets/tests.py::ForeignKeyRawIdWidgetTest.test_render_unsafe_limit_choices_to
 func TestForeignKeyRawIDWidget(t *testing.T) {
 	djangotest.EachDB(t, widgetRelatedModels(), func(t *testing.T, db *orm.DB) {
 		// FIXME-PORT: test_relations_to_non_primary_key needs a foreign key
 		// with to_field, test_proper_manager_for_label_lookup a custom
-		// manager, test_render_unsafe_limit_choices_to limit_choices_to and
-		// test_render_fk_as_pk_model a foreign key as the primary key; the Go
-		// ORM has none of them.
+		// manager and test_render_fk_as_pk_model a foreign key as the
+		// primary key; the Go ORM has none of them.
 		ctx := context.Background()
 		env := widgetEnv(t, db, admin.ModelAdmin{})
 
@@ -214,6 +230,18 @@ func TestForeignKeyRawIDWidget(t *testing.T) {
 				`<div><input type="text" name="test" class="vForeignKeyRawIdAdminField">`+
 					`<a href="`+mustReverse(t, env.router, "admin:admin_widgets_widgetalbum_changelist")+
 					`?_to_field=id" class="related-lookup" id="lookup_id_test" title="Lookup"></a></div>`)
+		})
+
+		t.Run("test_render_unsafe_limit_choices_to", func(t *testing.T) {
+			// Django's band is the artist_ptr of a Band that inherits from
+			// Artist; the Go foreign key targets the primary key id.
+			_, f := modelField(t, db, "admin_widgets.WidgetUnsafeLimitChoicesTo", "Band")
+			w := admin.NewForeignKeyRawIDWidget(ctx, env.site, f)
+			djangotest.AssertHTMLEqual(t, w.Render("test", nil, forms.Attrs{}),
+				`<div><input type="text" name="test" class="vForeignKeyRawIdAdminField">`+
+					`<a href="`+mustReverse(t, env.router, "admin:admin_widgets_widgetband_changelist")+
+					`?name=%22%26%3E%3Cescapeme&amp;_to_field=id" class="related-lookup" id="lookup_id_test" `+
+					`title="Lookup"></a></div>`)
 		})
 
 		t.Run("test_fk_related_model_not_in_admin", func(t *testing.T) {
@@ -271,6 +299,17 @@ func TestManyToManyRawIDWidget(t *testing.T) {
 				`<div><input type="text" name="test" value="%d" class="vManyToManyRawIdAdminField">`, m1.ID)+lookup)
 		})
 
+		t.Run("limit_choices_to", func(t *testing.T) {
+			// No Django test renders the lookup link of a many-to-many
+			// field with limit_choices_to. It has no _to_field parameter.
+			_, f := modelField(t, db, "admin_widgets.WidgetUnsafeLimitChoicesTo", "bands")
+			w := admin.NewManyToManyRawIDWidget(env.site, f)
+			djangotest.AssertHTMLEqual(t, w.Render("test", nil, forms.Attrs{}),
+				`<div><input type="text" name="test" value="" class="vManyToManyRawIdAdminField">`+
+					`<a href="`+mustReverse(t, env.router, "admin:admin_widgets_widgetband_changelist")+
+					`?name=%22%26%3E%3Cescapeme" class="related-lookup" id="lookup_id_test" title="Lookup"></a></div>`)
+		})
+
 		t.Run("test_m2m_related_model_not_in_admin", func(t *testing.T) {
 			// M2M relationship with model not registered with admin site.
 			// Raw ID widget should have no magnifying glass link. See #16542
@@ -290,6 +329,26 @@ func TestManyToManyRawIDWidget(t *testing.T) {
 	})
 }
 
+// Ported from Django: tests/admin_widgets/tests.py::AdminForeignKeyRawIdWidget.test_url_params_from_lookup_dict_any_iterable
+//
+// No Go counterpart: test_url_params_from_lookup_dict_callable passes a
+// function as a lookup value. A Cond value cannot be a function; a function
+// that returns the whole condition is LimitChoicesToFunc, which
+// TestLimitChoicesToAsCallableInAdmin covers.
+func TestURLParamsFromLookupDict(t *testing.T) {
+	lookup1 := admin.URLParamsFromLookups(orm.Q("color__in", [2]string{"red", "blue"}))
+	lookup2 := admin.URLParamsFromLookups(orm.Q("color__in", []string{"red", "blue"}))
+	djangotest.AssertEqual(t, lookup1, map[string]string{"color__in": "red,blue"})
+	djangotest.AssertEqual(t, lookup1, lookup2)
+
+	// No Django test checks the bool values, or that a condition that is
+	// not a lookup dict, such as a Q object, gives no parameters.
+	djangotest.AssertEqual(t, admin.URLParamsFromLookups(orm.Q("warm", true, "cold", false)),
+		map[string]string{"warm": "1", "cold": "0"})
+	djangotest.AssertEqual(t, len(admin.URLParamsFromLookups(orm.Q("a", 1).Or(orm.Q("b", 2)))), 0)
+	djangotest.AssertEqual(t, len(admin.URLParamsFromLookups(orm.Not(orm.Q("a", 1)))), 0)
+}
+
 // invalidChoice is the message of Django's ModelChoiceField for a key that
 // names no row.
 const invalidChoice = "Select a valid choice. That choice is not one of the available choices."
@@ -299,10 +358,6 @@ const invalidChoice = "Select a valid choice. That choice is not one of the avai
 // Ported from Django: tests/admin_widgets/tests.py::AdminForeignKeyRawIdWidget.test_label_and_url_for_value_invalid_uuid
 func TestAdminForeignKeyRawIDWidget(t *testing.T) {
 	djangotest.EachDB(t, widgetRelatedModels(), func(t *testing.T, db *orm.DB) {
-		// FIXME-PORT: test_url_params_from_lookup_dict_any_iterable and
-		// test_url_params_from_lookup_dict_callable test the
-		// limit_choices_to parameters of the lookup link, which the Go ORM
-		// does not have.
 		ctx := context.Background()
 		env := widgetEnv(t, db, admin.ModelAdmin{})
 		env.client.ForceLogin(createTestUser(t, db, "super", "secret", true, true))
@@ -564,15 +619,25 @@ type Question struct {
 func (q Question) String() string { return q.Question }
 
 // Answer stands in for tests/admin_views/models.py::Answer, without
-// question_with_to_field and related_answers.
+// related_answers. QuestionWithToField refers to the primary key of Question:
+// the Go ORM has no to_field.
 type Answer struct {
-	ID       int64
-	Question orm.FK[Question] `orm:"on_delete=protect"`
-	Answer   string           `orm:"max_length=20"`
+	ID                  int64
+	Question            orm.FK[Question] `orm:"on_delete=protect"`
+	QuestionWithToField orm.FK[Question] `orm:"null;blank;on_delete=set_null;related_name=uuid_answers"`
+	Answer              string           `orm:"max_length=20"`
 }
 
 // String returns the answer text.
 func (a Answer) String() string { return a.Answer }
+
+// Meta limits QuestionWithToField to the questions that do not start with
+// "not".
+func (Answer) Meta() orm.Meta {
+	return orm.Meta{LimitChoicesTo: map[string]orm.Cond{
+		"QuestionWithToField": orm.Not(orm.Q("question__istartswith", "not")),
+	}}
+}
 
 // autocompleteViewModels returns the model set of the ported
 // AutocompleteJsonViewTests.
@@ -640,14 +705,14 @@ func autocompleteGet(t *testing.T, env *adminTestEnv, field string, extra url.Va
 // Ported from Django: tests/admin_views/test_autocomplete_view.py::AutocompleteJsonViewTests.test_search_use_distinct
 // Ported from Django: tests/admin_views/test_autocomplete_view.py::AutocompleteJsonViewTests.test_missing_search_fields
 // Ported from Django: tests/admin_views/test_autocomplete_view.py::AutocompleteJsonViewTests.test_get_paginator
+// Ported from Django: tests/admin_views/test_autocomplete_view.py::AutocompleteJsonViewTests.test_limit_choices_to
 func TestAutocompleteJSONView(t *testing.T) {
 	djangotest.EachDB(t, autocompleteViewModels(), func(t *testing.T, db *orm.DB) {
 		// FIXME-PORT: test_custom_to_field, test_custom_to_field_permission_denied,
 		// test_custom_to_field_custom_pk, test_to_field_resolution_with_mti and
 		// test_to_field_resolution_with_fk_pk need foreign keys with
-		// to_field, test_limit_choices_to needs limit_choices_to, and
-		// test_serialize_result a subclass of the view; the Go ORM and admin
-		// have none of them.
+		// to_field, and test_serialize_result a subclass of the view; the Go
+		// ORM and admin have none of them.
 		ctx := context.Background()
 		superuser := createTestUser(t, db, "super", "secret", true, true)
 
@@ -662,6 +727,28 @@ func TestAutocompleteJSONView(t *testing.T) {
 				"pagination": map[string]any{"more": false},
 			})
 			if _, err := orm.Query[Question](db).Filter("id", q.ID).Delete(ctx); err != nil {
+				t.Fatalf("delete: %v", err)
+			}
+		})
+
+		t.Run("test_limit_choices_to", func(t *testing.T) {
+			// Answer.question_with_to_field defines limit_choices_to to
+			// "those not starting with 'not'".
+			env := autocompleteEnv(t, db, questionAdmin())
+			env.client.ForceLogin(superuser)
+			q := create(t, db, &Question{Question: "Is this a question?"})
+			create(t, db, &Question{Question: "Not a question."})
+			want := map[string]any{
+				"results":    []any{map[string]any{"id": strconv.FormatInt(q.ID, 10), "text": q.Question}},
+				"pagination": map[string]any{"more": false},
+			}
+			resp := autocompleteGet(t, env, "question_with_to_field", url.Values{"term": {"is"}})
+			djangotest.AssertStatus(t, resp, 200)
+			djangotest.AssertJSONEqual(t, string(resp.Body), want)
+			// No Django test searches a term that both questions match.
+			resp = autocompleteGet(t, env, "question_with_to_field", url.Values{"term": {"question"}})
+			djangotest.AssertJSONEqual(t, string(resp.Body), want)
+			if _, err := orm.Query[Question](db).Delete(ctx); err != nil {
 				t.Fatalf("delete: %v", err)
 			}
 		})

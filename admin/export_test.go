@@ -94,3 +94,9 @@ func DateHierarchyBounds(params url.Values, field string) (from, to time.Time, e
 	from, to, _, err = dateHierarchyBounds(params, field)
 	return from, to, err
 }
+
+// URLParamsFromLookups returns the query parameters of the lookups of cond,
+// Django's url_params_from_lookup_dict.
+func URLParamsFromLookups(cond orm.Cond) map[string]string {
+	return urlParamsFromLookups(cond).values
+}

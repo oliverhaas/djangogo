@@ -59,6 +59,22 @@ type Relation struct {
 	SourceField *Field
 	// TargetField is the FK field on Through pointing to Target.
 	TargetField *Field
+
+	// limitChoicesTo returns the condition of Meta.LimitChoicesTo or
+	// Meta.LimitChoicesToFunc; it is nil without one.
+	limitChoicesTo func() Cond
+}
+
+// LimitChoicesTo returns the condition that a row of Target must match to be
+// a choice of the relation, Django's get_limit_choices_to(): the Cond of
+// Meta.LimitChoicesTo, or what the function of Meta.LimitChoicesToFunc
+// returns, called anew each time. Without a limit it is the empty Cond, which
+// matches every row.
+func (r *Relation) LimitChoicesTo() Cond {
+	if r == nil || r.limitChoicesTo == nil {
+		return Cond{}
+	}
+	return r.limitChoicesTo()
 }
 
 // OnDelete is the referential action applied when the row a foreign key points

@@ -229,7 +229,7 @@ func (s *AdminSite) relationChoices(r *http.Request, e *entry, form *forms.Form,
 		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Attr] || mf.Attr == skip || slices.Contains(limited, mf) {
 			continue
 		}
-		opts, err := orm.LabeledRowsOrdered(r.Context(), s.db, mf.Rel.Target, s.relatedOrdering(r, mf.Rel.Target), nil)
+		opts, err := orm.LabeledRowsWhere(r.Context(), s.db, mf.Rel.Target, mf.Rel.LimitChoicesTo(), s.relatedOrdering(r, mf.Rel.Target), nil)
 		if err != nil {
 			continue
 		}
