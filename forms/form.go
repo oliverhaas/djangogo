@@ -507,6 +507,17 @@ func (f *Form) SetChoices(name string, choices [][2]string) {
 	cf.setChoices(list)
 }
 
+// Choices returns the options of a choice field with their option groups,
+// Django's field.choices. A model choice field returns its empty first option
+// and the rows it has loaded. An unknown name or a field without choices
+// returns nil.
+func (f *Form) Choices(name string) []Choice {
+	if cf, ok := f.fields[name].(choiceField); ok {
+		return cf.widgetChoices()
+	}
+	return nil
+}
+
 // IsMultipart reports whether the form needs multipart encoding. No widget of
 // this package uploads files, so it is false.
 func (f *Form) IsMultipart() bool { return false }

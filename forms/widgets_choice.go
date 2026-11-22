@@ -7,12 +7,19 @@ import (
 )
 
 // Choice is one option of a choice field or widget: the submitted value and
-// the text shown for it.
+// the text shown for it. A choice with options in Group is an option group:
+// Label names the group and Value is not used.
+//
+//	forms.Choice{Label: "Audio", Group: []forms.Choice{{Value: "cd", Label: "CD"}}}
 type Choice struct {
 	// Value is the value submitted when the option is chosen.
 	Value string
-	// Label is the text shown to the user.
+	// Label is the text shown to the user, or the name of a group.
 	Label string
+	// Group holds the options of an option group, Django's nested choices.
+	// A Select shows them in an <optgroup>, a RadioSelect and a
+	// CheckboxSelectMultiple under the name of the group.
+	Group []Choice
 }
 
 // EmptyChoiceLabel is the label of the empty option that a model choice field
@@ -52,25 +59,58 @@ func choiceValues(value any, multiple bool) []string {
 	}
 }
 
-// selectedIndexes marks the options that are selected. A single-valued widget
-// selects only the first match.
-func selectedIndexes(choices []Choice, value any, multiple bool) []bool {
+// optGroup is the options of one option group, or one option outside any
+// group with an empty label, an entry of Django's ChoiceWidget.optgroups.
+type optGroup struct {
+	label   string
+	options []BoundWidget
+}
+
+// optGroups returns the options of choices in their groups, Django's
+// ChoiceWidget.optgroups. makeOption builds an option from its choice, its
+// index ("2", or "1_0" for the first option of the second choice, a group)
+// and whether it is selected. A single-valued widget selects only the first
+// match.
+func optGroups(choices []Choice, value any, multiple bool, makeOption func(c Choice, index string, selected bool) BoundWidget) []optGroup {
 	chosen := map[string]bool{}
 	for _, v := range choiceValues(value, multiple) {
 		chosen[v] = true
 	}
-	out := make([]bool, len(choices))
-	found := false
+	found, position := false, 0
+	option := func(c Choice, index string) BoundWidget {
+		selected := (multiple || !found) && chosen[c.Value]
+		found = found || selected
+		o := makeOption(c, index, selected)
+		o.Index = position
+		position++
+		return o
+	}
+	groups := make([]optGroup, len(choices))
 	for i, c := range choices {
-		if chosen[c.Value] && (multiple || !found) {
-			out[i] = true
-			found = true
+		if len(c.Group) == 0 {
+			groups[i].options = []BoundWidget{option(c, strconv.Itoa(i))}
+			continue
 		}
+		groups[i].label = c.Label
+		for j, sub := range c.Group {
+			groups[i].options = append(groups[i].options, option(sub, strconv.Itoa(i)+"_"+strconv.Itoa(j)))
+		}
+	}
+	return groups
+}
+
+// flatOptions returns the options of groups in order, Django's
+// ChoiceWidget.options.
+func flatOptions(groups []optGroup) []BoundWidget {
+	var out []BoundWidget
+	for _, g := range groups {
+		out = append(out, g.options...)
 	}
 	return out
 }
 
-// renderSelect returns a <select> element with its options.
+// renderSelect returns a <select> element with its options, Django's
+// select.html.
 func renderSelect(name string, choices []Choice, value any, multiple bool, layers ...Attrs) string {
 	attrs := mergeAttrs(layers...)
 	if multiple {
@@ -78,9 +118,16 @@ func renderSelect(name string, choices []Choice, value any, multiple bool, layer
 	}
 	var b strings.Builder
 	b.WriteString(`<select name="` + escape(name) + `"` + RenderAttrs(attrs) + ">")
-	selected := selectedIndexes(choices, value, multiple)
-	for i, c := range choices {
-		b.WriteString("\n  " + selectOption(c, selected[i]))
+	for _, g := range selectGroups(name, choices, value, multiple) {
+		if g.label != "" {
+			b.WriteString("\n  <optgroup label=\"" + escape(g.label) + "\">")
+		}
+		for _, o := range g.options {
+			b.WriteString("\n  " + o.String())
+		}
+		if g.label != "" {
+			b.WriteString("\n  </optgroup>")
+		}
 	}
 	b.WriteString("\n</select>")
 	return b.String()
@@ -111,14 +158,22 @@ func (w Select) WithChoices(choices []Choice) Widget {
 
 // options implements optionWidget.
 func (w Select) options(name string, value any, _ Attrs) []BoundWidget {
-	return selectOptions(name, w.Choices, value, false)
+	return flatOptions(selectGroups(name, w.Choices, value, false))
 }
 
 // UseRequiredAttribute allows the required attribute only when the first
 // option is the empty one: a required <select> whose first option has a value
-// is invalid HTML.
+// is invalid HTML. As in Django, a first choice that is a group counts as
+// empty when its name is.
 func (w Select) UseRequiredAttribute(any) bool {
-	return len(w.Choices) > 0 && w.Choices[0].Value == ""
+	if len(w.Choices) == 0 {
+		return false
+	}
+	first := w.Choices[0]
+	if len(first.Group) > 0 {
+		return first.Label == ""
+	}
+	return first.Value == ""
 }
 
 // NullBooleanSelect is a <select> with the options Unknown, Yes and No.
@@ -129,7 +184,9 @@ type NullBooleanSelect struct {
 }
 
 // nullBooleanChoices are the fixed options of a NullBooleanSelect.
-var nullBooleanChoices = []Choice{{"unknown", "Unknown"}, {"true", "Yes"}, {"false", "No"}}
+var nullBooleanChoices = []Choice{
+	{Value: "unknown", Label: "Unknown"}, {Value: "true", Label: "Yes"}, {Value: "false", Label: "No"},
+}
 
 // nullBoolean maps the accepted spellings of a three-state value to true,
 // false or nil. The numbers are the values Django rendered before 3.1.
@@ -164,7 +221,7 @@ func (w NullBooleanSelect) Render(name string, value any, attrs Attrs) string {
 
 // options implements optionWidget.
 func (NullBooleanSelect) options(name string, value any, _ Attrs) []BoundWidget {
-	return selectOptions(name, nullBooleanChoices, nullBooleanOption(value), false)
+	return flatOptions(selectGroups(name, nullBooleanChoices, nullBooleanOption(value), false))
 }
 
 // Attributes implements Widget.
@@ -203,7 +260,7 @@ func (w SelectMultiple) WithChoices(choices []Choice) Widget {
 
 // options implements optionWidget.
 func (w SelectMultiple) options(name string, value any, _ Attrs) []BoundWidget {
-	return selectOptions(name, w.Choices, value, true)
+	return flatOptions(selectGroups(name, w.Choices, value, true))
 }
 
 // ValueFromData returns every value submitted under name.
@@ -216,7 +273,8 @@ func (SelectMultiple) ValueFromData(data url.Values, name string) any {
 func (SelectMultiple) ValueOmittedFromData(url.Values, string) bool { return false }
 
 // renderInputGroup returns a group of radio buttons or checkboxes, one per
-// choice, each wrapped in its label.
+// choice, each wrapped in its label, Django's multiple_input.html. The
+// options of an option group follow the name of the group.
 func renderInputGroup(inputType, name string, choices []Choice, value any, multiple bool, layers ...Attrs) string {
 	attrs := mergeAttrs(layers...)
 	id, _ := attrs["id"].(string)
@@ -229,8 +287,16 @@ func renderInputGroup(inputType, name string, choices []Choice, value any, multi
 		b.WriteString(` class="` + escape(pyString(class)) + `"`)
 	}
 	b.WriteString(">")
-	for _, option := range inputOptions(inputType, name, choices, value, multiple, attrs) {
-		b.WriteString("<div>\n    " + option.String() + "</div>")
+	for _, g := range inputGroups(inputType, name, choices, value, multiple, attrs) {
+		if g.label != "" {
+			b.WriteString("\n  <div><label>" + escape(g.label) + "</label>")
+		}
+		for _, option := range g.options {
+			b.WriteString("<div>\n    " + option.String() + "</div>")
+		}
+		if g.label != "" {
+			b.WriteString("\n  </div>")
+		}
 	}
 	b.WriteString("\n</div>")
 	return b.String()
@@ -261,7 +327,7 @@ func (w RadioSelect) WithChoices(choices []Choice) Widget {
 
 // options implements optionWidget.
 func (w RadioSelect) options(name string, value any, attrs Attrs) []BoundWidget {
-	return inputOptions("radio", name, w.Choices, value, false, mergeAttrs(w.Attrs, attrs))
+	return flatOptions(inputGroups("radio", name, w.Choices, value, false, mergeAttrs(w.Attrs, attrs)))
 }
 
 // IDForLabel returns the empty string: a label pointing at the first button
@@ -296,7 +362,7 @@ func (w CheckboxSelectMultiple) WithChoices(choices []Choice) Widget {
 
 // options implements optionWidget.
 func (w CheckboxSelectMultiple) options(name string, value any, attrs Attrs) []BoundWidget {
-	return inputOptions("checkbox", name, w.Choices, value, true, mergeAttrs(w.Attrs, attrs))
+	return flatOptions(inputGroups("checkbox", name, w.Choices, value, true, mergeAttrs(w.Attrs, attrs)))
 }
 
 // ValueFromData returns every value submitted under name.

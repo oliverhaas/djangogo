@@ -1,9 +1,6 @@
 package forms
 
-import (
-	"strconv"
-	"strings"
-)
+import "strings"
 
 // BoundWidget is a part of the widget of a bound field, Django's
 // BoundWidget: an option of a choice widget, such as one radio button of a
@@ -21,7 +18,8 @@ type BoundWidget struct {
 	Label string
 	// Selected reports whether the option is selected or checked.
 	Selected bool
-	// Index is the position of the option among the options, from 0.
+	// Index is the position of the option among the options, from 0,
+	// counting the options inside option groups.
 	Index int
 	// Attrs are the HTML attributes of the option.
 	Attrs Attrs
@@ -91,22 +89,19 @@ func selectOption(c Choice, selected bool) string {
 	return s + ">" + escape(c.Label) + "</option>"
 }
 
-// selectOptions returns the options of a <select>. An option does not take
-// the attributes of the widget, as in Django.
-func selectOptions(name string, choices []Choice, value any, multiple bool) []BoundWidget {
-	selected := selectedIndexes(choices, value, multiple)
-	out := make([]BoundWidget, len(choices))
-	for i, c := range choices {
+// selectGroups returns the options of a <select> in their groups. An option
+// does not take the attributes of the widget, as in Django.
+func selectGroups(name string, choices []Choice, value any, multiple bool) []optGroup {
+	return optGroups(choices, value, multiple, func(c Choice, _ string, selected bool) BoundWidget {
 		attrs := Attrs{}
-		if selected[i] {
+		if selected {
 			attrs["selected"] = true
 		}
-		out[i] = BoundWidget{
-			Name: name, Value: c.Value, Label: c.Label, Selected: selected[i], Index: i, Attrs: attrs,
-			render: func(bool) string { return selectOption(c, selected[i]) },
+		return BoundWidget{
+			Name: name, Value: c.Value, Label: c.Label, Selected: selected, Attrs: attrs,
+			render: func(bool) string { return selectOption(c, selected) },
 		}
-	}
-	return out
+	})
 }
 
 // inputOption returns one radio button or checkbox, in its <label> when
@@ -130,25 +125,22 @@ func inputOption(inputType, name string, c Choice, attrs Attrs, wrapLabel bool) 
 	return b.String()
 }
 
-// inputOptions returns the radio buttons or checkboxes of a group, one per
-// choice. Each takes the attributes of the group, with the id suffixed by
-// its index.
-func inputOptions(inputType, name string, choices []Choice, value any, multiple bool, attrs Attrs) []BoundWidget {
+// inputGroups returns the radio buttons or checkboxes of a widget in their
+// option groups, one per option. Each takes the attributes of the widget,
+// with the id suffixed by the index of the option, such as "id_media_1_0".
+func inputGroups(inputType, name string, choices []Choice, value any, multiple bool, attrs Attrs) []optGroup {
 	id, _ := attrs["id"].(string)
-	selected := selectedIndexes(choices, value, multiple)
-	out := make([]BoundWidget, len(choices))
-	for i, c := range choices {
+	return optGroups(choices, value, multiple, func(c Choice, index string, selected bool) BoundWidget {
 		option := mergeAttrs(attrs)
 		if id != "" {
-			option["id"] = id + "_" + strconv.Itoa(i)
+			option["id"] = id + "_" + index
 		}
-		if selected[i] {
+		if selected {
 			option["checked"] = true
 		}
-		out[i] = BoundWidget{
-			Name: name, Value: c.Value, Label: c.Label, Selected: selected[i], Index: i, Attrs: option,
+		return BoundWidget{
+			Name: name, Value: c.Value, Label: c.Label, Selected: selected, Attrs: option,
 			render: func(wrapLabel bool) string { return inputOption(inputType, name, c, option, wrapLabel) },
 		}
-	}
-	return out
+	})
 }

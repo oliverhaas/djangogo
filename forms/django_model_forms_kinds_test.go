@@ -566,6 +566,36 @@ func TestModelFormTypedChoicesAndStructJSON(t *testing.T) {
 	})
 }
 
+// No Django test exists: a model field with choices in option groups gets a
+// form field with the same groups, because Django's Field.formfield hands
+// get_choices() to the form field unchanged.
+func TestModelFormGroupedChoices(t *testing.T) {
+	djangotest.EachDB(t, []any{&TypedChoicesModel{}}, func(t *testing.T, db *orm.DB) {
+		f := forms.NewModelForm[TypedChoicesModel](db, forms.WithFields("category"))
+		category := mustFieldDef[*forms.TypedChoiceField](t, f.Form, "category")
+		djangotest.AssertEqual(t, category.Choices, []forms.Choice{
+			{Value: "", Label: forms.EmptyChoiceLabel},
+			{Label: "Audio", Group: []forms.Choice{{Value: "vinyl", Label: "Vinyl"}, {Value: "cd", Label: "CD"}}},
+			{Label: "Video", Group: []forms.Choice{{Value: "vhs", Label: "VHS"}}},
+		})
+		djangotest.AssertHTMLEqual(t, f.Field("category").String(), `
+			<select name="category" id="id_category">
+			<option value="" selected>---------</option>
+			<optgroup label="Audio">
+			<option value="vinyl">Vinyl</option>
+			<option value="cd">CD</option>
+			</optgroup>
+			<optgroup label="Video">
+			<option value="vhs">VHS</option>
+			</optgroup>
+			</select>`)
+		bound := forms.NewModelForm[TypedChoicesModel](db, forms.WithFields("category")).Bind(vals("category", "Audio"))
+		djangotest.AssertEqual(t, bound.Errors().Messages(), map[string][]string{
+			"category": {"Select a valid choice. Audio is not one of the available choices."},
+		})
+	})
+}
+
 // typeNameOf returns the Go type name of v.
 func typeNameOf(v any) string {
 	switch v.(type) {

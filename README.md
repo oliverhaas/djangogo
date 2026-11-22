@@ -222,7 +222,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `cache` tag libraries are missing, and output is English only.
   `{% lorem %}` is pongo2's tag. A template never runs a query: a relation renders empty unless the view loaded it with
   `SelectRelated` or `PrefetchRelated`.
-- **Forms:** no file fields or option groups, no localization and no custom
+- **Forms:** no file fields, no localization and no custom
   renderers. A model formset has no to_field relations.
   `ModelChoiceField` and `ModelMultipleChoiceField` load their options once
   per form, where Django loads them on each render, and their widget options

@@ -402,9 +402,13 @@ func (s *AdminSite) addForm(w http.ResponseWriter, r *http.Request, e *entry) {
 				return
 			}
 			if r.PostForm.Has(isPopupVar) {
-				s.checkSourceModel(r)
 				pk := pkOf(reflect.ValueOf(obj).Elem(), e)
-				s.popupResponse(w, r, e, "value", strconv.FormatInt(pk, 10), "obj", orm.Label(e.model, obj))
+				label := orm.Label(e.model, obj)
+				data := []string{"value", strconv.FormatInt(pk, 10), "obj", label}
+				if group, ok := s.sourceOptgroup(r, e, label); ok {
+					data = append(data, "optgroup", group)
+				}
+				s.popupResponse(w, r, e, data...)
 				return
 			}
 			// Link the object when the user can change it.
@@ -1038,23 +1042,43 @@ func (s *AdminSite) popupResponse(w http.ResponseWriter, r *http.Request, e *ent
 		map[string]any{"popup_response_data": b.String()})
 }
 
-// checkSourceModel adds Django's error message to the request when the
-// _source_model of a popup add names no model. Django then looks for the
-// choice of the new object in the option groups of the source model's form;
-// Go choices have no option groups, so a model that exists needs no lookup.
-func (s *AdminSite) checkSourceModel(r *http.Request) {
+// sourceOptgroup returns the option group of the new object of a popup add
+// in the form of the model that opened the popup, the lookup of Django's
+// response_add: the _source_model's admin form has a choice field named after
+// the plural name of e's model, and the group holds a choice labeled label.
+// The last matching group wins, as in Django. A _source_model that names no
+// model adds Django's error message to the request, and a model without an
+// admin on the site has no group.
+func (s *AdminSite) sourceOptgroup(r *http.Request, e *entry, label string) (string, bool) {
 	name := r.PostForm.Get(sourceModelVar)
 	if name == "" {
-		return
+		return "", false
 	}
+	var source *orm.Model
 	if app, model, ok := strings.Cut(name, "."); ok {
 		for _, m := range s.db.Registry().AppModels(app) {
 			if strings.EqualFold(m.Name(), model) {
-				return
+				source = m
+				break
 			}
 		}
 	}
-	_ = messages.Error(r, fmt.Sprintf(`The app "%s" could not be found.`, name))
+	if source == nil {
+		_ = messages.Error(r, fmt.Sprintf(`The app "%s" could not be found.`, name))
+		return "", false
+	}
+	src := s.entryByModel(source)
+	if src == nil {
+		return "", false
+	}
+	form := forms.FromModel(src.model, src.formOptions(r, nil)...)
+	group, found := "", false
+	for _, c := range form.Choices(e.model.VerboseNamePlural()) {
+		if slices.ContainsFunc(c.Group, func(sub forms.Choice) bool { return sub.Label == label }) {
+			group, found = c.Label, true
+		}
+	}
+	return group, found
 }
 
 // redirectPostSave redirects after a successful add or change save: to the

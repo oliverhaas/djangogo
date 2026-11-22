@@ -43,11 +43,17 @@ func (f *ChoiceField) widgetChoices() []Choice { return f.Choices }
 // setChoices implements choiceField.
 func (f *ChoiceField) setChoices(choices []Choice) { f.Choices = choices }
 
-// ValidValue reports whether value is one of the choices.
+// ValidValue reports whether value is one of the choices, also inside an
+// option group. The name of a group is not a choice.
 func (f *ChoiceField) ValidValue(value string) bool {
 	for _, c := range f.Choices {
-		if c.Value == value {
+		if len(c.Group) == 0 && c.Value == value {
 			return true
+		}
+		for _, sub := range c.Group {
+			if sub.Value == value {
+				return true
+			}
 		}
 	}
 	return false

@@ -61,7 +61,7 @@ func formFieldFor(db *orm.DB, mf *orm.Field, factory fieldFactory, class fieldCl
 		if mf.Kind == orm.KindBool {
 			includeBlank = !mf.HasDefault
 		}
-		choices := flattenORMChoices(mf.GetChoices(includeBlank))
+		choices := ormChoices(mf.GetChoices(includeBlank))
 		opts = append(opts, ChoiceList(choices), Coerce(coerceForField(mf)))
 		if mf.Null {
 			opts = append(opts, EmptyValue(nil))
@@ -208,16 +208,15 @@ func Class[F Field](fn func(opts ...FieldOption) F) func(opts ...FieldOption) Fi
 	return func(opts ...FieldOption) Field { return fn(opts...) }
 }
 
-// flattenORMChoices converts orm.Choice entries (expanding optgroups) into
-// flat forms.Choice values.
-func flattenORMChoices(in []orm.Choice) []Choice {
-	out := make([]Choice, 0, len(in))
-	for _, c := range in {
-		if len(c.Group) > 0 {
-			out = append(out, flattenORMChoices(c.Group)...)
-			continue
-		}
-		out = append(out, Choice{Value: c.Value, Label: c.Label})
+// ormChoices converts the choices of a model field to form choices, with
+// their option groups.
+func ormChoices(in []orm.Choice) []Choice {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Choice, len(in))
+	for i, c := range in {
+		out[i] = Choice{Value: c.Value, Label: c.Label, Group: ormChoices(c.Group)}
 	}
 	return out
 }

@@ -71,3 +71,16 @@ func TestValidateDuplicatedInvalidValues(t *testing.T) {
 	equal(t, forms.ValidationErrors(err).Messages(),
 		[]string{"Select a valid choice. invalid-one is not one of the available choices."})
 }
+
+// Ported from Django: tests/forms_tests/field_tests/test_multiplechoicefield.py::MultipleChoiceFieldTest.test_multiplechoicefield_3
+func TestMultiplechoicefield3(t *testing.T) {
+	f := forms.NewMultipleChoiceField(forms.ChoiceList(choiceNumbersLetters))
+	cleans(t, f, []any{1}, []string{"1"})
+	cleans(t, f, []string{"1"}, []string{"1"})
+	cleans(t, f, []any{1, 5}, []string{"1", "5"})
+	cleans(t, f, []any{1, "5"}, []string{"1", "5"})
+	cleans(t, f, []any{"1", 5}, []string{"1", "5"})
+	cleans(t, f, []string{"1", "5"}, []string{"1", "5"})
+	rejects(t, f, []string{"6"}, "Select a valid choice. 6 is not one of the available choices.")
+	rejects(t, f, []string{"1", "6"}, "Select a valid choice. 6 is not one of the available choices.")
+}

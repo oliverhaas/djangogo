@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/oliverhaas/djangogo/admin"
+	"github.com/oliverhaas/djangogo/auth"
+	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
@@ -513,4 +515,40 @@ func TestFormfieldOverridesOptionsAndFormClass(t *testing.T) {
 func isEmailField(f forms.Field) bool {
 	_, ok := f.(*forms.EmailField)
 	return ok
+}
+
+// WidgetMedia has a field whose choices are in option groups.
+type WidgetMedia struct {
+	ID   int64
+	Kind string `orm:"max_length=10;blank"`
+}
+
+// Meta puts the choices of Kind in the option groups Audio and Video.
+func (WidgetMedia) Meta() orm.Meta {
+	return orm.Meta{Choices: map[string][]orm.Choice{
+		"Kind": {orm.ChoiceGroup("Audio", orm.ChoiceOf("cd", "CD")), orm.ChoiceGroup("Video", orm.ChoiceOf("dvd", "DVD"))},
+	}}
+}
+
+// No Django test exists: the radio buttons of a field of RadioFields keep the
+// option groups of its choices, because Django's formfield_for_choice_field
+// hands get_choices() to the form field unchanged.
+func TestAdminRadioFieldsOptionGroups(t *testing.T) {
+	models := []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_widgets", &WidgetMedia{})}
+	djangotest.EachDB(t, models, func(t *testing.T, db *orm.DB) {
+		super := createTestUser(t, db, "super", "secret", true, true)
+		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+			admin.Register[WidgetMedia](site, admin.ModelAdmin{RadioFields: map[string]admin.RadioStyle{"kind": admin.Vertical}})
+		})
+		env.client.ForceLogin(super)
+		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_widgets_widgetmedia_add"))
+		djangotest.AssertContains(t, resp, `<div id="id_kind" class="radiolist"><div>`+
+			`<label for="id_kind_0"><input type="radio" name="kind" value="" class="radiolist" `+
+			`id="id_kind_0" checked> None</label></div>`+
+			`<div><label>Audio</label><div><label for="id_kind_1_0"><input type="radio" name="kind" value="cd" `+
+			`class="radiolist" id="id_kind_1_0"> CD</label></div></div>`+
+			`<div><label>Video</label><div><label for="id_kind_2_0"><input type="radio" name="kind" value="dvd" `+
+			`class="radiolist" id="id_kind_2_0"> DVD</label></div></div></div>`,
+			djangotest.HTML())
+	})
 }

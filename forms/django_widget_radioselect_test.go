@@ -186,3 +186,136 @@ func TestRadioSelectFieldset(t *testing.T) {
 		<div><label for="id_field_2"><input type="radio" name="field" value="G" id="id_field_2"> George</label></div>
 		<div><label for="id_field_3"><input type="radio" name="field" value="R" id="id_field_3">Ringo</label></div></div>`)
 }
+
+// Ported from Django: tests/forms_tests/widget_tests/test_radioselect.py::RadioSelectTest.test_nested_choices
+func TestRadioSelectNestedChoices(t *testing.T) {
+	widgetCheckHTML(t, forms.RadioSelect{Choices: widgetMediaChoices}, "nestchoice", "dvd", forms.Attrs{"id": "media"}, `
+        <div id="media">
+        <div>
+        <label for="media_0">
+        <input type="radio" name="nestchoice" value="unknown" id="media_0"> Unknown
+        </label></div>
+        <div>
+        <label>Audio</label>
+        <div>
+        <label for="media_1_0">
+        <input type="radio" name="nestchoice" value="vinyl" id="media_1_0"> Vinyl
+        </label></div>
+        <div> <label for="media_1_1">
+        <input type="radio" name="nestchoice" value="cd" id="media_1_1"> CD
+        </label></div>
+        </div><div>
+        <label>Video</label>
+        <div>
+        <label for="media_2_0">
+        <input type="radio" name="nestchoice" value="vhs" id="media_2_0"> VHS
+        </label></div>
+        <div>
+        <label for="media_2_1">
+        <input type="radio" name="nestchoice" value="dvd" id="media_2_1" checked> DVD
+        </label></div>
+        </div>
+        </div>`)
+}
+
+// Ported from Django: tests/forms_tests/widget_tests/test_radioselect.py::RadioSelectTest.test_choices_optgroup
+func TestRadioSelectChoicesOptgroup(t *testing.T) {
+	// Choices nest one level to create groups of radio buttons.
+	widgetCheckHTML(t, forms.RadioSelect{Choices: widgetNestedChoices}, "nestchoice", nil, nil, `
+        <div>
+          <div>
+            <label><input type="radio" name="nestchoice" value="outer1">Outer 1</label>
+          </div>
+          <div>
+            <label>Group &quot;1&quot;</label>
+            <div>
+              <label>
+              <input type="radio" name="nestchoice" value="inner1">Inner 1</label>
+            </div>
+            <div>
+              <label>
+              <input type="radio" name="nestchoice" value="inner2">Inner 2</label>
+            </div>
+          </div>
+        </div>`)
+}
+
+// Ported from Django: tests/forms_tests/widget_tests/test_radioselect.py::RadioSelectTest.test_choices_select_outer
+func TestRadioSelectChoicesSelectOuter(t *testing.T) {
+	widgetCheckHTML(t, forms.RadioSelect{Choices: widgetNestedChoices}, "nestchoice", "outer1", nil, `
+        <div>
+          <div>
+            <label>
+            <input checked type="radio" name="nestchoice" value="outer1">Outer 1</label>
+          </div>
+          <div>
+            <label>Group &quot;1&quot;</label>
+            <div>
+              <label>
+              <input type="radio" name="nestchoice" value="inner1">Inner 1</label>
+            </div>
+            <div>
+              <label>
+              <input type="radio" name="nestchoice" value="inner2">Inner 2</label>
+            </div>
+          </div>
+        </div>`)
+}
+
+// Ported from Django: tests/forms_tests/widget_tests/test_radioselect.py::RadioSelectTest.test_choices_select_inner
+func TestRadioSelectChoicesSelectInner(t *testing.T) {
+	widgetCheckHTML(t, forms.RadioSelect{Choices: widgetNestedChoices}, "nestchoice", "inner2", nil, `
+        <div>
+          <div>
+            <label><input type="radio" name="nestchoice" value="outer1">Outer 1</label>
+          </div>
+          <div>
+            <label>Group &quot;1&quot;</label>
+            <div>
+              <label>
+              <input type="radio" name="nestchoice" value="inner1">Inner 1</label>
+            </div>
+            <div>
+              <label>
+                <input checked type="radio" name="nestchoice" value="inner2">Inner 2
+              </label>
+            </div>
+          </div>
+        </div>`)
+}
+
+// Ported from Django: tests/forms_tests/widget_tests/test_radioselect.py::RadioSelectTest.test_render_as_subwidget
+func TestRadioSelectRenderAsSubwidget(t *testing.T) {
+	// A RadioSelect as a subwidget of a MultiWidget.
+	choices := append([]forms.Choice{{Value: "", Label: "------"}}, widgetBeatles...)
+	w := forms.MultiWidget{Widgets: []forms.Widget{forms.RadioSelect{Choices: choices}, forms.TextInput{}}}
+	widgetCheckHTML(t, w, "beatle", []any{"J", "Some text"}, nil, `
+        <div>
+          <div><label>
+            <input type="radio" name="beatle_0" value="">------</label>
+          </div>
+          <div><label>
+            <input checked type="radio" name="beatle_0" value="J">John</label>
+          </div>
+          <div><label>
+            <input type="radio" name="beatle_0" value="P">Paul</label>
+          </div>
+          <div><label>
+            <input type="radio" name="beatle_0" value="G">George</label>
+          </div>
+          <div><label>
+            <input type="radio" name="beatle_0" value="R">Ringo</label>
+          </div>
+        </div>
+        <input name="beatle_1" type="text" value="Some text">`)
+}
+
+// No Go counterpart: tests/forms_tests/widget_tests/test_radioselect.py::RadioSelectTest.test_choices_constructor_generator:
+// Choices is a slice, which a render does not use up.
+
+// No Go counterpart: tests/forms_tests/widget_tests/test_radioselect.py::RadioSelectTest.test_choices_escaping:
+// a label is plain text, which the widget always escapes. There is no safe
+// string to leave unescaped.
+
+// No Go counterpart: tests/forms_tests/widget_tests/test_radioselect.py::RadioSelectTest.test_doesnt_localize_input_value:
+// an option value is a string, and there is no localization.

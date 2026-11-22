@@ -103,3 +103,15 @@ func TestSelectMultipleFieldset(t *testing.T) {
 		<option value="J">John</option>  <option value="P">Paul</option>
 		<option value="G">George</option><option value="R">Ringo</option></select>`)
 }
+
+// Ported from Django: tests/forms_tests/widget_tests/test_selectmultiple.py::SelectMultipleTest.test_optgroup_select_multiple
+func TestSelectMultipleOptgroupSelectMultiple(t *testing.T) {
+	widgetCheckHTML(t, forms.SelectMultiple{Choices: widgetNestedChoices}, "nestchoice", []string{"outer1", "inner2"}, nil,
+		`<select multiple name="nestchoice">
+            <option value="outer1" selected>Outer 1</option>
+            <optgroup label="Group &quot;1&quot;">
+            <option value="inner1">Inner 1</option>
+            <option value="inner2" selected>Inner 2</option>
+            </optgroup>
+            </select>`)
+}

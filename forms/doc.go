@@ -73,6 +73,11 @@
 // views.Render converts a form in the context through TemplateValue. A loop
 // over a field yields its subwidgets, see BoundField.Subwidgets.
 //
+// A Choice with options in Group is an option group, Django's nested
+// choices. A Select renders it as an <optgroup>, a RadioSelect and a
+// CheckboxSelectMultiple as a <div> under the name of the group. Subwidgets
+// returns the options without their groups, as Django's options() does.
+//
 // # Model forms
 //
 // NewModelForm derives a form from a registered model, validates unique
@@ -137,6 +142,6 @@
 //
 // # Not covered
 //
-// File uploads (FileField, ImageField, ClearableFileInput), option groups in
-// choices and localized input formats are not part of this package.
+// File uploads (FileField, ImageField, ClearableFileInput) and localized
+// input formats are not part of this package.
 package forms

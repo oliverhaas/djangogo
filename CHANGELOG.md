@@ -907,6 +907,21 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   After an aggregate the rows stay grouped by the keys of the earlier
   `Values`, as in Django:
   `Values("publisher").Annotate("n", orm.Count("pk")).Values("n")`.
+- Forms: option groups, Django's nested choices. A `forms.Choice` with
+  options in its new `Group` field is a group named by `Label`:
+  `forms.Choice{Label: "Audio", Group: []forms.Choice{{Value: "cd", Label:
+  "CD"}}}`. A `Select` and a `SelectMultiple` render it as an `<optgroup>`,
+  a `RadioSelect` and a `CheckboxSelectMultiple` as a `<div>` under the name
+  of the group, with ids such as `id_media_1_0`. A choice field accepts the
+  options of a group but not its name. A model field whose choices use
+  `orm.ChoiceGroup` gets a form field with the same groups, also as radio
+  buttons of `ModelAdmin.RadioFields`. `Form.Choices` returns the options of
+  a choice field.
+- Admin: a popup add opened from the form of another model reports the
+  option group of the new object, Django 6.1's `"optgroup"` in the popup
+  response. The form of the `_source_model`'s admin needs a choice field
+  named after the plural name of the added model, whose groups hold a
+  choice labeled as the new object.
 
 ### Changed
 

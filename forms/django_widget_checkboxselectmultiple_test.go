@@ -121,3 +121,57 @@ func TestCheckboxSelectMultipleFieldset(t *testing.T) {
 		<div><label for="id_field_2"><input type="checkbox" name="field" value="G" id="id_field_2"> George</label></div>
 		<div><label for="id_field_3"><input type="checkbox" name="field" value="R" id="id_field_3">Ringo</label></div></div>`)
 }
+
+// Ported from Django: tests/forms_tests/widget_tests/test_checkboxselectmultiple.py::CheckboxSelectMultipleTest.test_nested_choices
+func TestCheckboxSelectMultipleNestedChoices(t *testing.T) {
+	widgetCheckHTML(t, forms.CheckboxSelectMultiple{Choices: widgetMediaChoices}, "nestchoice", []string{"vinyl", "dvd"},
+		forms.Attrs{"id": "media"}, `
+        <div id="media">
+        <div> <label for="media_0">
+        <input type="checkbox" name="nestchoice" value="unknown" id="media_0"> Unknown
+        </label></div>
+        <div>
+        <label>Audio</label>
+        <div> <label for="media_1_0">
+        <input checked type="checkbox" name="nestchoice" value="vinyl" id="media_1_0">
+        Vinyl</label></div>
+        <div> <label for="media_1_1">
+        <input type="checkbox" name="nestchoice" value="cd" id="media_1_1"> CD
+        </label></div>
+        </div><div>
+        <label>Video</label>
+        <div> <label for="media_2_0">
+        <input type="checkbox" name="nestchoice" value="vhs" id="media_2_0"> VHS
+        </label></div>
+        <div> <label for="media_2_1">
+        <input type="checkbox" name="nestchoice" value="dvd" id="media_2_1" checked> DVD
+        </label></div>
+        </div>
+        </div>`)
+}
+
+// Ported from Django: tests/forms_tests/widget_tests/test_checkboxselectmultiple.py::CheckboxSelectMultipleTest.test_nested_choices_without_id
+func TestCheckboxSelectMultipleNestedChoicesWithoutID(t *testing.T) {
+	widgetCheckHTML(t, forms.CheckboxSelectMultiple{Choices: widgetMediaChoices}, "nestchoice", []string{"vinyl", "dvd"}, nil, `
+        <div>
+        <div> <label>
+        <input type="checkbox" name="nestchoice" value="unknown"> Unknown</label></div>
+        <div>
+        <label>Audio</label>
+        <div> <label>
+        <input checked type="checkbox" name="nestchoice" value="vinyl"> Vinyl
+        </label></div>
+        <div> <label>
+        <input type="checkbox" name="nestchoice" value="cd"> CD</label></div>
+        </div><div>
+        <label>Video</label>
+        <div> <label>
+        <input type="checkbox" name="nestchoice" value="vhs"> VHS</label></div>
+        <div> <label>
+        <input type="checkbox" name="nestchoice" value="dvd" checked> DVD</label></div>
+        </div>
+        </div>`)
+}
+
+// No Go counterpart: tests/forms_tests/widget_tests/test_checkboxselectmultiple.py::CheckboxSelectMultipleTest.test_doesnt_localize_input_value:
+// an option value is a string, and there is no localization.

@@ -53,3 +53,35 @@ func TestChoicefieldDisabled(t *testing.T) {
 		`<select id="id_f" name="f" disabled><option value="J">John</option>`+
 			`<option value="P">Paul</option></select>`)
 }
+
+// choiceNumbersLetters is the choices of Django's test_choicefield_4 and
+// test_multiplechoicefield_3: two groups and an option.
+var choiceNumbersLetters = []forms.Choice{
+	{Label: "Numbers", Group: []forms.Choice{{Value: "1", Label: "One"}, {Value: "2", Label: "Two"}}},
+	{Label: "Letters", Group: []forms.Choice{{Value: "3", Label: "A"}, {Value: "4", Label: "B"}}},
+	{Value: "5", Label: "Other"},
+}
+
+// Ported from Django: tests/forms_tests/field_tests/test_choicefield.py::ChoiceFieldTest.test_choicefield_4
+func TestChoicefield4(t *testing.T) {
+	f := forms.NewChoiceField(forms.ChoiceList(choiceNumbersLetters))
+	cleans(t, f, 1, "1")
+	cleans(t, f, "1", "1")
+	cleans(t, f, 3, "3")
+	cleans(t, f, "3", "3")
+	cleans(t, f, 5, "5")
+	cleans(t, f, "5", "5")
+	rejects(t, f, "6", "Select a valid choice. 6 is not one of the available choices.")
+}
+
+// A Go choice list is ordered, so the dict becomes a list of Choice.
+//
+// Ported from Django: tests/forms_tests/field_tests/test_choicefield.py::ChoiceFieldTest.test_choicefield_grouped_mapping
+// Ported from Django: tests/forms_tests/field_tests/test_choicefield.py::ChoiceFieldTest.test_choicefield_grouped_mapping_inner_dict
+func TestChoicefieldGroupedMapping(t *testing.T) {
+	f := forms.NewChoiceField(forms.ChoiceList(choiceNumbersLetters[:2]))
+	for _, v := range []string{"1", "2", "3", "4"} {
+		cleans(t, f, v, v)
+	}
+	rejects(t, f, "Numbers", "Select a valid choice. Numbers is not one of the available choices.")
+}

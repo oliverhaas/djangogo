@@ -133,14 +133,24 @@ func radioField(mf *orm.Field, f forms.Field, style RadioStyle, emptyLabel *stri
 // radioChoices returns the choices of mf as radio buttons, Django's
 // get_choices(include_blank=db_field.blank, blank_choice=[("", "None")]): the
 // empty choice "None" first for a field that can be blank and has no empty
-// choice of its own.
+// choice of its own, then the choices with their option groups.
 func radioChoices(mf *orm.Field) []forms.Choice {
 	var out []forms.Choice
 	if mf.Blank && len(mf.GetChoices(true)) > len(mf.GetChoices(false)) {
 		out = append(out, forms.Choice{Value: "", Label: "None"})
 	}
-	for _, c := range mf.FlatChoices() {
-		out = append(out, forms.Choice{Value: c.Value, Label: c.Label})
+	for _, c := range mf.GetChoices(false) {
+		out = append(out, formChoice(c))
+	}
+	return out
+}
+
+// formChoice converts a choice of a model field to a form choice, with the
+// options of its group.
+func formChoice(c orm.Choice) forms.Choice {
+	out := forms.Choice{Value: c.Value, Label: c.Label}
+	for _, sub := range c.Group {
+		out.Group = append(out.Group, formChoice(sub))
 	}
 	return out
 }

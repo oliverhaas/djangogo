@@ -9,6 +9,7 @@ import (
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/djangotest"
+	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/messages"
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -35,11 +36,6 @@ func popupEnv(t *testing.T, db *orm.DB) *adminTestEnv {
 
 // The Go Article has a title, a view count and a published flag in place of
 // Django's content and date.
-//
-// FIXME-PORT: test_popup_add_POST_with_optgroups,
-// test_popup_add_POST_with_object_optgroups and
-// test_popup_add_POST_with_dynamic_optgroups need choices in option groups,
-// which Go form fields do not have.
 //
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_popup_add_POST
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_popup_add_POST_with_valid_source_model
@@ -214,5 +210,103 @@ func TestPopupResponseData(t *testing.T) {
 		resp = env.client.Post(deleteURL, url.Values{"post": {"yes"}, "_popup": {"1"}})
 		djangotest.AssertContains(t, resp, fmt.Sprintf(
 			`data-popup-response="{&quot;action&quot;: &quot;delete&quot;, &quot;value&quot;: &quot;%d&quot;}"`, actor.ID))
+	})
+}
+
+// optgroupPopupEnv returns an admin site where Section has sectionAdmin, as
+// Django's sites admin11, admin12 and admin13 do, logged in as a superuser.
+func optgroupPopupEnv(t *testing.T, db *orm.DB, sectionAdmin admin.ModelAdmin) *adminTestEnv {
+	t.Helper()
+	super := createTestUser(t, db, "super", "secret", true, true)
+	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[Article](site, admin.ModelAdmin{})
+		admin.Register[Section](site, sectionAdmin)
+	})
+	env.client.ForceLogin(super)
+	return env
+}
+
+// postPopupFromSection adds an article titled title in a popup opened from
+// the form of a section.
+func postPopupFromSection(t *testing.T, env *adminTestEnv, title string) *djangotest.Response {
+	t.Helper()
+	return env.client.Post(mustReverse(t, env.router, "admin:admin_views_article_add"), url.Values{
+		"_popup": {"1"}, "_source_model": {"admin_views.section"}, "title": {title}, "views": {"0"},
+	})
+}
+
+// articleGroups returns a choice field named for the articles of a section,
+// with the given groups, as the forms of Django's optgroup tests declare.
+func articleGroups(groups ...forms.Choice) forms.Field {
+	return forms.NewChoiceField(forms.ChoiceList(groups), forms.Required(false))
+}
+
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_popup_add_POST_with_optgroups
+func TestPopupAddPOSTWithOptgroups(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		env := optgroupPopupEnv(t, db, admin.ModelAdmin{FormOptions: []forms.ModelFormOption{
+			forms.WithFields("name", "articles"),
+			forms.WithFormField("articles", articleGroups(
+				forms.Choice{Label: "Published", Group: []forms.Choice{{Value: "1", Label: "Test Article"}}},
+				forms.Choice{Label: "Draft", Group: []forms.Choice{{Value: "2", Label: "Other Article"}}},
+			)),
+		}})
+		resp := postPopupFromSection(t, env, "Test Article")
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		djangotest.AssertContains(t, resp, "&quot;optgroup&quot;: &quot;Published&quot;")
+	})
+}
+
+// Django labels the groups with sections in the form's __init__; the Go
+// admin builds the groups from the sections in GetFormOptions.
+//
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_popup_add_POST_with_object_optgroups
+func TestPopupAddPOSTWithObjectOptgroups(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		mustCreate(t, db, &Section{Name: "Test section"})
+		env := optgroupPopupEnv(t, db, admin.ModelAdmin{
+			GetFormOptions: func(r *http.Request, _ any) []forms.ModelFormOption {
+				sections, err := orm.Query[Section](db).OrderBy("pk").Limit(2).All(r.Context())
+				if err != nil || len(sections) == 0 {
+					return []forms.ModelFormOption{forms.WithFields("name", "articles"), forms.WithFormField("articles", articleGroups())}
+				}
+				second := sections[len(sections)-1]
+				return []forms.ModelFormOption{
+					forms.WithFields("name", "articles"),
+					forms.WithFormField("articles", articleGroups(
+						forms.Choice{Label: sections[0].String(), Group: []forms.Choice{{Value: "1", Label: "Article 1"}}},
+						forms.Choice{Label: second.String(), Group: []forms.Choice{{Value: "2", Label: "Article 2"}}},
+					)),
+				}
+			},
+		})
+		resp := postPopupFromSection(t, env, "Article 1")
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		// The groups are labeled with the first sections, the first of which
+		// is "Test section".
+		djangotest.AssertContains(t, resp, "&quot;optgroup&quot;: &quot;Test section&quot;")
+	})
+}
+
+// Django adds the field in the form's __init__, after the fields of its
+// Meta; GetFormOptions declares it for each request in Go.
+//
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_popup_add_POST_with_dynamic_optgroups
+func TestPopupAddPOSTWithDynamicOptgroups(t *testing.T) {
+	djangotest.EachDB(t, adminViewsModels(), func(t *testing.T, db *orm.DB) {
+		env := optgroupPopupEnv(t, db, admin.ModelAdmin{
+			GetFormOptions: func(*http.Request, any) []forms.ModelFormOption {
+				return []forms.ModelFormOption{
+					forms.WithFields("name"),
+					forms.WithFormField("articles", articleGroups(
+						forms.Choice{Label: "Category A", Group: []forms.Choice{{Value: "1", Label: "Item 1"}, {Value: "2", Label: "Item 2"}}},
+						forms.Choice{Label: "Category B", Group: []forms.Choice{{Value: "3", Label: "Item 3"}, {Value: "4", Label: "Item 4"}}},
+					)),
+				}
+			},
+		})
+		resp := postPopupFromSection(t, env, "Item 1")
+		djangotest.AssertStatus(t, resp, http.StatusOK)
+		djangotest.AssertContains(t, resp, "&quot;optgroup&quot;: &quot;Category A&quot;")
 	})
 }
