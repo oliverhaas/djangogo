@@ -72,6 +72,25 @@ func call(fn string, args []any) Expr {
 //	Annotate("total", orm.Coalesce(orm.Sum("views"), orm.Value(0)))
 func Coalesce(args ...any) Expr { return call("COALESCE", args) }
 
+// Greatest returns the largest of its arguments, Django's Greatest. Each
+// argument is a field key or an Expr; pass Value(3) for a literal. It takes
+// at least two arguments. PostgreSQL skips a NULL argument and gives NULL
+// only when all are NULL; SQLite, where it is MAX(a, b, ...), gives NULL when
+// one is NULL, as Django documents.
+func Greatest(args ...any) Expr { return call("GREATEST", args) }
+
+// Least returns the smallest of its arguments, Django's Least, MIN(a, b, ...)
+// on SQLite. NULL arguments behave as for Greatest.
+func Least(args ...any) Expr { return call("LEAST", args) }
+
+// callNames are the Django names of the functions of call, by SQL name.
+var callNames = map[string]string{
+	"COALESCE": "Coalesce",
+	fnConcat:   "Concat",
+	"GREATEST": "Greatest",
+	"LEAST":    "Least",
+}
+
 // Concat joins the text of its arguments, Django's Concat. Each argument is a
 // field key or an Expr; pass Value(" - ") for a literal. A NULL argument
 // counts as the empty text, and one that is not text is cast to text. It
@@ -80,17 +99,14 @@ func Coalesce(args ...any) Expr { return call("COALESCE", args) }
 //	Annotate("label", orm.Concat("name", orm.Value(" ("), "goes_by", orm.Value(")")))
 func Concat(args ...any) Expr { return call(fnConcat, args) }
 
-// resolveCall binds Coalesce or Concat. Concat casts each argument that is not
-// text to text on every dialect, as Cast does. Django's ConcatPair casts on
-// PostgreSQL only and leaves the conversion to the || of SQLite, which gives
-// the same text.
+// resolveCall binds Coalesce, Concat, Greatest or Least. Concat casts each
+// argument that is not text to text on every dialect, as Cast does. Django's
+// ConcatPair casts on PostgreSQL only and leaves the conversion to the || of
+// SQLite, which gives the same text. Greatest and Least are MAX and MIN on
+// SQLite.
 func (c *compiler) resolveCall(e Expr) (sqlNode, error) {
 	if len(e.args) < 2 {
-		name := "Coalesce"
-		if e.fn == fnConcat {
-			name = "Concat"
-		}
-		return nil, fmt.Errorf("orm: %s must take at least two expressions", name)
+		return nil, fmt.Errorf("orm: %s must take at least two expressions", callNames[e.fn])
 	}
 	args := make([]sqlNode, len(e.args))
 	for i, a := range e.args {
@@ -103,10 +119,16 @@ func (c *compiler) resolveCall(e Expr) (sqlNode, error) {
 		}
 		args[i] = n
 	}
-	if e.fn == fnConcat {
+	fn := e.fn
+	switch {
+	case fn == fnConcat:
 		return concatNode{args: args}, nil
+	case fn == "GREATEST" && c.d.Name() == "sqlite":
+		fn = "MAX"
+	case fn == "LEAST" && c.d.Name() == "sqlite":
+		fn = "MIN"
 	}
-	return callNode{fn: e.fn, args: args}, nil
+	return callNode{fn: fn, args: args}, nil
 }
 
 // Cast converts arg to the type of the field to, Django's Cast. arg is a

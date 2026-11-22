@@ -822,6 +822,29 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   ordering does not decide the position of every row, as Django's
   `_get_deterministic_ordering` does, and the ordering check reports an `F`
   expression that names a missing field (`admin.E033`).
+- ORM: the aggregates `orm.StdDev`, `orm.Variance`, `orm.AnyValue` and
+  `orm.StringAgg`, and the functions `orm.Greatest` and `orm.Least`, as
+  Django's classes of the same names. `Default` sets the value of an
+  aggregate over no rows, Django's `default=`: `orm.Sum("pages").Default(0)`.
+  `Expr.OrderBy` orders the values that `StringAgg` joins. `Avg` of a decimal
+  field returns an `orm.Decimal` and of a duration field a `time.Duration`.
+  The SQLite backend registers the statistics aggregates and `ANY_VALUE`, and
+  `Greatest` and `Least` are `MAX` and `MIN` there. What Django refuses fails
+  with Django's message: `Default` on `Count`, `Distinct` or `OrderBy` on an
+  aggregate that does not take it, `"*"` outside a plain `Count`, `Distinct`
+  on a `StringAgg` on SQLite, arithmetic of a float and a decimal, and an
+  annotation name with whitespace, quotes, semicolons, hashes or SQL comments.
+- ORM: `Aggregate` over an annotated, sliced or distinct queryset takes
+  expressions of aggregates, such as `orm.Sum("pages").Add(orm.Avg("rating"))`,
+  and leaves the annotations that the aggregates do not use out of its
+  subquery, as Django's `get_aggregation` does. Over a queryset that matches
+  no row by construction, such as `Filter("pk__in", []int{})`, `Aggregate`
+  returns 0 for `Count`, the `Default` of an aggregate and nil for the others
+  without a query. `Annotate` after `Filter` across a multi-valued relation
+  reuses the join of the filter, as in Django. `Values` grouped by an
+  expression annotation, such as `orm.F("pages").Mod(10)`, groups by the
+  expression, and `OrderBy` takes an annotation followed by a transform, such
+  as `"sum_pages__mod100"`.
 
 ### Changed
 

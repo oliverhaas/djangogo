@@ -36,11 +36,24 @@ func Case(whens ...When) Expr {
 	return Expr{kind: exprCase, whens: whens}
 }
 
-// Default sets the value of a Case for the rows that meet no branch, Django's
-// default argument. x is a field key or an Expr, or another Go value as a
-// literal. Default is an error on an expression that is not a Case.
+// Default sets the value of a Case for the rows that meet no branch, or the
+// value of an aggregate over no rows, Django's default argument. Of a Case, x
+// is a field key or an Expr, or another Go value as a literal. Of an
+// aggregate, x is an Expr or a Go value, a string included, as a literal, and
+// the aggregate becomes COALESCE(aggregate, x) with the type of the
+// aggregate:
+//
+//	Aggregate(ctx, "total", orm.Sum("pages").Default(0))
+//
+// Default is an error on Count, whose value over no rows is 0, and on an
+// expression that is neither a Case nor an aggregate.
 func (e Expr) Default(x any) Expr {
-	d := fieldOrExpr(x)
+	var d Expr
+	if e.kind == exprAggregate {
+		d = toExpr(x)
+	} else {
+		d = fieldOrExpr(x)
+	}
 	e.def = &d
 	return e
 }

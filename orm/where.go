@@ -212,9 +212,10 @@ func (n *whereNode) split(negated bool) (where, having *whereNode) {
 }
 
 // addFilters resolves every Filter and Exclude condition of the query, in
-// call order, into c.where and c.having. A join that was INNER before a call
-// is INNER after it: a later call may only relax the joins it introduced
-// itself, as in Django's Query.add_q.
+// call order, into c.where and c.having, and before each one the annotations
+// added before it. A join that was INNER before a call is INNER after it: a
+// later call may only relax the joins it introduced itself, as in Django's
+// Query.add_q.
 func (c *compiler) addFilters() error {
 	root := &whereNode{conn: connAnd}
 	if mf := c.q.m2mFilter; mf != nil && c.q.model != nil && c.q.model.PrimaryKey() != nil {
@@ -263,7 +264,10 @@ func (c *compiler) addFilters() error {
 		pred.empty = len(pred.rhs) == 0
 		root.children = append(root.children, whereChild{pred: pred})
 	}
-	for _, cond := range c.q.filters {
+	for i, cond := range c.q.filters {
+		if err := c.resolveAnnotations(i); err != nil {
+			return err
+		}
 		if cond.err != nil {
 			return cond.err
 		}

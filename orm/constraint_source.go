@@ -21,6 +21,7 @@ var functionNames = map[string]string{
 	"LOWER": "Lower", "UPPER": "Upper", "LENGTH": "Length",
 	"TRIM": "Trim", "LTRIM": "LTrim", "RTRIM": "RTrim",
 	"COALESCE": "Coalesce", fnConcat: "Concat", "ABS": "Abs",
+	"GREATEST": "Greatest", "LEAST": "Least",
 }
 
 // ConstraintSource returns Go source code that builds c, such as

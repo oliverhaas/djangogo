@@ -51,10 +51,9 @@ var querySQLDivergences = map[dialectCaseKey]string{
 	// emits ORDER BY RANDOM() on both dialects.
 	{dialect: "*", name: "order_by_random"}: "Django emits ORDER BY RAND() ASC (SQLite) / RANDOM() ASC (PostgreSQL); Djan-Go-Go emits ORDER BY RANDOM()",
 
-	// Subquery COUNT(*) aliases: Django omits outer __count and aliases the inner
-	// DISTINCT column; Djan-Go-Go aliases outer COUNT(*) AS __count and omits the
-	// redundant inner column alias.
-	{dialect: "*", name: "count_distinct"}: "Django omits outer __count alias and aliases inner DISTINCT column; Djan-Go-Go aliases outer __count only",
+	// Subquery COUNT(*) aliases: Django aliases the inner DISTINCT column;
+	// Djan-Go-Go omits the redundant inner column alias.
+	{dialect: "*", name: "count_distinct"}: "Django aliases inner DISTINCT column; Djan-Go-Go omits the redundant inner column alias",
 
 	// EXISTS shape: Django selects a literal 1 with LIMIT 1; Djan-Go-Go wraps the
 	// query in SELECT EXISTS(SELECT 1 ...).

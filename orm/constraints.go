@@ -347,8 +347,8 @@ func (c UniqueConstraint) validate(ctx context.Context, db *DB, m *Model, rv ref
 			lhsName := fmt.Sprintf("_constraint_%d", i)
 			rhsName := lhsName + "_value"
 			q.annotations = append(q.annotations,
-				annotation{name: lhsName, expr: e},
-				annotation{name: rhsName, expr: Expr{kind: exprNode, node: rhs}},
+				annotation{name: lhsName, expr: e, filters: len(q.filters)},
+				annotation{name: rhsName, expr: Expr{kind: exprNode, node: rhs}, filters: len(q.filters)},
 			)
 			cond := Q(lhsName, F(rhsName))
 			if c.NullsNotDistinct {

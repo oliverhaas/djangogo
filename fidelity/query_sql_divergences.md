@@ -59,7 +59,7 @@ caught and removed.
 | --- | --- | --- |
 | `filter_exact_bool`, `filter_exact_bool_false` | Emits bare `WHERE fid_book.published` / `WHERE NOT fid_book.published` with no bound parameter | Emits parameterized `WHERE fid_book.published = ?` with `true` / `false` |
 | `order_by_random` | Emits `ORDER BY RAND() ASC` (SQLite) / `ORDER BY RANDOM() ASC` (PostgreSQL) | Emits `ORDER BY RANDOM()` without `ASC` on both dialects |
-| `count_distinct` | Emits `SELECT COUNT(*) FROM (SELECT DISTINCT fid_book.author_id AS author FROM fid_book) subquery` | Emits `SELECT COUNT(*) AS __count FROM (SELECT DISTINCT fid_book.author_id FROM fid_book) subquery` |
+| `count_distinct` | Emits `SELECT COUNT(*) FROM (SELECT DISTINCT fid_book.author_id AS author FROM fid_book) subquery` | Emits `SELECT COUNT(*) FROM (SELECT DISTINCT fid_book.author_id FROM fid_book) subquery` |
 | `exists_all`, `exists_filtered`, `exists_none` | Emits `SELECT %s AS a FROM ... LIMIT 1` with bound param `1` | Emits `SELECT EXISTS(SELECT 1 FROM ...)` |
 | `values_list`, `values_list_flat`, `distinct_extra_order`, `annotate_expr` | Emits `AS <key>` aliases on every selected `values()` / `values_list()` column | Omits redundant aliases on plain columns (keeps aliases on annotations); on PostgreSQL `annotate_expr` also casts `$1::bigint` |
 | `values_fields`, `distinct_values`, `distinct_values_relation`, `values_transform_date` | Aliases selected columns and emits positional `ORDER BY 1 ASC` | Writes explicit column names in `ORDER BY` without redundant column aliases (a transform keeps its alias) |

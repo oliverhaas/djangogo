@@ -3,6 +3,7 @@ package orm
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -39,8 +40,8 @@ type compiler struct {
 	m2mPrefetchJoin *join
 }
 
-// compile runs the first phase for q: it resolves the annotations and then the
-// filters, in call order.
+// compile runs the first phase for q: it resolves the annotations and the
+// filters in call order.
 func (q *query) compile() (*compiler, error) {
 	if q.err != nil {
 		return nil, q.err
@@ -51,20 +52,32 @@ func (q *query) compile() (*compiler, error) {
 		joins:  newJoinSet(q.model),
 		annots: make(map[string]sqlNode, len(q.annotations)),
 	}
-	for _, a := range q.annotations {
-		n, err := c.resolveExpr(a.expr)
-		if err != nil {
-			return nil, err
-		}
-		c.annots[a.name] = n
-		c.annotNames = append(c.annotNames, a.name)
-	}
 	if err := c.addFilters(); err != nil {
+		return nil, err
+	}
+	if err := c.resolveAnnotations(len(q.filters)); err != nil {
 		return nil, err
 	}
 	// A limit of zero rows matches nothing, whatever the filters say.
 	c.empty = c.empty || q.limit == 0
 	return c, nil
+}
+
+// resolveAnnotations resolves the annotations that were added before the
+// given number of Filter and Exclude calls and are not resolved yet.
+func (c *compiler) resolveAnnotations(filters int) error {
+	for _, a := range c.q.annotations[len(c.annotNames):] {
+		if a.filters > filters {
+			return nil
+		}
+		n, err := c.resolveExpr(a.expr)
+		if err != nil {
+			return err
+		}
+		c.annots[a.name] = n
+		c.annotNames = append(c.annotNames, a.name)
+	}
+	return nil
 }
 
 // column returns the column a resolved path ends on, joining the tables on
@@ -98,8 +111,11 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 	if e.filter != nil && e.kind != exprAggregate {
 		return nil, errors.New("orm: Filter applies to aggregates only")
 	}
-	if e.def != nil && e.kind != exprCase {
-		return nil, errors.New("orm: Default applies to Case only")
+	if e.def != nil && e.kind != exprCase && e.kind != exprAggregate {
+		return nil, errors.New("orm: Default applies to Case and aggregates only")
+	}
+	if e.order != nil && e.kind != exprAggregate {
+		return nil, errors.New("orm: OrderBy applies to aggregates only")
 	}
 	switch e.kind {
 	case exprField:
@@ -130,6 +146,9 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		}
 		right, err := c.resolveExpr(*e.right)
 		if err != nil {
+			return nil, err
+		}
+		if err := c.checkCombinedTypes(e.op, left.vtype(), right.vtype()); err != nil {
 			return nil, err
 		}
 		return binaryNode{op: e.op, left: left, right: right}, nil
@@ -177,49 +196,171 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 // boolean, as Django's NegatedExpression does.
 var errNegateNonConditional = errors.New("orm: cannot negate non-conditional expressions")
 
+// checkCombinedTypes refuses arithmetic between a float and a decimal, whose
+// result type Django cannot infer either.
+func (c *compiler) checkCombinedTypes(op string, left, right valueType) error {
+	if !slices.Contains([]string{"+", "-", "*", "/", "%"}, op) {
+		return nil
+	}
+	names := map[valueType]string{typeFloat: "FloatField", typeDecimal: "DecimalField"}
+	if left == right || names[left] == "" || names[right] == "" {
+		return nil
+	}
+	return &FieldError{
+		Model: c.q.model.Name(),
+		Message: fmt.Sprintf("cannot infer type of '%s' expression involving these types: %s, %s; "+
+			"Cast one of them", op, names[left], names[right]),
+	}
+}
+
 // errStarFilter refuses Count("*") with a filter, as Django does.
 var errStarFilter = errors.New("orm: Star cannot be used with filter. Please specify a field.") //nolint:revive,staticcheck // Django's message
 
 // resolveAggregate binds an aggregate call. An aggregate of an aggregate is
 // refused here; Aggregate computes one over an annotated queryset through a
-// subquery instead.
+// subquery instead. An aggregate with a Default is COALESCE(aggregate,
+// default) with the type of the aggregate, as Django wraps it in Coalesce.
 func (c *compiler) resolveAggregate(e Expr) (sqlNode, error) {
+	if err := checkAggregate(e); err != nil {
+		return nil, err
+	}
 	if e.arg.kind == exprStar {
-		if e.filter != nil {
-			return nil, errStarFilter
+		if err := checkStar(e); err != nil {
+			return nil, err
 		}
-		if e.fn != "COUNT" || e.distinct {
-			return nil, errors.New(`orm: "*" is only valid as the argument of a plain Count`)
-		}
-		return aggNode{fn: e.fn}, nil
+		return c.aggregateDefault(e, aggNode{fn: e.fn})
 	}
 	arg, err := c.resolveExpr(*e.arg)
 	if err != nil {
 		return nil, err
 	}
 	if arg.aggregate() {
-		// Django's wording: Cannot compute Avg('n'): 'n' is an aggregate.
-		fn := e.fn[:1] + strings.ToLower(e.fn[1:])
-		name := "its argument"
-		if e.arg.kind == exprField {
-			name = "'" + e.arg.key + "'"
-		}
-		return nil, &FieldError{
-			Model:   c.q.model.Name(),
-			Message: fmt.Sprintf("cannot compute %s(%s): %s is an aggregate", fn, name, name),
-		}
+		return nil, c.aggregateOfAggregate(e)
 	}
 	agg := aggNode{fn: e.fn, arg: arg, distinct: e.distinct}
+	if agg.extra, err = c.resolveAggregateArgs(e); err != nil {
+		return nil, err
+	}
+	if agg.order, err = c.aggregateOrder(e.order); err != nil {
+		return nil, err
+	}
+	var n sqlNode = agg
 	where, match, err := c.condition(e.filter)
 	switch {
 	case err != nil:
 		return nil, err
 	case match == matchNone:
-		return emptyAggNode{agg: agg}, nil
+		n = emptyAggNode{agg: agg}
 	case match == matchSome:
 		agg.filter = condNode{where: where}
+		n = agg
 	}
-	return agg, nil
+	return c.aggregateDefault(e, n)
+}
+
+// checkStar refuses an aggregate of "*" other than a plain Count.
+func checkStar(e Expr) error {
+	if e.filter != nil {
+		return errStarFilter
+	}
+	if e.fn != "COUNT" || e.distinct {
+		return errors.New(`orm: "*" is only valid as the argument of a plain Count`)
+	}
+	return nil
+}
+
+// checkAggregate refuses what Django's Aggregate.__init__ refuses: a Default
+// of Count, Distinct on an aggregate other than Count, Sum, Avg and
+// StringAgg, and an OrderBy of an aggregate other than StringAgg.
+func checkAggregate(e Expr) error {
+	name := aggregateName(e.fn)
+	switch {
+	case e.def != nil && e.fn == "COUNT":
+		return fmt.Errorf("orm: %s does not allow default", name)
+	case e.distinct && !slices.Contains([]string{"COUNT", "SUM", "AVG", fnStringAgg}, e.fn):
+		return fmt.Errorf("orm: %s does not allow distinct", name)
+	case len(e.order) > 0 && e.fn != fnStringAgg:
+		return fmt.Errorf("orm: %s does not allow order_by", name)
+	}
+	return nil
+}
+
+// aggregateOfAggregate returns the error of an aggregate whose argument holds
+// an aggregate, in Django's wording: Cannot compute Avg('n'): 'n' is an
+// aggregate.
+func (c *compiler) aggregateOfAggregate(e Expr) error {
+	name := "its argument"
+	if e.arg.kind == exprField {
+		name = "'" + e.arg.key + "'"
+	}
+	return &FieldError{
+		Model:   c.q.model.Name(),
+		Message: fmt.Sprintf("cannot compute %s(%s): %s is an aggregate", aggregateName(e.fn), name, name),
+	}
+}
+
+// resolveAggregateArgs binds the arguments of an aggregate after the first:
+// the delimiter of a StringAgg. SQLite takes DISTINCT only in an aggregate of
+// one argument, and Django refuses it there.
+func (c *compiler) resolveAggregateArgs(e Expr) ([]sqlNode, error) {
+	if len(e.args) == 0 {
+		return nil, nil
+	}
+	if e.distinct && c.d.Name() == "sqlite" {
+		return nil, fmt.Errorf("orm: %s does not support distinct with multiple expressions on this database backend",
+			aggregateName(e.fn))
+	}
+	out := make([]sqlNode, len(e.args))
+	for i, a := range e.args {
+		n, err := c.resolveExpr(a)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = n
+	}
+	return out, nil
+}
+
+// aggregateOrder binds the terms of an aggregate's OrderBy, Django's
+// AggregateOrderBy: a key, "-" and a key, an Expr or an OrderExpr. A key is
+// the column or annotation it names; the default ordering of a related model
+// does not apply.
+func (c *compiler) aggregateOrder(terms []any) ([]orderItem, error) {
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	parsed, err := parseOrderArgs(terms)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]orderItem, len(parsed))
+	for i, t := range parsed {
+		x := F(t.key)
+		if t.expr != nil {
+			x = *t.expr
+		} else if t.random {
+			return nil, errors.New(`orm: "?" cannot order the values of an aggregate`)
+		}
+		n, err := c.resolveExpr(x)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = orderItem{node: n, desc: t.desc, nullsFirst: t.nullsFirst, nullsLast: t.nullsLast}
+	}
+	return out, nil
+}
+
+// aggregateDefault returns the aggregate n of e, wrapped in COALESCE with the
+// Default of e when it has one.
+func (c *compiler) aggregateDefault(e Expr, n sqlNode) (sqlNode, error) {
+	if e.def == nil {
+		return n, nil
+	}
+	d, err := c.resolveExpr(*e.def)
+	if err != nil {
+		return nil, err
+	}
+	return typedNode{node: callNode{fn: "COALESCE", args: []sqlNode{n, d}}, typ: n.vtype()}, nil
 }
 
 // condition resolves the condition of an aggregate's Filter or of a When and
@@ -359,6 +500,12 @@ func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected map[st
 		if selected[t.key] != "" {
 			item.alias = t.key
 		}
+	} else if n, ok, err := c.annotationTransform(t.key); ok || err != nil {
+		if err != nil {
+			return nil, err
+		}
+		item.node = n
+		key = nodeKey(c.d, n)
 	} else {
 		p, err := resolveFieldPath(c.q.model, t.key, c.annotNames)
 		if err != nil {
@@ -388,6 +535,33 @@ func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected map[st
 	}
 	seen[key] = true
 	return append(out, item), nil
+}
+
+// annotationTransform resolves a key that names an annotation followed by
+// transforms of its value, such as "sum_pages__mod100", as Django's
+// names_to_path reads an annotation as a field. It reports false for a key
+// that does not start with an annotation or goes on with a name that is not a
+// transform, so that the key resolves as a field path.
+func (c *compiler) annotationTransform(key string) (sqlNode, bool, error) {
+	parts := strings.Split(key, lookupSep)
+	for i := len(parts) - 1; i >= 1; i-- {
+		n, ok := c.annots[strings.Join(parts[:i], lookupSep)]
+		if !ok {
+			continue
+		}
+		for _, name := range parts[i:] {
+			kind := valueKind(n.vtype())
+			if !slices.Contains(transformsOf(kind), name) {
+				return nil, false, nil
+			}
+			var err error
+			if n, err = c.transform(n, kind, name); err != nil {
+				return nil, true, err
+			}
+		}
+		return n, true, nil
+	}
+	return nil, false, nil
 }
 
 // relatedOrderTerm returns the term sub of the default ordering of the model
@@ -559,6 +733,11 @@ func columnsOf(n sqlNode) []sqlNode {
 	case colNode:
 		return []sqlNode{v}
 	case binaryNode:
+		// Django groups by the expression as a whole: grouping pages % 10 by
+		// pages would split a group into one group per page count.
+		if !v.aggregate() {
+			return []sqlNode{v}
+		}
 		return append(columnsOf(v.left), columnsOf(v.right)...)
 	case transformNode:
 		// Django groups by the transform itself: grouping by its column would
@@ -586,6 +765,8 @@ func columnsOf(n sqlNode) []sqlNode {
 			out = append(out, columnsOf(p)...)
 		}
 		return out
+	case typedNode:
+		return columnsOf(v.node)
 	default:
 		return nil
 	}

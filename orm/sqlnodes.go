@@ -357,9 +357,16 @@ func (n binaryNode) render(w *sqlWriter) {
 	w.write(")")
 }
 
-// vtype is float when either side is float, and otherwise the type of the
-// first side that has a known type.
-func (n binaryNode) vtype() valueType { return commonType([]sqlNode{n.left, n.right}) }
+// vtype is float when either side is float, decimal when either side is
+// decimal, and otherwise the type of the first side that has a known type, as
+// Django combines an integer with a float or a decimal.
+func (n binaryNode) vtype() valueType {
+	t := commonType([]sqlNode{n.left, n.right})
+	if t != typeFloat && (n.left.vtype() == typeDecimal || n.right.vtype() == typeDecimal) {
+		return typeDecimal
+	}
+	return t
+}
 
 // commonType is the type that the values of nodes are read as together: float
 // when one of them is float, and otherwise the first type that is known.
@@ -431,6 +438,22 @@ func (notNode) vtype() valueType { return typeBool }
 
 // aggregate reports whether the negated expression holds an aggregate.
 func (n notNode) aggregate() bool { return n.inner.aggregate() }
+
+// typedNode is node read as type typ, such as the COALESCE of an aggregate
+// with its Default, which has the type of the aggregate.
+type typedNode struct {
+	node sqlNode
+	typ  valueType
+}
+
+// render writes node.
+func (n typedNode) render(w *sqlWriter) { n.node.render(w) }
+
+// vtype is typ.
+func (n typedNode) vtype() valueType { return n.typ }
+
+// aggregate reports whether node holds an aggregate.
+func (n typedNode) aggregate() bool { return n.node.aggregate() }
 
 // callNode is a call of a function of several arguments, such as
 // COALESCE(a, b).
@@ -593,18 +616,27 @@ func (likeExprNode) vtype() valueType { return typeString }
 // aggregate reports whether the expression holds an aggregate.
 func (n likeExprNode) aggregate() bool { return n.inner.aggregate() }
 
-// aggNode is an aggregate function call. arg is nil for COUNT(*), and filter
-// is the condition of a Filter, nil without one.
+// aggNode is an aggregate function call. arg is nil for COUNT(*), extra holds
+// the arguments after the first, such as the delimiter of STRING_AGG, order
+// the terms of its ORDER BY, and filter the condition of a Filter, nil
+// without one.
 type aggNode struct {
 	fn       string
 	arg      sqlNode
+	extra    []sqlNode
 	distinct bool
+	order    []orderItem
 	filter   sqlNode
 }
 
-// render writes "FN(DISTINCT arg)" or "FN(*)", followed by
-// "FILTER (WHERE condition)" for a filter.
+// render writes "FN(DISTINCT arg, extra ORDER BY order)" or "FN(*)",
+// followed by "FILTER (WHERE condition)" for a filter. A decimal aggregate is
+// cast to NUMERIC on SQLite, as for a funcNode.
 func (n aggNode) render(w *sqlWriter) {
+	if n.vtype() == typeDecimal && w.d.Name() == "sqlite" {
+		w.write("CAST(")
+		defer w.write(" AS NUMERIC)")
+	}
 	w.write(n.fn + "(")
 	if n.distinct {
 		w.write("DISTINCT ")
@@ -614,6 +646,29 @@ func (n aggNode) render(w *sqlWriter) {
 	} else {
 		n.arg.render(w)
 	}
+	for _, x := range n.extra {
+		w.write(", ")
+		x.render(w)
+	}
+	for i, o := range n.order {
+		if i == 0 {
+			w.write(" ORDER BY ")
+		} else {
+			w.write(", ")
+		}
+		o.node.render(w)
+		if o.desc {
+			w.write(" DESC")
+		} else {
+			w.write(" ASC")
+		}
+		switch {
+		case o.nullsLast:
+			w.write(" NULLS LAST")
+		case o.nullsFirst:
+			w.write(" NULLS FIRST")
+		}
+	}
 	w.write(")")
 	if n.filter != nil {
 		w.write(" FILTER (WHERE ")
@@ -622,13 +677,23 @@ func (n aggNode) render(w *sqlWriter) {
 	}
 }
 
-// vtype is int64 for COUNT, float64 for AVG, and the argument's type for SUM,
-// MIN, and MAX.
+// vtype is int64 for COUNT, string for STRING_AGG and the argument's type for
+// SUM, MIN, MAX and ANY_VALUE. AVG keeps a decimal or a duration argument's
+// type and the deviations and variances a decimal one, and they are float64
+// for the others, as Django's NumericOutputFieldMixin resolves it.
 func (n aggNode) vtype() valueType {
 	switch n.fn {
 	case "COUNT":
 		return typeInt
-	case "AVG":
+	case fnStringAgg:
+		return typeString
+	case "AVG", "STDDEV_POP", "STDDEV_SAMP", "VAR_POP", "VAR_SAMP":
+		if n.arg != nil {
+			t := n.arg.vtype()
+			if t == typeDecimal || (t == typeDuration && n.fn == "AVG") {
+				return t
+			}
+		}
 		return typeFloat
 	default:
 		if n.arg == nil {
@@ -712,6 +777,8 @@ func readsJoin(n sqlNode) bool {
 		return slices.ContainsFunc(nodeParts(n), readsJoin)
 	case condNode:
 		return slices.ContainsFunc(n.where.operands(), readsJoin)
+	case typedNode:
+		return readsJoin(n.node)
 	default:
 		return false
 	}

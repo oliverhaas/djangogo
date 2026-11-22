@@ -3,6 +3,7 @@ package orm
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -56,6 +57,11 @@ type orderTerm struct {
 type annotation struct {
 	name string
 	expr Expr
+	// filters is the number of Filter and Exclude calls before the Annotate
+	// call. The compiler resolves the annotation between those filters and
+	// the later ones, so that it reuses the joins of the earlier filters, as
+	// Django does.
+	filters int
 }
 
 // valuesSpec records a Values or ValuesList call.
@@ -238,6 +244,7 @@ func (q *query) annotate(args []any) *query {
 				return cp
 			}
 		}
+		a.filters = len(cp.filters)
 		cp.annotations = append(cp.annotations, a)
 	}
 	return cp
@@ -266,6 +273,21 @@ func (q *query) withValues(keys []string) *query {
 	return cp
 }
 
+// forbiddenAlias matches what Django's FORBIDDEN_ALIAS_PATTERN refuses in the
+// name of an annotation: quotation marks, brackets, semicolons, whitespace,
+// hashes and SQL comments.
+var forbiddenAlias = regexp.MustCompile(`['"\x60\][;\s]|#|--|/\*|\*/`)
+
+// checkAlias refuses a name that forbiddenAlias matches, as Django's
+// Query.check_alias does.
+func checkAlias(name string) error {
+	if forbiddenAlias.MatchString(name) {
+		return errors.New("orm: column aliases cannot contain whitespace characters, hashes, " +
+			"quotation marks, semicolons, or SQL comments")
+	}
+	return nil
+}
+
 // parseAnnotations reads the arguments of Annotate and Aggregate: a string
 // name followed by its Expr, or a bare aggregate that takes Django's default
 // alias "<key>__<function>". what names the arguments in an error:
@@ -285,6 +307,9 @@ func parseAnnotations(args []any, what string) ([]annotation, error) {
 			}
 			if a == "" {
 				return nil, errors.New("orm: an annotation name must not be empty")
+			}
+			if err := checkAlias(a); err != nil {
+				return nil, err
 			}
 			out = append(out, annotation{name: a, expr: e})
 		case Expr:

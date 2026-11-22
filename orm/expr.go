@@ -26,8 +26,8 @@ const (
 	// exprNode is a value that is already bound to the query: the value a
 	// transform of RegisterTransform transforms.
 	exprNode
-	// exprCall is a call of a function of several arguments: Coalesce or
-	// Concat.
+	// exprCall is a call of a function of several arguments: Coalesce,
+	// Concat, Greatest or Least.
 	exprCall
 	// exprCast converts its argument to the type of a field.
 	exprCast
@@ -39,9 +39,10 @@ const (
 
 // Expr is an SQL value expression: a field reference (F), a literal (Value),
 // an arithmetic or bitwise combination of expressions, an aggregate (Count,
-// Sum, Avg, Min, Max), a text function (Lower, Upper, Length, Trim, LTrim,
-// RTrim, Concat), Abs, Coalesce, Cast, a conditional expression (Case) or
-// the negation of a boolean expression (Not). It is immutable; every method
+// Sum, Avg, Min, Max, StdDev, Variance, AnyValue, StringAgg), a text function
+// (Lower, Upper, Length, Trim, LTrim, RTrim, Concat), Abs, Coalesce,
+// Greatest, Least, Cast, a conditional expression (Case) or the negation of a
+// boolean expression (Not). It is immutable; every method
 // returns a new Expr.
 //
 // An Expr can be the value of a filter, so a column is compared with another
@@ -76,14 +77,18 @@ type Expr struct {
 	typed  bool
 	// node is the bound value of an exprNode.
 	node sqlNode
-	// args are the arguments of an exprCall.
+	// args are the arguments of an exprCall, and of an exprAggregate the
+	// arguments after the first, such as the delimiter of StringAgg.
 	args []Expr
 	// castTo is the field whose type an exprCast converts to.
 	castTo *Field
 	// whens are the branches of an exprCase, and def its Default, nil
-	// without one.
+	// without one. def is also the Default of an aggregate.
 	whens []When
 	def   *Expr
+	// order holds the terms of an aggregate's OrderBy, in the forms
+	// QuerySet.OrderBy takes.
+	order []any
 }
 
 // F references a model field by key, like Django's F(): F("views") or, across
@@ -202,6 +207,20 @@ func (e Expr) Filter(args ...any) Expr {
 	return e
 }
 
+// OrderBy orders the values that a StringAgg joins, Django's order_by
+// argument of an aggregate. Each term is a field key, "-" and a key for
+// descending order, an Expr or an OrderExpr:
+//
+//	orm.StringAgg("name", orm.Value(";")).OrderBy("-original_opening")
+//
+// An aggregate with an ordering has no default alias. OrderBy is an error on
+// an expression that is not a StringAgg, as Django allows order_by only
+// where the order changes the value.
+func (e Expr) OrderBy(terms ...any) Expr {
+	e.order = slices.Clone(terms)
+	return e
+}
+
 // aggregate builds a call of the aggregate function fn. arg is a field key or
 // an Expr.
 func aggregate(fn string, arg any) Expr {
@@ -229,7 +248,9 @@ func Count(arg any) Expr { return aggregate("COUNT", arg) }
 func Sum(arg any) Expr { return aggregate("SUM", arg) }
 
 // Avg is the AVG aggregate (Django's Avg). arg is a field key or an Expr. The
-// result is a float64 on every dialect, and nil when no row matches.
+// result is an orm.Decimal for a decimal field, a time.Duration for a
+// duration field and a float64 for the others, on every dialect, and nil when
+// no row matches.
 func Avg(arg any) Expr { return aggregate("AVG", arg) }
 
 // Min is the MIN aggregate (Django's Min). arg is a field key or an Expr. The
@@ -240,14 +261,79 @@ func Min(arg any) Expr { return aggregate("MIN", arg) }
 // result has the Go type of the field, and is nil when no row matches.
 func Max(arg any) Expr { return aggregate("MAX", arg) }
 
+// StdDev is the standard deviation aggregate (Django's StdDev): of the
+// population, STDDEV_POP, or of a sample when sample is set, STDDEV_SAMP. arg
+// is a field key or an Expr. The result is an orm.Decimal for a decimal field
+// and a float64 for the others, and nil when no row matches or, for a sample,
+// when one row matches. SQLite has no such function; the SQLite backend
+// registers one.
+func StdDev(arg any, sample bool) Expr {
+	if sample {
+		return aggregate("STDDEV_SAMP", arg)
+	}
+	return aggregate("STDDEV_POP", arg)
+}
+
+// Variance is the variance aggregate (Django's Variance): of the population,
+// VAR_POP, or of a sample when sample is set, VAR_SAMP. arg is a field key or
+// an Expr. The result is that of StdDev.
+func Variance(arg any, sample bool) Expr {
+	if sample {
+		return aggregate("VAR_SAMP", arg)
+	}
+	return aggregate("VAR_POP", arg)
+}
+
+// AnyValue is the ANY_VALUE aggregate (Django's AnyValue): one of the values
+// of the group that is not NULL, so that a column which is the same in each
+// row of a group can be selected without grouping by it. arg is a field key
+// or an Expr, and the result has its Go type. PostgreSQL has ANY_VALUE from
+// version 16 on; the SQLite backend registers one.
+func AnyValue(arg any) Expr { return aggregate("ANY_VALUE", arg) }
+
+// StringAgg joins the text of the values of arg with delimiter between them,
+// Django's StringAgg, STRING_AGG in SQL. arg and delimiter are field keys or
+// Exprs; pass Value(";") for a literal delimiter. The result is a string, nil
+// when no row matches. OrderBy orders the values. SQLite refuses Distinct on
+// it, since its STRING_AGG takes the delimiter as a second argument.
+//
+//	Aggregate(ctx, "names", orm.StringAgg("name", orm.Value(", ")).OrderBy("name"))
+func StringAgg(arg any, delimiter any) Expr {
+	e := aggregate(fnStringAgg, arg)
+	e.args = []Expr{fieldOrExpr(delimiter)}
+	return e
+}
+
+// fnStringAgg is the SQL function of StringAgg.
+const fnStringAgg = "STRING_AGG"
+
+// aggregateName returns the name of the Django aggregate class of the SQL
+// function fn, as Django's messages and default aliases name it.
+func aggregateName(fn string) string {
+	switch fn {
+	case "STDDEV_POP", "STDDEV_SAMP":
+		return "StdDev"
+	case "VAR_POP", "VAR_SAMP":
+		return "Variance"
+	case "ANY_VALUE":
+		return "AnyValue"
+	case fnStringAgg:
+		return "StringAgg"
+	default:
+		return fn[:1] + strings.ToLower(fn[1:])
+	}
+}
+
 // defaultAlias returns the name Django gives an aggregate that is passed
 // without one, "<key>__<function>" (for example "age__avg"). Only an aggregate
-// over a plain field reference without a filter has a default alias.
+// of one plain field reference, without a filter or an ordering, has a default
+// alias.
 func (e Expr) defaultAlias() (string, bool) {
-	if e.kind != exprAggregate || e.arg == nil || e.arg.kind != exprField || e.filter != nil {
+	if e.kind != exprAggregate || e.arg == nil || e.arg.kind != exprField || e.filter != nil ||
+		len(e.args) > 0 || len(e.order) > 0 {
 		return "", false
 	}
-	return e.arg.key + "__" + strings.ToLower(e.fn), true
+	return e.arg.key + "__" + strings.ToLower(aggregateName(e.fn)), true
 }
 
 // containsAggregate reports whether the expression holds an aggregate call.

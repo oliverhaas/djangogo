@@ -2,9 +2,12 @@ package orm
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
+	"time"
 )
 
 // subqueryAlias names the derived table of an aggregate computed over a
@@ -25,8 +28,8 @@ func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, err
 	}
 	w := newSQLWriter(c.d)
 	types := make([]valueType, len(aggs))
-	// The values over no rows are known when every aggregate is a plain one.
-	skip := c.empty && plainAggregates(aggs)
+	// The values over no rows are known when every expression has one.
+	skip := c.empty && emptyValuesKnown(aggs)
 
 	if !q.hasAggregates() && !q.sliced() && !q.distinct {
 		items := make([]selectItem, len(aggs))
@@ -45,85 +48,82 @@ func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, err
 			c.annotNames = append(c.annotNames, a.name)
 		}
 		if skip {
-			return "", nil, nil, errEmptyResultSet
+			return "", nil, types, errEmptyResultSet
 		}
 		stmt := &selectStmt{c: c, items: items, limit: -1}
 		stmt.render(w)
 		return w.String(), w.args, types, nil
 	}
 
-	var inner []selectItem
-	if q.values != nil {
-		inner, _, err = c.valuesItems()
-		if err != nil {
-			return "", nil, nil, err
-		}
-	} else {
-		for _, f := range q.model.fields {
-			inner = append(inner, selectItem{node: c.baseColumn(f)})
+	inner, prunable, err := c.aggregateInner()
+	if err != nil {
+		return "", nil, nil, err
+	}
+	// innerColumn returns the column of the subquery that selects n: an item
+	// that selects it already, or a new one named "__col1", "__col2" and so
+	// on, as Django names them.
+	aliases := make(map[string]string, len(inner))
+	for _, it := range inner {
+		if key := nodeKey(c.d, it.node); it.alias != "" && aliases[key] == "" {
+			aliases[key] = it.alias
 		}
 	}
-	outer := make([]selectItem, len(aggs))
-	// innerColumn selects n in the subquery and returns its column there,
-	// named "__col1", "__col2" and so on, as Django names them.
+	used := make(map[string]bool)
 	cols := 0
 	innerColumn := func(n sqlNode) subColNode {
-		cols++
-		col := "__col" + strconv.Itoa(cols)
-		inner = append(inner, selectItem{node: n, alias: col})
+		key := nodeKey(c.d, n)
+		col, ok := aliases[key]
+		if !ok {
+			cols++
+			col = "__col" + strconv.Itoa(cols)
+			inner = append(inner, selectItem{node: n, alias: col})
+			aliases[key] = col
+		}
+		used[col] = true
 		return subColNode{table: subqueryAlias, column: col, typ: n.vtype()}
 	}
+	// outer binds the expressions of the outer statement: each aggregate is
+	// computed over columns of the subquery, and a key outside an aggregate
+	// names an aggregate of the call before it.
+	outer := make([]selectItem, len(aggs))
+	named := make(map[string]sqlNode, len(aggs))
+	agg := func(e Expr) (sqlNode, error) {
+		return c.outerAggregate(e, named, innerColumn)
+	}
 	for i, a := range aggs {
-		if a.expr.kind != exprAggregate {
-			return "", nil, nil, errors.New(
-				"orm: only a plain aggregate can be computed over an annotated, sliced, or distinct queryset")
-		}
-		agg := aggNode{fn: a.expr.fn, distinct: a.expr.distinct}
-		if a.expr.arg.kind == exprStar {
-			if a.expr.filter != nil {
-				return "", nil, nil, errStarFilter
-			}
-		} else {
-			arg, err := c.resolveExpr(*a.expr.arg)
-			if err != nil {
-				return "", nil, nil, err
-			}
-			agg.arg = innerColumn(arg)
-		}
-		// The subquery selects the condition of a filter, and the outer
-		// aggregate filters on that column.
-		where, match, err := c.condition(a.expr.filter)
+		e, err := outerExpr(a.expr, named, agg)
 		if err != nil {
 			return "", nil, nil, err
 		}
-		var n sqlNode = agg
-		switch match {
-		case matchNone:
-			n = emptyAggNode{agg: agg}
-		case matchSome:
-			agg.filter = innerColumn(condNode{where: where})
-			n = agg
+		n, err := c.resolveExpr(e)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		if !n.aggregate() {
+			return "", nil, nil, fmt.Errorf("orm: %s is not an aggregate expression", a.name)
 		}
 		outer[i] = selectItem{node: n, alias: a.name}
 		types[i] = n.vtype()
+		named[a.name] = n
 	}
+	inner = c.pruneInner(inner, prunable, used)
 	// The order of the inner rows only matters when the query is sliced.
 	sub, err := c.build(inner, q.sliced())
 	if err != nil {
 		return "", nil, nil, err
 	}
 	if skip {
-		return "", nil, nil, errEmptyResultSet
+		return "", nil, types, errEmptyResultSet
 	}
 	sub.forUpdate = false
+	// The outer columns are read by position, so they carry no alias, as in
+	// Django's SQLAggregateCompiler.
 	w.write("SELECT ")
 	for i, it := range outer {
 		if i > 0 {
 			w.write(", ")
 		}
 		it.node.render(w)
-		w.write(" AS ")
-		w.ident(it.alias)
 	}
 	w.write(" FROM (")
 	sub.render(w)
@@ -132,15 +132,234 @@ func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, err
 	return w.String(), w.args, types, nil
 }
 
-// plainAggregates reports whether every expression is a bare aggregate call,
-// whose value over no rows is known: zero for Count and NULL for the others.
-func plainAggregates(aggs []annotation) bool {
+// aggregateInner returns the items that the subquery of aggregateSQL selects
+// before the columns of the aggregates are added, and the aliases of the
+// annotations among them that pruneInner may leave out. A Values query
+// selects its keys, a distinct query every field and annotation, since
+// DISTINCT compares them all, and any other query its annotations only, as
+// Django's get_aggregation drops the default columns.
+func (c *compiler) aggregateInner() ([]selectItem, map[string]bool, error) {
+	q := c.q
+	prunable := make(map[string]bool)
+	if q.values != nil {
+		items, _, err := c.valuesItems()
+		if err != nil || q.distinct {
+			return items, prunable, err
+		}
+		for _, name := range c.annotNames[q.values.annotated:] {
+			if !slices.Contains(q.values.keys, name) {
+				prunable[name] = true
+			}
+		}
+		return items, prunable, nil
+	}
+	var items []selectItem
+	if q.distinct {
+		for _, f := range q.model.fields {
+			items = append(items, selectItem{node: c.baseColumn(f)})
+		}
+	}
+	for _, name := range c.annotNames {
+		items = append(items, selectItem{node: c.annots[name], alias: name})
+		prunable[name] = !q.distinct
+	}
+	return items, prunable, nil
+}
+
+// pruneInner leaves out of items each prunable annotation that the
+// aggregates do not use and that adds no column to the GROUP BY, as Django's
+// get_aggregation masks the annotations of its inner query. The rows of the
+// subquery stay the same. Without any item left it selects the primary key.
+func (c *compiler) pruneInner(items []selectItem, prunable, used map[string]bool) []selectItem {
+	kept := make([]selectItem, 0, len(items))
+	for _, it := range items {
+		if prunable[it.alias] && !used[it.alias] && len(columnsOf(it.node)) == 0 {
+			continue
+		}
+		kept = append(kept, it)
+	}
+	if len(kept) == 0 {
+		kept = append(kept, selectItem{node: c.baseColumn(c.q.model.pk)})
+	}
+	return kept
+}
+
+// outerExpr returns e with each aggregate replaced by the node that agg binds
+// it to, and each key by the aggregate of named it names, so that resolving
+// the result reads no column of the query. It refuses a key that names no
+// aggregate of named, and an expression that holds an aggregate in a part
+// other than an operand or a function argument.
+func outerExpr(e Expr, named map[string]sqlNode, agg func(Expr) (sqlNode, error)) (Expr, error) {
+	switch e.kind {
+	case exprAggregate:
+		n, err := agg(e)
+		return Expr{kind: exprNode, node: n}, err
+	case exprField:
+		n, ok := named[e.key]
+		if !ok {
+			return Expr{}, fmt.Errorf("orm: %s is not an aggregate of the call", e.key)
+		}
+		return Expr{kind: exprNode, node: n}, nil
+	case exprBinary:
+		left, err := outerExpr(*e.left, named, agg)
+		if err != nil {
+			return Expr{}, err
+		}
+		right, err := outerExpr(*e.right, named, agg)
+		if err != nil {
+			return Expr{}, err
+		}
+		e.left, e.right = &left, &right
+		return e, nil
+	case exprFunc, exprCast:
+		arg, err := outerExpr(*e.arg, named, agg)
+		if err != nil {
+			return Expr{}, err
+		}
+		e.arg = &arg
+		return e, nil
+	case exprCall:
+		args := make([]Expr, len(e.args))
+		for i, a := range e.args {
+			var err error
+			if args[i], err = outerExpr(a, named, agg); err != nil {
+				return Expr{}, err
+			}
+		}
+		e.args = args
+		return e, nil
+	case exprValue:
+		return e, nil
+	default:
+		if e.containsAggregate() {
+			return Expr{}, errors.New(
+				"orm: this expression cannot be computed over an annotated, sliced, or distinct queryset")
+		}
+		return e, nil
+	}
+}
+
+// outerAggregate binds the aggregate e of the statement that aggregates over
+// the subquery of an annotated, sliced, or distinct query: its argument, its
+// ordering and the condition of its Filter are columns that innerColumn
+// selects in the subquery, and its Default is bound as an outer expression.
+// An argument that names an aggregate of named is refused, as in a plain
+// aggregate.
+func (c *compiler) outerAggregate(e Expr, named map[string]sqlNode, innerColumn func(sqlNode) subColNode) (sqlNode, error) {
+	if err := checkAggregate(e); err != nil {
+		return nil, err
+	}
+	agg := aggNode{fn: e.fn, distinct: e.distinct}
+	if e.arg.kind == exprStar {
+		if err := checkStar(e); err != nil {
+			return nil, err
+		}
+	} else {
+		if _, ok := named[e.arg.key]; ok && e.arg.kind == exprField {
+			return nil, c.aggregateOfAggregate(e)
+		}
+		arg, err := c.resolveExpr(*e.arg)
+		if err != nil {
+			return nil, err
+		}
+		agg.arg = innerColumn(arg)
+	}
+	extra, err := c.resolveAggregateArgs(e)
+	if err != nil {
+		return nil, err
+	}
+	for _, x := range extra {
+		agg.extra = append(agg.extra, innerColumn(x))
+	}
+	order, err := c.aggregateOrder(e.order)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range order {
+		o.node = innerColumn(o.node)
+		agg.order = append(agg.order, o)
+	}
+	// The subquery selects the condition of a filter, and the outer
+	// aggregate filters on that column.
+	where, match, err := c.condition(e.filter)
+	if err != nil {
+		return nil, err
+	}
+	var n sqlNode = agg
+	switch match {
+	case matchNone:
+		n = emptyAggNode{agg: agg}
+	case matchSome:
+		agg.filter = innerColumn(condNode{where: where})
+		n = agg
+	}
+	if e.def == nil {
+		return n, nil
+	}
+	def, err := outerExpr(*e.def, named, func(x Expr) (sqlNode, error) {
+		return c.outerAggregate(x, named, innerColumn)
+	})
+	if err != nil {
+		return nil, err
+	}
+	e.def = &def
+	return c.aggregateDefault(e, n)
+}
+
+// emptyValuesKnown reports whether the value of every expression over no rows
+// is known, so that an aggregate over a query known to match nothing runs no
+// statement.
+func emptyValuesKnown(aggs []annotation) bool {
 	for _, a := range aggs {
-		if a.expr.kind != exprAggregate {
+		if _, ok := emptyValue(a.expr); !ok {
 			return false
 		}
 	}
 	return true
+}
+
+// emptyValue returns the value of e over no rows, Django's
+// empty_result_set_value: zero for Count, the value over no rows of the
+// Default of another aggregate and NULL without one, a literal itself, and
+// the first value of a Coalesce that is not NULL. It reports false for the
+// other expressions, whose value only the database gives.
+func emptyValue(e Expr) (any, bool) {
+	switch e.kind {
+	case exprAggregate:
+		switch {
+		case e.fn == "COUNT":
+			return int64(0), true
+		case e.def != nil:
+			return emptyValue(*e.def)
+		}
+		return nil, true
+	case exprValue:
+		return e.value, true
+	case exprCall:
+		if e.fn != "COALESCE" {
+			return nil, false
+		}
+		for _, a := range e.args {
+			if v, ok := emptyValue(a); !ok || v != nil {
+				return v, ok
+			}
+		}
+		return nil, true
+	}
+	return nil, false
+}
+
+// emptyResult converts the value over no rows v to the Go type of t, as a
+// value the database returns for t is converted.
+func emptyResult(v any, t valueType) (any, error) {
+	if d, ok := v.(time.Duration); ok && t == typeDuration {
+		return d, nil
+	}
+	v, err := driver.DefaultParameterConverter.ConvertValue(v)
+	if err != nil {
+		return nil, err
+	}
+	return convertValue(v, t)
 }
 
 // aggregate runs the aggregates over the rows of q and returns their values
@@ -149,10 +368,10 @@ func (q *query) aggregate(ctx context.Context, aggs []annotation) (map[string]an
 	query, args, types, err := q.aggregateSQL(aggs)
 	if errors.Is(err, errEmptyResultSet) {
 		out := make(map[string]any, len(aggs))
-		for _, a := range aggs {
-			out[a.name] = nil
-			if a.expr.fn == "COUNT" {
-				out[a.name] = int64(0)
+		for i, a := range aggs {
+			v, _ := emptyValue(a.expr)
+			if out[a.name], err = emptyResult(v, types[i]); err != nil {
+				return nil, fmt.Errorf("orm: aggregate %s: %s: %w", q.model.Name(), a.name, err)
 			}
 		}
 		return out, nil

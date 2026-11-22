@@ -1077,14 +1077,17 @@ func assignFieldScanned(d Dialect, f *Field, dst reflect.Value, v any) error {
 	return assignScanned(dst, v)
 }
 
-// scanDuration converts a driver value (SQLite int64 microseconds or PostgreSQL
-// INTERVAL text) into a time.Duration.
+// scanDuration converts a driver value (SQLite int64 microseconds, a float of
+// microseconds such as SQLite's AVG, or PostgreSQL INTERVAL text) into a
+// time.Duration.
 func scanDuration(v any) (time.Duration, error) {
 	switch x := v.(type) {
 	case time.Duration:
 		return x, nil
 	case int64:
 		return time.Duration(x) * time.Microsecond, nil
+	case float64:
+		return time.Duration(math.RoundToEven(x)) * time.Microsecond, nil
 	case string:
 		return ParsePGInterval(x)
 	case []byte:
