@@ -16,6 +16,7 @@ import (
 	"github.com/oliverhaas/djangogo/conf"
 	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/csrf"
+	"github.com/oliverhaas/djangogo/mail"
 	"github.com/oliverhaas/djangogo/messages"
 	"github.com/oliverhaas/djangogo/middleware"
 	"github.com/oliverhaas/djangogo/migrations"
@@ -25,9 +26,9 @@ import (
 )
 
 // This file turns the settings into the configuration of the contrib
-// packages: the auth app, the session and CSRF middleware, the context
-// processors of the template engine and the post-migrate hook that creates
-// content types and permissions.
+// packages: the auth app, the mail package, the session and CSRF
+// middleware, the context processors of the template engine and the
+// post-migrate hook that creates content types and permissions.
 
 // configureAuth applies the auth settings to the auth package. It starts from
 // the active configuration, so the backends a project sets in code before New
@@ -66,6 +67,57 @@ func (a *Application) configureAuth() error {
 	}
 	auth.Configure(cfg)
 	return nil
+}
+
+// configureMail applies the email settings to the mail package. The backend
+// must be one the mail package knows, by its name or by Django's dotted path
+// of a built-in backend.
+func (a *Application) configureMail() error {
+	s := a.Settings
+	backend := mailBackendName(s.EmailBackend)
+	if !mail.HasBackend(backend) {
+		return &conf.ImproperlyConfigured{Msg: fmt.Sprintf(
+			"EMAIL_BACKEND %q is not a known email backend; the backends are %s.",
+			s.EmailBackend, strings.Join(mail.BackendNames(), ", "))}
+	}
+	// Validate reports a TimeZone that does not load; the Date header then
+	// takes the local time zone.
+	loc, _ := s.Location()
+	mail.Configure(mail.Config{
+		Backend:          backend,
+		Host:             s.EmailHost,
+		Port:             s.EmailPort,
+		HostUser:         s.EmailHostUser,
+		HostPassword:     s.EmailHostPassword,
+		UseTLS:           s.EmailUseTLS,
+		UseSSL:           s.EmailUseSSL,
+		SSLCertfile:      s.EmailSSLCertfile,
+		SSLKeyfile:       s.EmailSSLKeyfile,
+		Timeout:          s.EmailTimeout,
+		FilePath:         s.EmailFilePath,
+		DefaultFromEmail: s.DefaultFromEmail,
+		ServerEmail:      s.ServerEmail,
+		Admins:           s.Admins,
+		Managers:         s.Managers,
+		SubjectPrefix:    s.EmailSubjectPrefix,
+		UseLocaltime:     s.EmailUseLocaltime,
+		Location:         loc,
+		DefaultCharset:   s.DefaultCharset,
+	})
+	return nil
+}
+
+// mailBackendName returns the name of the mail backend that Django's dotted
+// path "django.core.mail.backends.<name>.EmailBackend" selects, or name
+// unchanged.
+func mailBackendName(name string) string {
+	const prefix, suffix = "django.core.mail.backends.", ".EmailBackend"
+	if short, ok := strings.CutPrefix(name, prefix); ok {
+		if short, ok = strings.CutSuffix(short, suffix); ok && !strings.Contains(short, ".") {
+			return short
+		}
+	}
+	return name
 }
 
 // isSecure reports whether r reached the site over HTTPS, Django's

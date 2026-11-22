@@ -930,6 +930,29 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   the ordering of the queryset, and a submitted row outside it is an invalid
   choice, also in a raw-id or autocomplete field. The new
   `orm.LabeledQuerySetRows` returns the labeled rows of a queryset.
+- Mail: the new `mail` package sends email, as Django's `django.core.mail`.
+  `mail.Message` builds the MIME message of Django's `EmailMessage` and
+  `EmailMultiAlternatives` with alternatives, attachments, attached messages,
+  inline `mail.Part`s, extra headers, Cc, Bcc and Reply-To.
+  `mail.SendMail`, `mail.SendMassMail`, `mail.MailAdmins` and
+  `mail.MailManagers` are Django's helpers. The backends are "smtp" (STARTTLS,
+  TLS, login, client certificates), "console", "file", "locmem" and "dummy";
+  `mail.RegisterBackend` adds one. Headers fold and parse as in the email
+  package of Python 3.14, which fixes folding bugs of the Python 3.12 and 3.13
+  that Django 6.0 supports.
+- Settings: the email settings of Django, `EmailBackend` (EMAIL_BACKEND,
+  default "smtp", also Django's dotted path of a built-in backend),
+  `EmailHost`, `EmailPort`, `EmailHostUser`, `EmailHostPassword`,
+  `EmailUseTLS`, `EmailUseSSL`, `EmailSSLCertfile`, `EmailSSLKeyfile`,
+  `EmailTimeout`, `EmailFilePath`, `EmailSubjectPrefix`, `EmailUseLocaltime`,
+  `DefaultFromEmail`, `ServerEmail`, `Admins`, `Managers` and
+  `DefaultCharset`. `djangogo.New` applies them to the `mail` package and
+  fails for an unknown backend.
+- Commands: `sendtestemail` sends a test email to the given addresses, and
+  with `--managers` or `--admins` to the managers or admins.
+- Testing: `djangotest.LocmemMail` sends the mail of a test to the outbox of
+  the locmem backend, as Django's test runner does; `mail.Outbox` returns the
+  messages.
 
 ### Changed
 

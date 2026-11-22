@@ -81,6 +81,25 @@ var djangoDefaults = map[string]any{
 	"SECURE_PROXY_SSL_HEADER":           []string(nil),
 	"X_FRAME_OPTIONS":                   "DENY",
 
+	"EMAIL_BACKEND":        "smtp", // differs: "django.core.mail.backends.smtp.EmailBackend"
+	"EMAIL_HOST":           "localhost",
+	"EMAIL_PORT":           25,
+	"EMAIL_HOST_USER":      "",
+	"EMAIL_HOST_PASSWORD":  "",
+	"EMAIL_USE_TLS":        false,
+	"EMAIL_USE_SSL":        false,
+	"EMAIL_SSL_CERTFILE":   "",
+	"EMAIL_SSL_KEYFILE":    "",
+	"EMAIL_TIMEOUT":        time.Duration(0),
+	"EMAIL_FILE_PATH":      "",
+	"EMAIL_SUBJECT_PREFIX": "[Django] ",
+	"EMAIL_USE_LOCALTIME":  false,
+	"DEFAULT_FROM_EMAIL":   "webmaster@localhost",
+	"SERVER_EMAIL":         "root@localhost",
+	"ADMINS":               []string(nil),
+	"MANAGERS":             []string(nil),
+	"DEFAULT_CHARSET":      "utf-8",
+
 	"PASSWORD_HASHERS": []string(nil), // differs: five dotted class paths
 }
 

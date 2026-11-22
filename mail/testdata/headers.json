@@ -1,0 +1,2389 @@
+{
+ "headers": [
+  {
+   "name": "Subject",
+   "value": "",
+   "str": "",
+   "default": "Subject:\n",
+   "smtp": "Subject:\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "Subject",
+   "str": "Subject",
+   "default": "Subject: Subject\n",
+   "smtp": "Subject: Subject\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "  leading and trailing  ",
+   "str": "  leading and trailing  ",
+   "default": "Subject:   leading and trailing  \n",
+   "smtp": "Subject:   leading and trailing  \r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "tab\there",
+   "str": "tab\there",
+   "default": "Subject: tab\there\n",
+   "smtp": "Subject: tab\there\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "default": "Subject:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "smtp": "Subject:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "default": "Subject: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "smtp": "Subject: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "default": "Subject:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "smtp": "Subject:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "default": "Subject:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "smtp": "Subject:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+   "str": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+   "default": "Subject: word word word word word word word word word word word word word word\n word word word word word word word word word word word word word word word\n word\n",
+   "smtp": "Subject: word word word word word word word word word word word word word word\r\n word word word word word word word word word word word word word word word\r\n word\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "str": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "default": "Subject: =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\n =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\n",
+   "smtp": "Subject: =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\r\n =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "short xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "str": "short xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "default": "Subject: short =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\n =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\n",
+   "smtp": "Subject: short =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\r\n =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "Gżegżółka",
+   "str": "Gżegżółka",
+   "default": "Subject: =?utf-8?b?R8W8ZWfFvMOzxYJrYQ==?=\n",
+   "smtp": "Subject: =?utf-8?b?R8W8ZWfFvMOzxYJrYQ==?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé ",
+   "str": "Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé Ünïcödé ",
+   "default": "Subject: =?utf-8?b?w5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69j?=\n =?utf-8?b?w7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69j?=\n =?utf-8?b?w7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69j?=\n =?utf-8?b?w7Zkw6k=?= \n",
+   "smtp": "Subject: =?utf-8?b?w5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69j?=\r\n =?utf-8?b?w7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69j?=\r\n =?utf-8?b?w7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69jw7Zkw6kgw5xuw69j?=\r\n =?utf-8?b?w7Zkw6k=?= \r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "Ünïcödé word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+   "str": "Ünïcödé word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+   "default": "Subject: =?utf-8?b?w5xuw69jw7Zkw6k=?= word word word word word word word word\n word word word word word word word word word word word word word word word\n word word word word word word word\n",
+   "smtp": "Subject: =?utf-8?b?w5xuw69jw7Zkw6k=?= word word word word word word word word\r\n word word word word word word word word word word word word word word word\r\n word word word word word word word\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word Ünïcödé ",
+   "str": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word Ünïcödé ",
+   "default": "Subject: word word word word word word word word word word word word word word\n word word word word word word word word word word word word word word word\n word =?utf-8?b?w5xuw69jw7Zkw6k=?= \n",
+   "smtp": "Subject: word word word word word word word word word word word word word word\r\n word word word word word word word word word word word word word word word\r\n word =?utf-8?b?w5xuw69jw7Zkw6k=?= \r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "日本語の件名です日本語の件名です日本語の件名です日本語の件名です日本語の件名です日本語の件名です",
+   "str": "日本語の件名です日本語の件名です日本語の件名です日本語の件名です日本語の件名です日本語の件名です",
+   "default": "Subject: =?utf-8?b?5pel5pys6Kqe44Gu5Lu25ZCN44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN?=\n =?utf-8?b?44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN?=\n =?utf-8?b?44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN?=\n =?utf-8?b?44Gn44GZ?=\n",
+   "smtp": "Subject: =?utf-8?b?5pel5pys6Kqe44Gu5Lu25ZCN44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN?=\r\n =?utf-8?b?44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN?=\r\n =?utf-8?b?44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN44Gn44GZ5pel5pys6Kqe44Gu5Lu25ZCN?=\r\n =?utf-8?b?44Gn44GZ?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "emoji 🎉 party 🎉🎉 time",
+   "str": "emoji 🎉 party 🎉🎉 time",
+   "default": "Subject: emoji =?utf-8?b?8J+OiSBwYXJ0eSDwn46J8J+OiQ==?= time\n",
+   "smtp": "Subject: emoji =?utf-8?b?8J+OiSBwYXJ0eSDwn46J8J+OiQ==?= time\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "mixed ascii and ü and more ascii text that keeps going on and on and on",
+   "str": "mixed ascii and ü and more ascii text that keeps going on and on and on",
+   "default": "Subject: mixed ascii and =?utf-8?q?=C3=BC?= and more ascii text that keeps\n going on and on and on\n",
+   "smtp": "Subject: mixed ascii and =?utf-8?q?=C3=BC?= and more ascii text that keeps\r\n going on and on and on\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "=?utf-8?q?hi?= there",
+   "str": "hi there",
+   "default": "Subject: hi there\n",
+   "smtp": "Subject: hi there\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "=?utf-8?q?S=C3=BCrname?= =?utf-8?q?_=C3=84bc?=",
+   "str": "Sürname Äbc",
+   "default": "Subject: =?utf-8?q?S=C3=BCrname_=C3=84bc?=\n",
+   "smtp": "Subject: =?utf-8?q?S=C3=BCrname_=C3=84bc?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "literal =? and ?= marks",
+   "str": "literal =? and ?= marks",
+   "default": "Subject: literal =? and ?= marks\n",
+   "smtp": "Subject: literal =? and ?= marks\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "price=?3 and ?=4",
+   "str": "price=?3 and ?=4",
+   "default": "Subject: price=?3 and ?=4\n",
+   "smtp": "Subject: price=?3 and ?=4\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "Re: [list] (comment) <angle> @ , ; : \\ \" quoted",
+   "str": "Re: [list] (comment) <angle> @ , ; : \\ \" quoted",
+   "default": "Subject: Re: [list] (comment) <angle> @ , ; : \\ \" quoted\n",
+   "smtp": "Subject: Re: [list] (comment) <angle> @ , ; : \\ \" quoted\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "a\u0001b control",
+   "str": "a\u0001b control",
+   "default": "Subject: a\u0001b control\n",
+   "smtp": "Subject: a\u0001b control\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "trailing space ",
+   "str": "trailing space ",
+   "default": "Subject: trailing space \n",
+   "smtp": "Subject: trailing space \r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx üüüüüüüüüüüüüüüüüüüüüüüüüüüüüü yyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+   "str": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx üüüüüüüüüüüüüüüüüüüüüüüüüüüüüü yyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+   "default": "Subject: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx =?utf-8?b?w7zDvMO8w7zDvMO8w7zDvMO8?=\n =?utf-8?b?w7zDvMO8w7zDvMO8w7zDvMO8w7zDvMO8w7zDvMO8w7zDvMO8w7zDvMO8?=\n yyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n",
+   "smtp": "Subject: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx =?utf-8?b?w7zDvMO8w7zDvMO8w7zDvMO8?=\r\n =?utf-8?b?w7zDvMO8w7zDvMO8w7zDvMO8w7zDvMO8w7zDvMO8w7zDvMO8w7zDvMO8?=\r\n yyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "Subject: ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ",
+   "str": "Subject: ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ",
+   "default": "Subject: Subject: =?utf-8?b?w4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOE?=\n =?utf-8?b?w4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4Q=?=\n",
+   "smtp": "Subject: Subject: =?utf-8?b?w4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOE?=\r\n =?utf-8?b?w4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4TDhMOEw4Q=?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ü",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ü",
+   "default": "Subject:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n =?utf-8?q?=C3=BC?=\n",
+   "smtp": "Subject:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n =?utf-8?q?=C3=BC?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ü",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ü",
+   "default": "Subject:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n =?utf-8?q?=C3=BC?=\n",
+   "smtp": "Subject:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n =?utf-8?q?=C3=BC?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa üü",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa üü",
+   "default": "Subject:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n =?utf-8?q?=C3=BC=C3=BC?=\n",
+   "smtp": "Subject:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n =?utf-8?q?=C3=BC=C3=BC?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ü",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ü",
+   "default": "Subject: =?utf-8?q?aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?=\n =?utf-8?q?aaaaaaaaaaaaaaaaaaaaa_=C3=BC?=\n",
+   "smtp": "Subject: =?utf-8?q?aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?=\r\n =?utf-8?q?aaaaaaaaaaaaaaaaaaaaa_=C3=BC?=\r\n"
+  },
+  {
+   "name": "Subject",
+   "value": "Long subject with a ünïcödé word near the end of a line that wraps around",
+   "str": "Long subject with a ünïcödé word near the end of a line that wraps around",
+   "default": "Subject: Long subject with a =?utf-8?b?w7xuw69jw7Zkw6k=?= word near the end of\n a line that wraps around\n",
+   "smtp": "Subject: Long subject with a =?utf-8?b?w7xuw69jw7Zkw6k=?= word near the end of\r\n a line that wraps around\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "",
+   "str": "",
+   "default": "X-Custom-Header:\n",
+   "smtp": "X-Custom-Header:\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "Subject",
+   "str": "Subject",
+   "default": "X-Custom-Header: Subject\n",
+   "smtp": "X-Custom-Header: Subject\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "  leading and trailing  ",
+   "str": "  leading and trailing  ",
+   "default": "X-Custom-Header:   leading and trailing  \n",
+   "smtp": "X-Custom-Header:   leading and trailing  \r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "tab\there",
+   "str": "tab\there",
+   "default": "X-Custom-Header: tab\there\n",
+   "smtp": "X-Custom-Header: tab\there\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "default": "X-Custom-Header:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "smtp": "X-Custom-Header:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "default": "X-Custom-Header:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "smtp": "X-Custom-Header:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "default": "X-Custom-Header:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "smtp": "X-Custom-Header:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "default": "X-Custom-Header:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+   "smtp": "X-Custom-Header:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+   "str": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+   "default": "X-Custom-Header: word word word word word word word word word word word word\n word word word word word word word word word word word word word word word\n word word word\n",
+   "smtp": "X-Custom-Header: word word word word word word word word word word word word\r\n word word word word word word word word word word word word word word word\r\n word word word\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "str": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "default": "X-Custom-Header: =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\n =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\n",
+   "smtp": "X-Custom-Header: =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\r\n =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "short xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "str": "short xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "default": "X-Custom-Header: short =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\n =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\n",
+   "smtp": "X-Custom-Header: short =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\r\n =?utf-8?q?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?=\r\n"
+  },
+  {
+   "name": "X-Custom-Header",
+   "value": "Gżegżółka",
+   "str": "Gżegżółka",
+   "default": "X-Custom-Header: =?utf-8?b?R8W8ZWfFvMOzxYJrYQ==?=\n",
+   "smtp": "X-Custom-Header: =?utf-8?b?R8W8ZWfFvMOzxYJrYQ==?=\r\n"
+  },
+  {
+   "name": "A-Name-That-Is-Rather-Long-For-A-Header",
+   "value": "with a value that pushes the line over",
+   "str": "with a value that pushes the line over",
+   "default": "A-Name-That-Is-Rather-Long-For-A-Header:\n with a value that pushes the line over\n",
+   "smtp": "A-Name-That-Is-Rather-Long-For-A-Header:\r\n with a value that pushes the line over\r\n"
+  },
+  {
+   "name": "To",
+   "value": "",
+   "str": "",
+   "default": "To:\n",
+   "smtp": "To:\r\n",
+   "mailboxes": [],
+   "defects": [],
+   "tree_str": ""
+  },
+  {
+   "name": "To",
+   "value": "to@example.com",
+   "str": "to@example.com",
+   "default": "To: to@example.com\n",
+   "smtp": "To: to@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@example.com"
+  },
+  {
+   "name": "To",
+   "value": "Firstname Sürname <to@example.com>",
+   "str": "Firstname Sürname <to@example.com>",
+   "default": "To: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\n",
+   "smtp": "To: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Firstname Sürname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Firstname Sürname <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "\"Firstname Sürname\" <to@example.com>",
+   "str": "Firstname Sürname <to@example.com>",
+   "default": "To: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\n",
+   "smtp": "To: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Firstname Sürname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"Firstname Sürname\" <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "\"Lastname, Firstname\" <to@example.com>",
+   "str": "\"Lastname, Firstname\" <to@example.com>",
+   "default": "To: \"Lastname, Firstname\" <to@example.com>\n",
+   "smtp": "To: \"Lastname, Firstname\" <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Lastname, Firstname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"Lastname, Firstname\" <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "Sürname, Firstname <to@example.com>",
+   "str": "Sürname, Firstname <to@example.com>",
+   "default": "To: =?utf-8?q?S=C3=BCrname?=, Firstname <to@example.com>\n",
+   "smtp": "To: =?utf-8?q?S=C3=BCrname?=, Firstname <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": "Sürname",
+     "domain": null,
+     "addr_spec": "Sürname"
+    },
+    {
+     "type": "mailbox",
+     "display_name": "Firstname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "addr-spec local part with no domain",
+    "local-part contains non-ASCII characters)"
+   ],
+   "tree_str": "Sürname, Firstname <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "to@éxample.com",
+   "str": "to@éxample.com",
+   "default": "To: to@=?utf-8?q?=C3=A9xample?=.com\n",
+   "smtp": "To: to@=?utf-8?q?=C3=A9xample?=.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "éxample.com",
+     "addr_spec": "to@éxample.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@éxample.com"
+  },
+  {
+   "name": "To",
+   "value": "Firstname Sürname <to@éxample.com>",
+   "str": "Firstname Sürname <to@éxample.com>",
+   "default": "To: Firstname =?utf-8?q?S=C3=BCrname?= <to@=?utf-8?q?=C3=A9xample?=.com>\n",
+   "smtp": "To: Firstname =?utf-8?q?S=C3=BCrname?= <to@=?utf-8?q?=C3=A9xample?=.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Firstname Sürname",
+     "local_part": "to",
+     "domain": "éxample.com",
+     "addr_spec": "to@éxample.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Firstname Sürname <to@éxample.com>"
+  },
+  {
+   "name": "To",
+   "value": "tó@example.com",
+   "str": "tó@example.com",
+   "default": "To: =?utf-8?q?t=C3=B3?=@example.com\n",
+   "smtp": "To: =?utf-8?q?t=C3=B3?=@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "tó",
+     "domain": "example.com",
+     "addr_spec": "tó@example.com"
+    }
+   ],
+   "defects": [
+    "local-part contains non-ASCII characters)"
+   ],
+   "tree_str": "tó@example.com"
+  },
+  {
+   "name": "To",
+   "value": "Tó Example <tó@example.com>",
+   "str": "Tó Example <tó@example.com>",
+   "default": "To: =?utf-8?q?T=C3=B3?= Example <=?utf-8?q?t=C3=B3?=@example.com>\n",
+   "smtp": "To: =?utf-8?q?T=C3=B3?= Example <=?utf-8?q?t=C3=B3?=@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Tó Example",
+     "local_part": "tó",
+     "domain": "example.com",
+     "addr_spec": "tó@example.com"
+    }
+   ],
+   "defects": [
+    "local-part contains non-ASCII characters)"
+   ],
+   "tree_str": "Tó Example <tó@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "to@example.com, other@example.com",
+   "str": "to@example.com, other@example.com",
+   "default": "To: to@example.com, other@example.com\n",
+   "smtp": "To: to@example.com, other@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "other",
+     "domain": "example.com",
+     "addr_spec": "other@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@example.com, other@example.com"
+  },
+  {
+   "name": "To",
+   "value": "recipient0@example.com, recipient1@example.com, recipient2@example.com, recipient3@example.com, recipient4@example.com, recipient5@example.com, recipient6@example.com, recipient7@example.com",
+   "str": "recipient0@example.com, recipient1@example.com, recipient2@example.com, recipient3@example.com, recipient4@example.com, recipient5@example.com, recipient6@example.com, recipient7@example.com",
+   "default": "To: recipient0@example.com, recipient1@example.com, recipient2@example.com,\n recipient3@example.com, recipient4@example.com, recipient5@example.com,\n recipient6@example.com, recipient7@example.com\n",
+   "smtp": "To: recipient0@example.com, recipient1@example.com, recipient2@example.com,\r\n recipient3@example.com, recipient4@example.com, recipient5@example.com,\r\n recipient6@example.com, recipient7@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "recipient0",
+     "domain": "example.com",
+     "addr_spec": "recipient0@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "recipient1",
+     "domain": "example.com",
+     "addr_spec": "recipient1@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "recipient2",
+     "domain": "example.com",
+     "addr_spec": "recipient2@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "recipient3",
+     "domain": "example.com",
+     "addr_spec": "recipient3@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "recipient4",
+     "domain": "example.com",
+     "addr_spec": "recipient4@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "recipient5",
+     "domain": "example.com",
+     "addr_spec": "recipient5@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "recipient6",
+     "domain": "example.com",
+     "addr_spec": "recipient6@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "recipient7",
+     "domain": "example.com",
+     "addr_spec": "recipient7@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "recipient0@example.com, recipient1@example.com, recipient2@example.com, recipient3@example.com, recipient4@example.com, recipient5@example.com, recipient6@example.com, recipient7@example.com"
+  },
+  {
+   "name": "To",
+   "value": "Recipient Number 0 <recipient0@example.com>, Recipient Number 1 <recipient1@example.com>, Recipient Number 2 <recipient2@example.com>, Recipient Number 3 <recipient3@example.com>, Recipient Number 4 <recipient4@example.com>",
+   "str": "Recipient Number 0 <recipient0@example.com>, Recipient Number 1 <recipient1@example.com>, Recipient Number 2 <recipient2@example.com>, Recipient Number 3 <recipient3@example.com>, Recipient Number 4 <recipient4@example.com>",
+   "default": "To: Recipient Number 0 <recipient0@example.com>,\n Recipient Number 1 <recipient1@example.com>,\n Recipient Number 2 <recipient2@example.com>,\n Recipient Number 3 <recipient3@example.com>,\n Recipient Number 4 <recipient4@example.com>\n",
+   "smtp": "To: Recipient Number 0 <recipient0@example.com>,\r\n Recipient Number 1 <recipient1@example.com>,\r\n Recipient Number 2 <recipient2@example.com>,\r\n Recipient Number 3 <recipient3@example.com>,\r\n Recipient Number 4 <recipient4@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Recipient Number 0",
+     "local_part": "recipient0",
+     "domain": "example.com",
+     "addr_spec": "recipient0@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": "Recipient Number 1",
+     "local_part": "recipient1",
+     "domain": "example.com",
+     "addr_spec": "recipient1@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": "Recipient Number 2",
+     "local_part": "recipient2",
+     "domain": "example.com",
+     "addr_spec": "recipient2@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": "Recipient Number 3",
+     "local_part": "recipient3",
+     "domain": "example.com",
+     "addr_spec": "recipient3@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": "Recipient Number 4",
+     "local_part": "recipient4",
+     "domain": "example.com",
+     "addr_spec": "recipient4@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Recipient Number 0 <recipient0@example.com>, Recipient Number 1 <recipient1@example.com>, Recipient Number 2 <recipient2@example.com>, Recipient Number 3 <recipient3@example.com>, Recipient Number 4 <recipient4@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "\"Lastname, Firstname\" <to@example.com>, Firstname Sürname <x@example.com>, \"Sürname, Äbc\" <y@example.com>",
+   "str": "\"Lastname, Firstname\" <to@example.com>, Firstname Sürname <x@example.com>, \"Sürname, Äbc\" <y@example.com>",
+   "default": "To: \"Lastname, Firstname\" <to@example.com>,\n Firstname =?utf-8?q?S=C3=BCrname?= <x@example.com>,\n =?utf-8?q?S=C3=BCrname=2C_=C3=84bc?= <y@example.com>\n",
+   "smtp": "To: \"Lastname, Firstname\" <to@example.com>,\r\n Firstname =?utf-8?q?S=C3=BCrname?= <x@example.com>,\r\n =?utf-8?q?S=C3=BCrname=2C_=C3=84bc?= <y@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Lastname, Firstname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": "Firstname Sürname",
+     "local_part": "x",
+     "domain": "example.com",
+     "addr_spec": "x@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": "Sürname, Äbc",
+     "local_part": "y",
+     "domain": "example.com",
+     "addr_spec": "y@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"Lastname, Firstname\" <to@example.com>, Firstname Sürname <x@example.com>, \"Sürname, Äbc\" <y@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "undisclosed-recipients:;",
+   "str": "undisclosed-recipients:;",
+   "default": "To: undisclosed-recipients:;\n",
+   "smtp": "To: undisclosed-recipients:;\r\n",
+   "mailboxes": [],
+   "defects": [],
+   "tree_str": "undisclosed-recipients:;"
+  },
+  {
+   "name": "To",
+   "value": "Group: a@example.com, b@example.com;",
+   "str": "Group: a@example.com, b@example.com;",
+   "default": "To: Group: a@example.com, b@example.com;\n",
+   "smtp": "To: Group: a@example.com, b@example.com;\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "a",
+     "domain": "example.com",
+     "addr_spec": "a@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "b",
+     "domain": "example.com",
+     "addr_spec": "b@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Group: a@example.com, b@example.com;"
+  },
+  {
+   "name": "To",
+   "value": "Group: Sürname <a@example.com>;, c@example.com",
+   "str": "Group: Sürname <a@example.com>;, c@example.com",
+   "default": "To: Group: =?utf-8?q?S=C3=BCrname?= <a@example.com>;, c@example.com\n",
+   "smtp": "To: Group: =?utf-8?q?S=C3=BCrname?= <a@example.com>;, c@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Sürname",
+     "local_part": "a",
+     "domain": "example.com",
+     "addr_spec": "a@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "c",
+     "domain": "example.com",
+     "addr_spec": "c@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Group: Sürname <a@example.com>;, c@example.com"
+  },
+  {
+   "name": "To",
+   "value": "to@example.com (comment)",
+   "str": "to@example.com",
+   "default": "To: to@example.com (comment)\n",
+   "smtp": "To: to@example.com (comment)\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@example.com (comment)"
+  },
+  {
+   "name": "To",
+   "value": "(lead) to@example.com",
+   "str": "to@example.com",
+   "default": "To: (lead) to@example.com\n",
+   "smtp": "To: (lead) to@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "(lead) to@example.com"
+  },
+  {
+   "name": "To",
+   "value": "<to@example.com>",
+   "str": "to@example.com",
+   "default": "To: <to@example.com>\n",
+   "smtp": "To: <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "<to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "<>",
+   "str": "<>",
+   "default": "To: <>\n",
+   "smtp": "To: <>\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": "<>"
+    }
+   ],
+   "defects": [
+    "null addr-spec in angle-addr"
+   ],
+   "tree_str": "<>"
+  },
+  {
+   "name": "To",
+   "value": "to",
+   "str": "to",
+   "default": "To: to\n",
+   "smtp": "To: to\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": null,
+     "addr_spec": "to"
+    }
+   ],
+   "defects": [
+    "addr-spec local part with no domain"
+   ],
+   "tree_str": "to"
+  },
+  {
+   "name": "To",
+   "value": "to@",
+   "str": "<>",
+   "default": "To: to@\n",
+   "smtp": "To: to@\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    }
+   ],
+   "defects": [
+    "invalid address in address-list"
+   ],
+   "tree_str": "to@"
+  },
+  {
+   "name": "To",
+   "value": "@example.com",
+   "str": "<>",
+   "default": "To: @example.com\n",
+   "smtp": "To: @example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    }
+   ],
+   "defects": [
+    "invalid address in address-list",
+    "period in 'phrase'"
+   ],
+   "tree_str": "@example.com"
+  },
+  {
+   "name": "To",
+   "value": "to@example.com>",
+   "str": "to@example.com, <>",
+   "default": "To: to@example.com>\n",
+   "smtp": "To: to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    },
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    }
+   ],
+   "defects": [
+    "invalid address in address-list"
+   ],
+   "tree_str": "to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "<to@example.com",
+   "str": "to@example.com",
+   "default": "To: <to@example.com>\n",
+   "smtp": "To: <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "missing trailing '>' on angle-addr"
+   ],
+   "tree_str": "<to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "to@@example.com",
+   "str": "<>",
+   "default": "To: to@@example.com\n",
+   "smtp": "To: to@@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    }
+   ],
+   "defects": [
+    "invalid address in address-list",
+    "period in 'phrase'"
+   ],
+   "tree_str": "to@@example.com"
+  },
+  {
+   "name": "To",
+   "value": "to@example..com",
+   "str": "<>",
+   "default": "To: to@example..com\n",
+   "smtp": "To: to@example..com\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    }
+   ],
+   "defects": [
+    "invalid address in address-list",
+    "period in 'phrase'",
+    "period in 'phrase'"
+   ],
+   "tree_str": "to@example..com"
+  },
+  {
+   "name": "To",
+   "value": "to.@example.com",
+   "str": "to.@example.com",
+   "default": "To: to.@example.com\n",
+   "smtp": "To: to.@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": "to.",
+     "domain": "example.com",
+     "addr_spec": "to.@example.com"
+    }
+   ],
+   "defects": [
+    "local-part is not dot-atom, quoted-string, or obs-local-part",
+    "Invalid trailing '.' in local part"
+   ],
+   "tree_str": "to.@example.com"
+  },
+  {
+   "name": "To",
+   "value": ".to@example.com",
+   "str": ".to@example.com",
+   "default": "To: .to@example.com\n",
+   "smtp": "To: .to@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": ".to",
+     "domain": "example.com",
+     "addr_spec": ".to@example.com"
+    }
+   ],
+   "defects": [
+    "local-part is not dot-atom, quoted-string, or obs-local-part",
+    "Invalid leading '.' in local part"
+   ],
+   "tree_str": ".to@example.com"
+  },
+  {
+   "name": "To",
+   "value": "to..x@example.com",
+   "str": "to..x@example.com",
+   "default": "To: to..x@example.com\n",
+   "smtp": "To: to..x@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": "to..x",
+     "domain": "example.com",
+     "addr_spec": "to..x@example.com"
+    }
+   ],
+   "defects": [
+    "local-part is not dot-atom, quoted-string, or obs-local-part",
+    "invalid repeated '.'"
+   ],
+   "tree_str": "to..x@example.com"
+  },
+  {
+   "name": "To",
+   "value": "Name <to@example.com> trailing",
+   "str": "Name <to@example.com>, <>",
+   "default": "To: Name <to@example.com> trailing\n",
+   "smtp": "To: Name <to@example.com> trailing\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Name",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    },
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    }
+   ],
+   "defects": [
+    "invalid address in address-list"
+   ],
+   "tree_str": "Name <to@example.com> trailing"
+  },
+  {
+   "name": "To",
+   "value": "to@example.com; other@example.com",
+   "str": "to@example.com, <>",
+   "default": "To: to@example.com; other@example.com\n",
+   "smtp": "To: to@example.com; other@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    },
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    }
+   ],
+   "defects": [
+    "invalid address in address-list",
+    "period in 'phrase'"
+   ],
+   "tree_str": "to@example.com; other@example.com"
+  },
+  {
+   "name": "To",
+   "value": "to@[127.0.0.1]",
+   "str": "to@[127.0.0.1]",
+   "default": "To: to@[127.0.0.1]\n",
+   "smtp": "To: to@[127.0.0.1]\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "[127.0.0.1]",
+     "addr_spec": "to@[127.0.0.1]"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@[127.0.0.1]"
+  },
+  {
+   "name": "To",
+   "value": "to@[IPv6:::1]",
+   "str": "to@[IPv6:::1]",
+   "default": "To: to@[IPv6:::1]\n",
+   "smtp": "To: to@[IPv6:::1]\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "[IPv6:::1]",
+     "addr_spec": "to@[IPv6:::1]"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@[IPv6:::1]"
+  },
+  {
+   "name": "To",
+   "value": "\"quoted local\"@example.com",
+   "str": "\"quoted local\"@example.com",
+   "default": "To: \"quoted local\"@example.com\n",
+   "smtp": "To: \"quoted local\"@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "quoted local",
+     "domain": "example.com",
+     "addr_spec": "\"quoted local\"@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"quoted local\"@example.com"
+  },
+  {
+   "name": "To",
+   "value": "\"weird\\\"quote\"@example.com",
+   "str": "\"weird\\\"quote\"@example.com",
+   "default": "To: \"weird\\\"quote\"@example.com\n",
+   "smtp": "To: \"weird\\\"quote\"@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "weird\"quote",
+     "domain": "example.com",
+     "addr_spec": "\"weird\\\"quote\"@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"weird\\\"quote\"@example.com"
+  },
+  {
+   "name": "To",
+   "value": "a b@example.com",
+   "str": "\"a b\"@example.com",
+   "default": "To: a b@example.com\n",
+   "smtp": "To: a b@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": "a b",
+     "domain": "example.com",
+     "addr_spec": "\"a b\"@example.com"
+    }
+   ],
+   "defects": [
+    "local-part is not dot-atom, quoted-string, or obs-local-part",
+    "missing '.' between words"
+   ],
+   "tree_str": "a b@example.com"
+  },
+  {
+   "name": "To",
+   "value": "foo@example.com\u0000",
+   "str": "foo@example.com\u0000",
+   "default": "To: foo@example.com\u0000\n",
+   "smtp": "To: foo@example.com\u0000\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "foo",
+     "domain": "example.com\u0000",
+     "addr_spec": "foo@example.com\u0000"
+    }
+   ],
+   "defects": [
+    "the following ASCII non-printables found in header: ['\\x00']"
+   ],
+   "tree_str": "foo@example.com\u0000"
+  },
+  {
+   "name": "To",
+   "value": "to\u0000@example.com",
+   "str": "to\u0000@example.com",
+   "default": "To: to\u0000@example.com\n",
+   "smtp": "To: to\u0000@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to\u0000",
+     "domain": "example.com",
+     "addr_spec": "to\u0000@example.com"
+    }
+   ],
+   "defects": [
+    "the following ASCII non-printables found in header: ['\\x00']"
+   ],
+   "tree_str": "to\u0000@example.com"
+  },
+  {
+   "name": "To",
+   "value": "Name <to@example.com>, <other@example.com>",
+   "str": "Name <to@example.com>, other@example.com",
+   "default": "To: Name <to@example.com>, <other@example.com>\n",
+   "smtp": "To: Name <to@example.com>, <other@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Name",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "other",
+     "domain": "example.com",
+     "addr_spec": "other@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Name <to@example.com>, <other@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "<@route,@other:to@example.com>",
+   "str": "to@example.com",
+   "default": "To: <@route,@other:to@example.com>\n",
+   "smtp": "To: <@route,@other:to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "obsolete route specification in angle-addr"
+   ],
+   "tree_str": "<@route,@other:to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "=?utf-8?q?S=C3=BCrname?= <to@example.com>",
+   "str": "Sürname <to@example.com>",
+   "default": "To: =?utf-8?q?S=C3=BCrname?= <to@example.com>\n",
+   "smtp": "To: =?utf-8?q?S=C3=BCrname?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Sürname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Sürname <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "\"=?utf-8?q?S=C3=BCrname?=\" <to@example.com>",
+   "str": "Sürname <to@example.com>",
+   "default": "To: =?utf-8?q?S=C3=BCrname?= <to@example.com>\n",
+   "smtp": "To: =?utf-8?q?S=C3=BCrname?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": "Sürname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "encoded word inside quoted string",
+    "missing trailing whitespace after encoded-word"
+   ],
+   "tree_str": "\"Sürname\" <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "A Very Long Display Name That Goes On And On And On For Quite A While <someone@example.com>",
+   "str": "A Very Long Display Name That Goes On And On And On For Quite A While <someone@example.com>",
+   "default": "To: A Very Long Display Name That Goes On And On And On For Quite A While\n <someone@example.com>\n",
+   "smtp": "To: A Very Long Display Name That Goes On And On And On For Quite A While\r\n <someone@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "A Very Long Display Name That Goes On And On And On For Quite A While",
+     "local_part": "someone",
+     "domain": "example.com",
+     "addr_spec": "someone@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "A Very Long Display Name That Goes On And On And On For Quite A While <someone@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "Ä Very Löng Displäy Nämé Thät Göes Ön Änd Ön Änd Ön För Qüite Ä While <someone@example.com>",
+   "str": "Ä Very Löng Displäy Nämé Thät Göes Ön Änd Ön Änd Ön För Qüite Ä While <someone@example.com>",
+   "default": "To: =?utf-8?b?w4QgVmVyeSBMw7ZuZyBEaXNwbMOkeSBOw6Rtw6kgVGjDpHQgR8O2ZXMgw5Zu?=\n =?utf-8?b?IMOEbmQgw5ZuIMOEbmQgw5ZuIEbDtnIgUcO8aXRlIMOE?= While\n <someone@example.com>\n",
+   "smtp": "To: =?utf-8?b?w4QgVmVyeSBMw7ZuZyBEaXNwbMOkeSBOw6Rtw6kgVGjDpHQgR8O2ZXMgw5Zu?=\r\n =?utf-8?b?IMOEbmQgw5ZuIMOEbmQgw5ZuIEbDtnIgUcO8aXRlIMOE?= While\r\n <someone@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Ä Very Löng Displäy Nämé Thät Göes Ön Änd Ön Änd Ön För Qüite Ä While",
+     "local_part": "someone",
+     "domain": "example.com",
+     "addr_spec": "someone@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Ä Very Löng Displäy Nämé Thät Göes Ön Änd Ön Änd Ön För Qüite Ä While <someone@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "Name With Dot. <to@example.com>",
+   "str": "\"Name With Dot.\" <to@example.com>",
+   "default": "To: Name With Dot. <to@example.com>\n",
+   "smtp": "To: Name With Dot. <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Name With Dot.",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "period in 'phrase'",
+    "comment found without atom"
+   ],
+   "tree_str": "Name With Dot. <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com",
+   "str": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com",
+   "default": "To:\n xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com\n",
+   "smtp": "To:\r\n xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "domain": "example.com",
+     "addr_spec": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com"
+  },
+  {
+   "name": "To",
+   "value": "to@sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.example.com",
+   "str": "to@sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.example.com",
+   "default": "To: to@sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.example.com\n",
+   "smtp": "To: to@sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.example.com",
+     "addr_spec": "to@sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.sub.example.com"
+  },
+  {
+   "name": "To",
+   "value": "<to@example.com> (comment) ,",
+   "str": "to@example.com",
+   "default": "To: <to@example.com> (comment) ,\n",
+   "smtp": "To: <to@example.com> (comment) ,\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "<to@example.com> (comment) ,"
+  },
+  {
+   "name": "To",
+   "value": ",to@example.com",
+   "str": "to@example.com",
+   "default": "To: ,to@example.com\n",
+   "smtp": "To: ,to@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "empty element in address-list"
+   ],
+   "tree_str": ",to@example.com"
+  },
+  {
+   "name": "To",
+   "value": "to@example.com,,other@example.com",
+   "str": "to@example.com, other@example.com",
+   "default": "To: to@example.com,,other@example.com\n",
+   "smtp": "To: to@example.com,,other@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "other",
+     "domain": "example.com",
+     "addr_spec": "other@example.com"
+    }
+   ],
+   "defects": [
+    "empty element in address-list"
+   ],
+   "tree_str": "to@example.com,,other@example.com"
+  },
+  {
+   "name": "To",
+   "value": "\"A Very Long Display Name With A \\\"Quote\\\" Inside That Wraps Over The Line\" <someone@example.com>",
+   "str": "\"A Very Long Display Name With A \\\"Quote\\\" Inside That Wraps Over The Line\" <someone@example.com>",
+   "default": "To:\n \"A Very Long Display Name With A \\\"Quote\\\" Inside That Wraps Over The Line\"\n <someone@example.com>\n",
+   "smtp": "To:\r\n \"A Very Long Display Name With A \\\"Quote\\\" Inside That Wraps Over The Line\"\r\n <someone@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "A Very Long Display Name With A \"Quote\" Inside That Wraps Over The Line",
+     "local_part": "someone",
+     "domain": "example.com",
+     "addr_spec": "someone@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"A Very Long Display Name With A \\\"Quote\\\" Inside That Wraps Over The Line\" <someone@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "\"Back\\\\slash Name That Is Long Enough To Need Folding Across Lines Here\" <someone@example.com>",
+   "str": "\"Back\\\\slash Name That Is Long Enough To Need Folding Across Lines Here\" <someone@example.com>",
+   "default": "To: \"Back\\\\slash Name That Is Long Enough To Need Folding Across Lines Here\"\n <someone@example.com>\n",
+   "smtp": "To: \"Back\\\\slash Name That Is Long Enough To Need Folding Across Lines Here\"\r\n <someone@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Back\\slash Name That Is Long Enough To Need Folding Across Lines Here",
+     "local_part": "someone",
+     "domain": "example.com",
+     "addr_spec": "someone@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"Back\\\\slash Name That Is Long Enough To Need Folding Across Lines Here\" <someone@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "\"Very long display name, with comma and ünïcödé that must fold\" <x@example.com>",
+   "str": "\"Very long display name, with comma and ünïcödé that must fold\" <x@example.com>",
+   "default": "To: Very long display =?utf-8?b?bmFtZSwgd2l0aCBjb21tYSBhbmQgw7xuw69jw7Zkw6k=?=\n that must fold <x@example.com>\n",
+   "smtp": "To: Very long display =?utf-8?b?bmFtZSwgd2l0aCBjb21tYSBhbmQgw7xuw69jw7Zkw6k=?=\r\n that must fold <x@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Very long display name, with comma and ünïcödé that must fold",
+     "local_part": "x",
+     "domain": "example.com",
+     "addr_spec": "x@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"Very long display name, with comma and ünïcödé that must fold\" <x@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "=?utf-8?q?S=C3=BCrname?= =?utf-8?q?_=C3=84bc?= <to@example.com>",
+   "str": "Sürname Äbc <to@example.com>",
+   "default": "To: =?utf-8?q?S=C3=BCrname_=C3=84bc?= <to@example.com>\n",
+   "smtp": "To: =?utf-8?q?S=C3=BCrname_=C3=84bc?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Sürname Äbc",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Sürname Äbc <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "=?utf-8?q?S=C3=BCrname?= Plain <to@example.com>",
+   "str": "Sürname Plain <to@example.com>",
+   "default": "To: =?utf-8?q?S=C3=BCrname?= Plain <to@example.com>\n",
+   "smtp": "To: =?utf-8?q?S=C3=BCrname?= Plain <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Sürname Plain",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Sürname Plain <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "=?utf-8?q?A?=  =?utf-8?q?B?= <to@example.com>",
+   "str": "AB <to@example.com>",
+   "default": "To: AB <to@example.com>\n",
+   "smtp": "To: AB <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "AB",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "AB <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "Plain =?utf-8?q?S=C3=BCrname?= <to@example.com>",
+   "str": "Plain Sürname <to@example.com>",
+   "default": "To: Plain =?utf-8?q?S=C3=BCrname?= <to@example.com>\n",
+   "smtp": "To: Plain =?utf-8?q?S=C3=BCrname?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Plain Sürname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Plain Sürname <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "\"\" <to@example.com>",
+   "str": "to@example.com",
+   "default": "To: \"\" <to@example.com>\n",
+   "smtp": "To: \"\" <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"\" <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": ".foo <a@example.com>",
+   "str": "\".foo\" <a@example.com>",
+   "default": "To: .foo <a@example.com>\n",
+   "smtp": "To: .foo <a@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": ".foo",
+     "local_part": "a",
+     "domain": "example.com",
+     "addr_spec": "a@example.com"
+    }
+   ],
+   "defects": [
+    "phrase does not start with word",
+    "period in 'phrase'"
+   ],
+   "tree_str": ".foo <a@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "(c) .foo <a@example.com>",
+   "str": "\".foo\" <a@example.com>",
+   "default": "To: (c) .foo <a@example.com>\n",
+   "smtp": "To: (c) .foo <a@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": ".foo",
+     "local_part": "a",
+     "domain": "example.com",
+     "addr_spec": "a@example.com"
+    }
+   ],
+   "defects": [
+    "phrase does not start with word",
+    "period in 'phrase'"
+   ],
+   "tree_str": "(c) .foo <a@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "to@[",
+   "str": "to@[]",
+   "default": "To: to@[]\n",
+   "smtp": "To: to@[]\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "[]",
+     "addr_spec": "to@[]"
+    }
+   ],
+   "defects": [
+    "end of input inside domain-literal"
+   ],
+   "tree_str": "to@[]"
+  },
+  {
+   "name": "To",
+   "value": "to@[1.2",
+   "str": "to@[1.2]",
+   "default": "To: to@[1.2]\n",
+   "smtp": "To: to@[1.2]\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "[1.2]",
+     "addr_spec": "to@[1.2]"
+    }
+   ],
+   "defects": [
+    "end of input inside domain-literal"
+   ],
+   "tree_str": "to@[1.2]"
+  },
+  {
+   "name": "To",
+   "value": "<@route:to@example.com>",
+   "str": "to@example.com",
+   "default": "To: <@route:to@example.com>\n",
+   "smtp": "To: <@route:to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "obsolete route specification in angle-addr"
+   ],
+   "tree_str": "<@route:to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "<@route,,@other:to@example.com>",
+   "str": "to@example.com",
+   "default": "To: <@route,,@other:to@example.com>\n",
+   "smtp": "To: <@route,,@other:to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "obsolete route specification in angle-addr"
+   ],
+   "tree_str": "<@route,,@other:to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "<@:to@example.com>",
+   "str": "<>",
+   "default": "To: <@:to@example.com>\n",
+   "smtp": "To: <@:to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    }
+   ],
+   "defects": [
+    "invalid address in address-list",
+    "period in 'phrase'"
+   ],
+   "tree_str": "<@:to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "<,@route:to@example.com>",
+   "str": "to@example.com",
+   "default": "To: <,@route:to@example.com>\n",
+   "smtp": "To: <,@route:to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "obsolete route specification in angle-addr"
+   ],
+   "tree_str": "<,@route:to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "to@example.com junk, other@example.com",
+   "str": "to@example.com, <>, other@example.com",
+   "default": "To: to@example.com junk, other@example.com\n",
+   "smtp": "To: to@example.com junk, other@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    },
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    },
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "other",
+     "domain": "example.com",
+     "addr_spec": "other@example.com"
+    }
+   ],
+   "defects": [
+    "invalid address in address-list"
+   ],
+   "tree_str": "to@example.com junk, other@example.com"
+  },
+  {
+   "name": "To",
+   "value": "Name <to@example.com> junk <x@example.com>",
+   "str": "Name <to@example.com>, <>",
+   "default": "To: Name <to@example.com> junk <x@example.com>\n",
+   "smtp": "To: Name <to@example.com> junk <x@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Name",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    },
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": null,
+     "domain": null,
+     "addr_spec": null
+    }
+   ],
+   "defects": [
+    "invalid address in address-list",
+    "period in 'phrase'"
+   ],
+   "tree_str": "Name <to@example.com> junk <x@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Ü <to@example.com>",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Ü <to@example.com>",
+   "default": "To: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n =?utf-8?q?=C3=9C?= <to@example.com>\n",
+   "smtp": "To: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n =?utf-8?q?=C3=9C?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Ü",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Ü <to@example.com>"
+  },
+  {
+   "name": "To",
+   "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Ü <to@example.com>",
+   "str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Ü <to@example.com>",
+   "default": "To:\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n =?utf-8?q?=C3=9C?= <to@example.com>\n",
+   "smtp": "To:\r\n aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n =?utf-8?q?=C3=9C?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Ü",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Ü <to@example.com>"
+  },
+  {
+   "name": "From",
+   "value": "",
+   "str": "",
+   "default": "From:\n",
+   "smtp": "From:\r\n",
+   "mailboxes": [],
+   "defects": [],
+   "tree_str": ""
+  },
+  {
+   "name": "From",
+   "value": "to@example.com",
+   "str": "to@example.com",
+   "default": "From: to@example.com\n",
+   "smtp": "From: to@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@example.com"
+  },
+  {
+   "name": "From",
+   "value": "Firstname Sürname <to@example.com>",
+   "str": "Firstname Sürname <to@example.com>",
+   "default": "From: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\n",
+   "smtp": "From: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Firstname Sürname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Firstname Sürname <to@example.com>"
+  },
+  {
+   "name": "From",
+   "value": "\"Firstname Sürname\" <to@example.com>",
+   "str": "Firstname Sürname <to@example.com>",
+   "default": "From: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\n",
+   "smtp": "From: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Firstname Sürname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"Firstname Sürname\" <to@example.com>"
+  },
+  {
+   "name": "From",
+   "value": "\"Lastname, Firstname\" <to@example.com>",
+   "str": "\"Lastname, Firstname\" <to@example.com>",
+   "default": "From: \"Lastname, Firstname\" <to@example.com>\n",
+   "smtp": "From: \"Lastname, Firstname\" <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Lastname, Firstname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"Lastname, Firstname\" <to@example.com>"
+  },
+  {
+   "name": "From",
+   "value": "Sürname, Firstname <to@example.com>",
+   "str": "Sürname, Firstname <to@example.com>",
+   "default": "From: =?utf-8?q?S=C3=BCrname?=, Firstname <to@example.com>\n",
+   "smtp": "From: =?utf-8?q?S=C3=BCrname?=, Firstname <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "invalid-mailbox",
+     "display_name": null,
+     "local_part": "Sürname",
+     "domain": null,
+     "addr_spec": "Sürname"
+    },
+    {
+     "type": "mailbox",
+     "display_name": "Firstname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [
+    "addr-spec local part with no domain",
+    "local-part contains non-ASCII characters)"
+   ],
+   "tree_str": "Sürname, Firstname <to@example.com>"
+  },
+  {
+   "name": "From",
+   "value": "to@éxample.com",
+   "str": "to@éxample.com",
+   "default": "From: to@=?utf-8?q?=C3=A9xample?=.com\n",
+   "smtp": "From: to@=?utf-8?q?=C3=A9xample?=.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "éxample.com",
+     "addr_spec": "to@éxample.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@éxample.com"
+  },
+  {
+   "name": "From",
+   "value": "Firstname Sürname <to@éxample.com>",
+   "str": "Firstname Sürname <to@éxample.com>",
+   "default": "From: Firstname =?utf-8?q?S=C3=BCrname?= <to@=?utf-8?q?=C3=A9xample?=.com>\n",
+   "smtp": "From: Firstname =?utf-8?q?S=C3=BCrname?= <to@=?utf-8?q?=C3=A9xample?=.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Firstname Sürname",
+     "local_part": "to",
+     "domain": "éxample.com",
+     "addr_spec": "to@éxample.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Firstname Sürname <to@éxample.com>"
+  },
+  {
+   "name": "From",
+   "value": "tó@example.com",
+   "str": "tó@example.com",
+   "default": "From: =?utf-8?q?t=C3=B3?=@example.com\n",
+   "smtp": "From: =?utf-8?q?t=C3=B3?=@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "tó",
+     "domain": "example.com",
+     "addr_spec": "tó@example.com"
+    }
+   ],
+   "defects": [
+    "local-part contains non-ASCII characters)"
+   ],
+   "tree_str": "tó@example.com"
+  },
+  {
+   "name": "From",
+   "value": "Tó Example <tó@example.com>",
+   "str": "Tó Example <tó@example.com>",
+   "default": "From: =?utf-8?q?T=C3=B3?= Example <=?utf-8?q?t=C3=B3?=@example.com>\n",
+   "smtp": "From: =?utf-8?q?T=C3=B3?= Example <=?utf-8?q?t=C3=B3?=@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Tó Example",
+     "local_part": "tó",
+     "domain": "example.com",
+     "addr_spec": "tó@example.com"
+    }
+   ],
+   "defects": [
+    "local-part contains non-ASCII characters)"
+   ],
+   "tree_str": "Tó Example <tó@example.com>"
+  },
+  {
+   "name": "Reply-To",
+   "value": "",
+   "str": "",
+   "default": "Reply-To:\n",
+   "smtp": "Reply-To:\r\n",
+   "mailboxes": [],
+   "defects": [],
+   "tree_str": ""
+  },
+  {
+   "name": "Reply-To",
+   "value": "to@example.com",
+   "str": "to@example.com",
+   "default": "Reply-To: to@example.com\n",
+   "smtp": "Reply-To: to@example.com\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": null,
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "to@example.com"
+  },
+  {
+   "name": "Reply-To",
+   "value": "Firstname Sürname <to@example.com>",
+   "str": "Firstname Sürname <to@example.com>",
+   "default": "Reply-To: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\n",
+   "smtp": "Reply-To: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Firstname Sürname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "Firstname Sürname <to@example.com>"
+  },
+  {
+   "name": "Reply-To",
+   "value": "\"Firstname Sürname\" <to@example.com>",
+   "str": "Firstname Sürname <to@example.com>",
+   "default": "Reply-To: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\n",
+   "smtp": "Reply-To: Firstname =?utf-8?q?S=C3=BCrname?= <to@example.com>\r\n",
+   "mailboxes": [
+    {
+     "type": "mailbox",
+     "display_name": "Firstname Sürname",
+     "local_part": "to",
+     "domain": "example.com",
+     "addr_spec": "to@example.com"
+    }
+   ],
+   "defects": [],
+   "tree_str": "\"Firstname Sürname\" <to@example.com>"
+  },
+  {
+   "name": "Message-ID",
+   "value": "<12345.678.9@example.com>",
+   "str": "<12345.678.9@example.com>",
+   "default": "Message-ID: <12345.678.9@example.com>\n",
+   "smtp": "Message-ID: <12345.678.9@example.com>\r\n"
+  },
+  {
+   "name": "Message-ID",
+   "value": "foo",
+   "str": "foo",
+   "default": "Message-ID: foo\n",
+   "smtp": "Message-ID: foo\r\n"
+  },
+  {
+   "name": "Message-ID",
+   "value": "<foo>",
+   "str": "<foo>",
+   "default": "Message-ID: <foo>\n",
+   "smtp": "Message-ID: <foo>\r\n"
+  },
+  {
+   "name": "Message-ID",
+   "value": "<foo@bar",
+   "str": "<foo@bar>",
+   "default": "Message-ID: <foo@bar>\n",
+   "smtp": "Message-ID: <foo@bar>\r\n"
+  },
+  {
+   "name": "Message-ID",
+   "value": "<a.b@[127.0.0.1]>",
+   "str": "<a.b@[127.0.0.1]>",
+   "default": "Message-ID: <a.b@[127.0.0.1]>\n",
+   "smtp": "Message-ID: <a.b@[127.0.0.1]>\r\n"
+  },
+  {
+   "name": "Message-ID",
+   "value": "<xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com>",
+   "str": "<xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com>",
+   "default": "Message-ID: <xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com>\n",
+   "smtp": "Message-ID: <xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.com>\r\n"
+  },
+  {
+   "name": "Message-ID",
+   "value": "  <spaced@example.com>  ",
+   "str": "  <spaced@example.com>  ",
+   "default": "Message-ID:   <spaced@example.com>  \n",
+   "smtp": "Message-ID:   <spaced@example.com>  \r\n"
+  },
+  {
+   "name": "Message-ID",
+   "value": "<x@example.com> trailing",
+   "str": "<x@example.com> ",
+   "default": "Message-ID: <x@example.com> \n",
+   "smtp": "Message-ID: <x@example.com> \r\n"
+  },
+  {
+   "name": "Date",
+   "value": "Fri, 09 Nov 2001 01:08:47 -0000",
+   "str": "Fri, 09 Nov 2001 01:08:47 -0000",
+   "default": "Date: Fri, 09 Nov 2001 01:08:47 -0000\n",
+   "smtp": "Date: Fri, 09 Nov 2001 01:08:47 -0000\r\n"
+  },
+  {
+   "name": "Date",
+   "value": "Fri, 09 Nov 2001 01:08:47 +0100",
+   "str": "Fri, 09 Nov 2001 01:08:47 +0100",
+   "default": "Date: Fri, 09 Nov 2001 01:08:47 +0100\n",
+   "smtp": "Date: Fri, 09 Nov 2001 01:08:47 +0100\r\n"
+  },
+  {
+   "name": "Date",
+   "value": "Tue, 31 Dec 2024 23:59:59 GMT",
+   "str": "Tue, 31 Dec 2024 23:59:59 +0000",
+   "default": "Date: Tue, 31 Dec 2024 23:59:59 +0000\n",
+   "smtp": "Date: Tue, 31 Dec 2024 23:59:59 +0000\r\n"
+  },
+  {
+   "name": "Date",
+   "value": "9 Nov 2001 01:08:47 -0500",
+   "str": "Fri, 09 Nov 2001 01:08:47 -0500",
+   "default": "Date: Fri, 09 Nov 2001 01:08:47 -0500\n",
+   "smtp": "Date: Fri, 09 Nov 2001 01:08:47 -0500\r\n"
+  },
+  {
+   "name": "Date",
+   "value": "garbage",
+   "str": "garbage",
+   "default": "Date:\n",
+   "smtp": "Date:\r\n"
+  },
+  {
+   "name": "Resent-Date",
+   "value": "garbage",
+   "str": "garbage",
+   "default": "Resent-Date:\n",
+   "smtp": "Resent-Date:\r\n"
+  },
+  {
+   "name": "References",
+   "value": "",
+   "str": "",
+   "default": "References:\n",
+   "smtp": "References:\r\n"
+  },
+  {
+   "name": "References",
+   "value": "<a@example.com>",
+   "str": "<a@example.com>",
+   "default": "References: <a@example.com>\n",
+   "smtp": "References: <a@example.com>\r\n"
+  },
+  {
+   "name": "References",
+   "value": "<a@example.com> <b@example.com>",
+   "str": "<a@example.com> <b@example.com>",
+   "default": "References: <a@example.com> <b@example.com>\n",
+   "smtp": "References: <a@example.com> <b@example.com>\r\n"
+  },
+  {
+   "name": "References",
+   "value": "<a@example.com>, <b@example.com>",
+   "str": "<a@example.com>  <b@example.com>",
+   "default": "References: <a@example.com>  <b@example.com>\n",
+   "smtp": "References: <a@example.com>  <b@example.com>\r\n"
+  },
+  {
+   "name": "References",
+   "value": "<a@example.com> junk",
+   "str": "<a@example.com> junk",
+   "default": "References: <a@example.com> junk\n",
+   "smtp": "References: <a@example.com> junk\r\n"
+  },
+  {
+   "name": "References",
+   "value": "junk",
+   "str": "junk",
+   "default": "References: junk\n",
+   "smtp": "References: junk\r\n"
+  },
+  {
+   "name": "References",
+   "value": "<a@example.com> (comment) <b@example.com>",
+   "str": "<a@example.com> (comment) <b@example.com>",
+   "default": "References: <a@example.com> (comment) <b@example.com>\n",
+   "smtp": "References: <a@example.com> (comment) <b@example.com>\r\n"
+  },
+  {
+   "name": "References",
+   "value": "<a@[127.0.0.1]>",
+   "str": "<a@[127.0.0.1]>",
+   "default": "References: <a@[127.0.0.1]>\n",
+   "smtp": "References: <a@[127.0.0.1]>\r\n"
+  },
+  {
+   "name": "References",
+   "value": "<ü@example.com>",
+   "str": "<ü@example.com>",
+   "default": "References: <ü@example.com>\n",
+   "smtp": "References: <ü@example.com>\r\n"
+  },
+  {
+   "name": "References",
+   "value": "<id0.xxxxxxxxxxxxxxxxxxxx@example.com> <id1.xxxxxxxxxxxxxxxxxxxx@example.com> <id2.xxxxxxxxxxxxxxxxxxxx@example.com> <id3.xxxxxxxxxxxxxxxxxxxx@example.com> <id4.xxxxxxxxxxxxxxxxxxxx@example.com>",
+   "str": "<id0.xxxxxxxxxxxxxxxxxxxx@example.com> <id1.xxxxxxxxxxxxxxxxxxxx@example.com> <id2.xxxxxxxxxxxxxxxxxxxx@example.com> <id3.xxxxxxxxxxxxxxxxxxxx@example.com> <id4.xxxxxxxxxxxxxxxxxxxx@example.com>",
+   "default": "References: <id0.xxxxxxxxxxxxxxxxxxxx@example.com>\n <id1.xxxxxxxxxxxxxxxxxxxx@example.com>\n <id2.xxxxxxxxxxxxxxxxxxxx@example.com>\n <id3.xxxxxxxxxxxxxxxxxxxx@example.com> <id4.xxxxxxxxxxxxxxxxxxxx@example.com>\n",
+   "smtp": "References: <id0.xxxxxxxxxxxxxxxxxxxx@example.com>\r\n <id1.xxxxxxxxxxxxxxxxxxxx@example.com>\r\n <id2.xxxxxxxxxxxxxxxxxxxx@example.com>\r\n <id3.xxxxxxxxxxxxxxxxxxxx@example.com> <id4.xxxxxxxxxxxxxxxxxxxx@example.com>\r\n"
+  },
+  {
+   "name": "In-Reply-To",
+   "value": "",
+   "str": "",
+   "default": "In-Reply-To:\n",
+   "smtp": "In-Reply-To:\r\n"
+  },
+  {
+   "name": "In-Reply-To",
+   "value": "<a@example.com>",
+   "str": "<a@example.com>",
+   "default": "In-Reply-To: <a@example.com>\n",
+   "smtp": "In-Reply-To: <a@example.com>\r\n"
+  },
+  {
+   "name": "In-Reply-To",
+   "value": "<a@example.com> <b@example.com>",
+   "str": "<a@example.com> <b@example.com>",
+   "default": "In-Reply-To: <a@example.com> <b@example.com>\n",
+   "smtp": "In-Reply-To: <a@example.com> <b@example.com>\r\n"
+  },
+  {
+   "name": "In-Reply-To",
+   "value": "<a@example.com>, <b@example.com>",
+   "str": "<a@example.com>  <b@example.com>",
+   "default": "In-Reply-To: <a@example.com>  <b@example.com>\n",
+   "smtp": "In-Reply-To: <a@example.com>  <b@example.com>\r\n"
+  },
+  {
+   "name": "In-Reply-To",
+   "value": "<a@example.com> junk",
+   "str": "<a@example.com> junk",
+   "default": "In-Reply-To: <a@example.com> junk\n",
+   "smtp": "In-Reply-To: <a@example.com> junk\r\n"
+  }
+ ],
+ "names": [
+  {
+   "name": "Subject",
+   "error": ""
+  },
+  {
+   "name": "X-Custom-Header",
+   "error": ""
+  },
+  {
+   "name": "~!#$%&'*+-.^_`|",
+   "error": ""
+  },
+  {
+   "name": "",
+   "error": "Header field name contains invalid characters: ''"
+  },
+  {
+   "name": " ",
+   "error": "Header field name contains invalid characters: ' '"
+  },
+  {
+   "name": "Bad Name",
+   "error": "Header field name contains invalid characters: 'Bad Name'"
+  },
+  {
+   "name": "Bad:Name",
+   "error": "Header field name contains invalid characters: 'Bad:Name'"
+  },
+  {
+   "name": "Name:",
+   "error": "Header field name contains invalid characters: 'Name:'"
+  },
+  {
+   "name": "Name\n",
+   "error": ""
+  },
+  {
+   "name": "Name\n\n",
+   "error": "Header field name contains invalid characters: 'Name\\n\\n'"
+  },
+  {
+   "name": "Name\r",
+   "error": "Header field name contains invalid characters: 'Name\\r'"
+  },
+  {
+   "name": "\nName",
+   "error": "Header field name contains invalid characters: '\\nName'"
+  },
+  {
+   "name": "Näme",
+   "error": "Header field name contains invalid characters: 'Näme'"
+  },
+  {
+   "name": "Name",
+   "error": "Header field name contains invalid characters: 'Na\\x7fme'"
+  }
+ ],
+ "unique": {
+  "Subject": true,
+  "Date": true,
+  "Resent-Date": false,
+  "To": true,
+  "Cc": true,
+  "Bcc": true,
+  "From": true,
+  "Reply-To": true,
+  "Sender": true,
+  "Resent-To": false,
+  "Message-ID": true,
+  "In-Reply-To": true,
+  "References": true,
+  "MIME-Version": true,
+  "Content-Type": true,
+  "Content-Transfer-Encoding": true,
+  "X-Custom-Header": false,
+  "Received": false
+ }
+}

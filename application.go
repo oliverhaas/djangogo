@@ -146,6 +146,10 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 		_ = app.Close()
 		return nil, err
 	}
+	if err := app.configureMail(); err != nil {
+		_ = app.Close()
+		return nil, err
+	}
 	// The receivers of post_migrate that contenttypes and auth connect when
 	// they are ready, so they run before the hooks of the project.
 	if appReg.IsInstalled(contenttypes.App{}.Name()) {
@@ -168,6 +172,7 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	_ = app.Commands.Register(&createsuperuserCommand{app: app})
 	_ = app.Commands.Register(&changepasswordCommand{app: app})
 	_ = app.Commands.Register(&clearsessionsCommand{app: app, store: app.sessions})
+	_ = app.Commands.Register(&sendtestemailCommand{app: app})
 	_ = app.Commands.Register(&startprojectCommand{app: app})
 	_ = app.Commands.Register(&startappCommand{app: app})
 	if appReg.IsInstalled(contenttypes.App{}.Name()) {

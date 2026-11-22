@@ -32,6 +32,8 @@ const (
 //     "django.contrib.sessions.backends.db".
 //   - MessageStorage is MessageStorageFallback, the short name of
 //     "django.contrib.messages.storage.fallback.FallbackStorage".
+//   - EmailBackend is "smtp", the short name of
+//     "django.core.mail.backends.smtp.EmailBackend".
 //   - Database has the driver "sqlite" and no DSN; Django's DATABASES is empty.
 //   - Host and Port are the defaults of runserver, which are not settings in
 //     Django.
@@ -69,6 +71,14 @@ func Defaults() Settings {
 		SecureReferrerPolicy:          "same-origin",
 		SecureCrossOriginOpenerPolicy: "same-origin",
 		XFrameOptions:                 "DENY",
+
+		EmailBackend:       "smtp",
+		EmailHost:          "localhost",
+		EmailPort:          25,
+		EmailSubjectPrefix: "[Django] ",
+		DefaultFromEmail:   "webmaster@localhost",
+		ServerEmail:        "root@localhost",
+		DefaultCharset:     "utf-8",
 
 		defaulted: true,
 	}

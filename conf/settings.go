@@ -220,6 +220,56 @@ type Settings struct {
 	// "SAMEORIGIN" (X_FRAME_OPTIONS).
 	XFrameOptions string `env:"X_FRAME_OPTIONS"`
 
+	// EmailBackend selects the backend that sends mail (EMAIL_BACKEND):
+	// "smtp" (default), "console", "file", "locmem", "dummy" or a name
+	// passed to mail.RegisterBackend. Django's dotted path of a built-in
+	// backend, such as "django.core.mail.backends.console.EmailBackend",
+	// selects the same backend.
+	EmailBackend string `env:"EMAIL_BACKEND"`
+	// EmailHost and EmailPort are the address of the SMTP server
+	// (EMAIL_HOST, default "localhost", and EMAIL_PORT, default 25).
+	EmailHost string `env:"EMAIL_HOST"`
+	EmailPort int    `env:"EMAIL_PORT"`
+	// EmailHostUser and EmailHostPassword log in to the SMTP server when
+	// both are set (EMAIL_HOST_USER and EMAIL_HOST_PASSWORD).
+	EmailHostUser     string `env:"EMAIL_HOST_USER"`
+	EmailHostPassword string `env:"EMAIL_HOST_PASSWORD"`
+	// EmailUseTLS starts TLS with STARTTLS (EMAIL_USE_TLS); EmailUseSSL
+	// connects with TLS from the start (EMAIL_USE_SSL). They exclude each
+	// other.
+	EmailUseTLS bool `env:"EMAIL_USE_TLS"`
+	EmailUseSSL bool `env:"EMAIL_USE_SSL"`
+	// EmailSSLCertfile and EmailSSLKeyfile are the PEM files of a client
+	// certificate for TLS (EMAIL_SSL_CERTFILE and EMAIL_SSL_KEYFILE).
+	EmailSSLCertfile string `env:"EMAIL_SSL_CERTFILE"`
+	EmailSSLKeyfile  string `env:"EMAIL_SSL_KEYFILE"`
+	// EmailTimeout limits each network operation of the SMTP backend; zero
+	// means no limit (EMAIL_TIMEOUT). The environment value is seconds or a
+	// Go duration.
+	EmailTimeout time.Duration `env:"EMAIL_TIMEOUT"`
+	// EmailFilePath is the directory of the file backend (EMAIL_FILE_PATH).
+	EmailFilePath string `env:"EMAIL_FILE_PATH"`
+	// EmailSubjectPrefix starts the subject of the mail to the admins and
+	// managers (EMAIL_SUBJECT_PREFIX, default "[Django] ").
+	EmailSubjectPrefix string `env:"EMAIL_SUBJECT_PREFIX"`
+	// EmailUseLocaltime writes the Date header of a message in TimeZone
+	// instead of UTC (EMAIL_USE_LOCALTIME, default false).
+	EmailUseLocaltime bool `env:"EMAIL_USE_LOCALTIME"`
+	// DefaultFromEmail is the sender of a message without one
+	// (DEFAULT_FROM_EMAIL, default "webmaster@localhost").
+	DefaultFromEmail string `env:"DEFAULT_FROM_EMAIL"`
+	// ServerEmail is the sender of the mail to the admins and managers
+	// (SERVER_EMAIL, default "root@localhost").
+	ServerEmail string `env:"SERVER_EMAIL"`
+	// Admins and Managers list the addresses that receive the mail to the
+	// admins and to the managers (ADMINS and MANAGERS), one address each,
+	// such as "Name <name@example.com>".
+	Admins   []string `env:"ADMINS"`
+	Managers []string `env:"MANAGERS"`
+	// DefaultCharset is the charset of the text of a message
+	// (DEFAULT_CHARSET, default "utf-8").
+	DefaultCharset string `env:"DEFAULT_CHARSET"`
+
 	// PasswordHashers lists password hashers in order of preference: the
 	// first one hashes new passwords, all of them verify (PASSWORD_HASHERS).
 	// An entry is the algorithm ("pbkdf2_sha256") or Django's class, with or

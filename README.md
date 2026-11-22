@@ -141,6 +141,7 @@ go run . startproject --template https://example.com/blog_template.tgz blog
 | `scaffold`        | Project and app scaffolding used by `startproject`/`startapp`.             |
 | `contenttypes`    | Content types of the installed models.                                     |
 | `messages`        | One-time messages for the next page, in a signed cookie or the session.    |
+| `mail`            | Email messages and the SMTP, console, file, locmem and dummy backends.     |
 | `middleware`      | Host validation, security headers, X-Frame-Options, gzip, error pages.     |
 | `staticfiles`     | Static file finders, `collectstatic`, `findstatic` and debug serving.      |
 | `checks`          | The system check framework behind the `check` command.                     |
@@ -161,8 +162,12 @@ against them without Python:
 - **Migration SQL:** canonical operations compile on both dialects and are
   compared with Django's `sqlmigrate`. The tests also check the resulting SQLite
   schema and run every case on a live PostgreSQL server.
+- **Mail headers:** the folded headers and the parsed addresses of the `mail`
+  package must match those of Python's email package, which Django's messages
+  use. These goldens come from Python 3.14 (see "Known limitations").
 
-`go generate ./fidelity/...` regenerates all golden files. Known differences are
+`go generate ./fidelity/...` regenerates all golden files; the mail goldens
+need Python 3.14 (`uv python install 3.14`). Known differences are
 skipped with a reason and listed in `fidelity/divergences.md`,
 `fidelity/query_sql_divergences.md` and `fidelity/migration_sql_divergences.md`.
 
@@ -247,6 +252,11 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   them, sessions use signed cookies. A message added after the response
   headers are written is lost, and reading `messages` in a template, also in
   `{% if messages %}`, marks them as read.
+- **Mail:** headers fold and parse as in the email package of Python 3.14,
+  which fixes bugs of earlier versions: Django on Python 3.12 or 3.13 writes
+  some long headers with encoded words differently, and raises an
+  `IndexError` for an address such as `to@`. A header of a parsed message
+  that holds 8-bit bytes keeps its lines, where Python encodes it.
 - **Commands:** the auto-reloader of `runserver` needs the `go` command and
   the source of the program; it rebuilds the whole program on each change.
   `shell` is a query shell over the models, not a Go REPL. `collectstatic` has no post-processing (manifest
@@ -280,6 +290,8 @@ The `Makefile` provides `make` (fmt + vet + test), `make test-race`,
   sessions, login, redirects, and CSRF checks;
 - Django's assertions as plain functions, with Django's failure messages;
 - query capture (`AssertNumQueries`, `CaptureQueries`);
+- the outbox of the locmem mail backend for a test (`LocmemMail`, then
+  `mail.Outbox`);
 - private test databases on SQLite and PostgreSQL.
 
 A test that drives a view:
