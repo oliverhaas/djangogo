@@ -567,6 +567,11 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   longer needs `form.fields` or `formset.forms` for this. In Go,
   `BoundField.Subwidgets` returns the same parts, and a type that implements
   `templates.Iterable` defines what a loop over it yields.
+- Views: `{% for obj in page_obj %}` loops over the objects of a page, as in
+  Django. A template no longer needs `page_obj.object_list` for this.
+  `Page.TemplateValue` returns a `TemplatePage`. The model instances, times
+  and dates in a template value of a type defined as `map[string]any`, such
+  as a page or a form, are now converted as in a plain map.
 
 ### Changed
 

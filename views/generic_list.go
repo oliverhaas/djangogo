@@ -66,8 +66,7 @@ const emptyListMessage = "Empty list and “ListView.allow_empty” is False."
 // "page_obj" and "is_paginated", which are nil, nil and false without
 // PaginateBy. With PaginateBy the page number comes from the path value or the
 // query parameter "page", "last" selects the last page, and a page that does
-// not exist is answered with the 404 page. A template loops over
-// page_obj.object_list where a Django template loops over page_obj.
+// not exist is answered with the 404 page.
 //
 // T is the element type: a model struct, or any other type together with
 // ObjectList. Set DB also when Queryset is set: the model name, the default

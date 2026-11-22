@@ -61,11 +61,10 @@
 // template value before rendering. A type whose fields a template should read
 // under Django's names (a form, a page of results) implements it and returns a
 // map. That is how a Page reaches a template with Django's attribute names
-// (page_obj.number, page_obj.has_next, page_obj.paginator.num_pages). The
-// template engine cannot iterate a value and read attributes from it, so a
-// template loops over page_obj.object_list instead of page_obj:
+// (page_obj.number, page_obj.has_next, page_obj.paginator.num_pages). A loop
+// over the page yields its objects, see TemplatePage:
 //
-//	{% for post in page_obj.object_list %}...{% endfor %}
+//	{% for post in page_obj %}...{% endfor %}
 //
 // Model instances reach templates through templates.ModelContext, so
 // {{ post.created_at }} reads a column and {{ post }} writes the label of the

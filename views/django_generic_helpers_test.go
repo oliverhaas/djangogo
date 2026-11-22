@@ -196,7 +196,11 @@ func contextList(t *testing.T, resp *djangotest.Response, key string) []any {
 // a page or a paginator.
 func contextMap(t *testing.T, resp *djangotest.Response, key string) map[string]any {
 	t.Helper()
-	m, ok := contextValue(t, resp, key).(map[string]any)
+	v := contextValue(t, resp, key)
+	if page, ok := v.(views.TemplatePage); ok {
+		return page
+	}
+	m, ok := v.(map[string]any)
 	if !ok {
 		t.Fatalf("context[%q] is %T, want a map", key, contextValue(t, resp, key))
 	}

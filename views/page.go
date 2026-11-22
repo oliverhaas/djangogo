@@ -1,6 +1,10 @@
 package views
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/oliverhaas/djangogo/templates"
+)
 
 // Page is one page of a Paginator, the counterpart of
 // django.core.paginator.Page. Obtain it from Paginator.Page or GetPage; the
@@ -95,15 +99,24 @@ func (p *Page[T]) EndIndex() int {
 	return p.Number * p.perPage()
 }
 
-// TemplateValue returns the template view of the page, a map with Django's
-// names: number, object_list, has_next, has_previous, has_other_pages,
+// TemplatePage is a page as templates see it: a map with Django's names
+// number, object_list, has_next, has_previous, has_other_pages,
 // next_page_number, previous_page_number, start_index, end_index and
-// paginator (see Paginator.TemplateValue). Write
+// paginator (see Paginator.TemplateValue). A loop over it yields the objects
+// of the page, as in Django:
 //
-//	{% for obj in page_obj.object_list %}
-//
-// where a Django template iterates page_obj itself, because the template
-// engine cannot iterate a value and read attributes from it at the same time.
+//	{% for obj in page_obj %}
+type TemplatePage map[string]any
+
+var _ templates.Iterable = TemplatePage(nil)
+
+// TemplateIter implements templates.Iterable: the objects of the page.
+func (t TemplatePage) TemplateIter() []any {
+	objects, _ := t["object_list"].([]any)
+	return objects
+}
+
+// TemplateValue returns the template view of the page, a TemplatePage.
 // next_page_number and previous_page_number are numbers when such a page
 // exists; using them without one fails the render with an ErrEmptyPage, as it
 // raises EmptyPage in Django.
@@ -116,7 +129,7 @@ func (p *Page[T]) TemplateValue() any {
 			objects[i] = obj
 		}
 	}
-	out := map[string]any{
+	out := TemplatePage{
 		"number":          p.Number,
 		"object_list":     objects,
 		"has_next":        p.HasNext(),

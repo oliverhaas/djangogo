@@ -3,6 +3,7 @@ package templates
 import (
 	"net/netip"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -291,8 +292,27 @@ func (c converter) convert(v any, depth int) (any, bool) {
 		}
 	case reflect.Slice, reflect.Array:
 		return c.convertSlice(v, rv, depth)
+	case reflect.Map:
+		return c.convertNamedMap(v, rv, depth)
 	}
 	return v, false
+}
+
+// anyMapType is the type of a plain context map.
+var anyMapType = reflect.TypeFor[map[string]any]()
+
+// convertNamedMap converts the values of a map whose type is defined as
+// map[string]any, such as the template value of a form or a page. The result
+// keeps the type of the map, so its methods still apply.
+func (c converter) convertNamedMap(v any, rv reflect.Value, depth int) (any, bool) {
+	if !rv.Type().ConvertibleTo(anyMapType) {
+		return v, false
+	}
+	out, changed := c.convertMap(rv.Convert(anyMapType).Interface().(map[string]any), depth)
+	if !changed {
+		return v, false
+	}
+	return reflect.ValueOf(out).Convert(rv.Type()).Interface(), true
 }
 
 // modelOf looks v up when the converter has a lookup.
@@ -313,10 +333,15 @@ func (c converter) fromModelMap(m ModelMap, depth int) modelView {
 	return out
 }
 
-// convertMap converts the values of a nested context map.
+// convertMap converts the values of a nested context map. A key that starts
+// with NUL, which a template cannot name, holds a Go value for the owner of
+// the map, such as the form behind a template form, and keeps it as it is.
 func (c converter) convertMap(m map[string]any, depth int) (any, bool) {
 	var out map[string]any
 	for k, v := range m {
+		if strings.HasPrefix(k, "\x00") {
+			continue
+		}
 		nv, changed := c.convert(v, depth+1)
 		if !changed {
 			continue
@@ -367,7 +392,25 @@ func (c converter) convertSlice(v any, rv reflect.Value, depth int) (any, bool) 
 	if out == nil {
 		return v, false
 	}
-	return out, true
+	return keepSliceType(rv.Type(), out), true
+}
+
+// keepSliceType returns items as a slice of type t when every item is still
+// of the element type, such as a slice of template forms whose values were
+// converted, and as they are otherwise.
+func keepSliceType(t reflect.Type, items []any) any {
+	if t.Kind() != reflect.Slice || t.Elem().Kind() == reflect.Interface {
+		return items
+	}
+	out := reflect.MakeSlice(t, len(items), len(items))
+	for i, item := range items {
+		iv := reflect.ValueOf(item)
+		if !iv.IsValid() || iv.Type() != t.Elem() {
+			return items
+		}
+		out.Index(i).Set(iv)
+	}
+	return out.Interface()
 }
 
 // instance builds the attribute map of one model instance. rv is the struct

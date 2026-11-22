@@ -184,10 +184,45 @@ func TestPageTemplateValue(t *testing.T) {
 		t.Error("render of next_page_number on the last page succeeded, want an error")
 	}
 
+	eng = memEngine(t, map[string]string{"loop.html": "{% for obj in page_obj %}{{ obj }},{% endfor %}"})
+	out, err = eng.Render("loop.html", map[string]any{"page_obj": page.TemplateValue()})
+	djangotest.AssertEqual(t, err, nil)
+	djangotest.AssertEqual(t, out, "item 11,item 12,item 13,item 14,item 15,item 16,item 17,item 18,item 19,item 20,")
+
 	// A paginator that has not counted yet exposes lazy entries.
 	lazy := views.NewPaginator(views.SliceList(intsUpTo(25)), 10)
 	eng = memEngine(t, map[string]string{"lazy.html": "{{ paginator.count }} {{ paginator.num_pages }}"})
 	out, err = eng.Render("lazy.html", map[string]any{"paginator": lazy.TemplateValue()})
 	djangotest.AssertEqual(t, err, nil)
 	djangotest.AssertEqual(t, out, "25 3")
+}
+
+// No Django test exists for a template loop over a page of model instances,
+// which Django's pagination docs show with {% for contact in page_obj %}.
+func TestPageTemplateLoop(t *testing.T) {
+	djangotest.EachDB(t, []any{&PaginationArticle{}}, func(t *testing.T, db *orm.DB) {
+		paginationArticles(t, db)
+		paginator := views.NewPaginator(views.QuerySetList(orm.Query[PaginationArticle](db).OrderBy("id")), 5)
+		page, err := paginator.Page(context.Background(), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		eng := memEngine(t, map[string]string{"page.html": strings.Join([]string{
+			"{% for a in page_obj %}{{ forloop.counter }}:{{ a.headline }};{% empty %}none{% endfor %}",
+			"{% for a in page_obj reversed %}{{ a.id }};{% endfor %}",
+			"{% for a in page_obj.object_list %}{{ a.headline }};{% endfor %}",
+			"{{ page_obj.number }}",
+		}, "\n")})
+		eng.SetModels(db.Registry())
+		out, err := eng.Render("page.html", map[string]any{"page_obj": page.TemplateValue()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		djangotest.AssertEqual(t, out, strings.Join([]string{
+			"1:Article 6;2:Article 7;3:Article 8;4:Article 9;",
+			"9;8;7;6;",
+			"Article 6;Article 7;Article 8;Article 9;",
+			"2",
+		}, "\n"))
+	})
 }

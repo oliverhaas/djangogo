@@ -2,6 +2,7 @@ package templates_test
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -189,6 +190,29 @@ func TestModelsInContainers(t *testing.T) {
 	}
 	if len(posts) != 2 || posts[0].Title != "a" {
 		t.Errorf("the caller's slice was changed: %v", posts)
+	}
+}
+
+// ctxShelf is a template value defined as a map, as the template form of a
+// form is. Its NUL key holds the Go value it was built from.
+type ctxShelf map[string]any
+
+// HTML prints the number of the page the shelf was built from.
+func (s ctxShelf) HTML() string { return fmt.Sprintf("shelf %d", s["\x00self"].(ctxPage).Num) }
+
+// No Django test exists for a template value of a defined map type: its model
+// instances are converted, and it keeps its type and the Go values under NUL
+// keys.
+func TestModelsInNamedMaps(t *testing.T) {
+	shelf := ctxShelf{
+		"\x00self": ctxPage{Num: 3},
+		"post":     ctxPost{ID: 1, Title: "a"},
+		"posts":    []ctxPost{{ID: 2, Title: "b"}},
+	}
+	got := renderStr(t, modelEngine(t), `{{ shelf }}:{{ shelf.post.title }}{% for p in shelf.posts %}{{ p.pk }}{% endfor %}`,
+		map[string]any{"shelf": shelf})
+	if got != "shelf 3:a2" {
+		t.Errorf("got %q, want %q", got, "shelf 3:a2")
 	}
 }
 
