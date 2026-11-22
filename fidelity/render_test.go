@@ -31,7 +31,6 @@ type fidelityCase struct {
 // so a mismatch nobody knows about can never hide here.
 var skippedCases = map[string]string{
 	"print_none":                 "a nil value prints empty (pongo2) vs None (Django)",
-	"print_list":                 "a list prints in Go syntax vs Python's repr",
 	"lorem_words":                "pongo2's lorem words start with a capital letter and keep punctuation",
 	"urlize_bracket_punctuation": "Django 6.0.3 drops the punctuation in front of a trailing bracket, which Django's main branch fixed",
 }

@@ -31,7 +31,8 @@ type forTagNode struct {
 // nothing to iterate over.
 func (n *forTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWriter) (forErr *pongo2.Error) {
 	forCtx := pongo2.NewChildExecutionContext(ctx)
-	loop := make(map[string]any, 8)
+	// Django's parentloop is an empty dict outside a nested loop.
+	loop := map[string]any{"parentloop": map[string]any{}}
 	if parent, ok := forCtx.Private["forloop"]; ok {
 		loop["parentloop"] = parent
 	}
@@ -65,8 +66,8 @@ func (n *forTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWrit
 
 // assign binds the loop variables for one element. With one variable it is the
 // element (the key, for a map). With several, a map gives key and value and
-// any other element, a string too, is unpacked like a Python tuple; variables
-// the element has no value for are nil.
+// any other element, a string or a group of {% regroup %} too, is unpacked
+// like a Python tuple; variables the element has no value for are nil.
 func (n *forTagNode) assign(ctx *pongo2.ExecutionContext, key, value *pongo2.Value) {
 	if len(n.vars) == 1 {
 		ctx.Private[n.vars[0]] = key
@@ -81,6 +82,10 @@ func (n *forTagNode) assign(ctx *pongo2.ExecutionContext, key, value *pongo2.Val
 		return
 	}
 	rv := reflect.ValueOf(key.Interface())
+	if g, ok := key.Interface().(groupedResult); ok {
+		// A group of {% regroup %} is a named tuple of grouper and list.
+		rv = reflect.ValueOf([]any{g["grouper"], g["list"]})
+	}
 	if rv.Kind() == reflect.String {
 		// A Python string unpacks into its characters.
 		chars := []rune(rv.String())

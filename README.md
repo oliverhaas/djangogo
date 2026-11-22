@@ -185,11 +185,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   squashing and no `makemigrations --merge`: conflicts are reported only. A change
   to the type of a primary key does not change the foreign keys that reference
   it, and PostgreSQL rejects it.
-- **Templates:** the engine is built on pongo2. Missing tags: `regroup`,
-  `querystring`, `debug`, `partialdef`/`partial`, and the `i18n`, `l10n`, `tz` and
-  `cache` libraries. Missing filter: `pprint`. Output is English only. Lists and
-  maps print in Go syntax, not as Python's repr. `{% extends %}` takes only a
-  literal name, and `{% lorem %}` is pongo2's tag. A template never runs a
+- **Templates:** the engine is built on pongo2. The `i18n`, `l10n`, `tz` and
+  `cache` tag libraries are missing, and output is English only.
+  `{% extends %}` takes only a literal name, and `{% lorem %}` is pongo2's tag. A template never runs a
   query: a relation renders empty unless the view loaded it with
   `SelectRelated` or `PrefetchRelated`.
 - **Forms:** no file fields or option groups, no localization and no custom

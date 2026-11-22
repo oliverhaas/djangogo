@@ -535,6 +535,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   field, the arguments of Django's `Field.formfield()`, and `forms.Class`
   turns a field constructor such as `forms.NewEmailField` into a
   `func(...forms.FieldOption) forms.Field`.
+- Templates: `{% partialdef name %}` defines a named piece of a template and
+  `{% partial name %}` renders it, as in Django 6.0. With `inline` it also
+  renders in place. `Render("page.html#name", ...)` and
+  `{% include "page.html#name" %}` render only that piece.
+- Templates: the `{% regroup %}`, `{% querystring %}` and `{% debug %}` tags
+  and the `pprint` filter. `{% debug %}` prints the context only when
+  `Engine.SetDebug(true)` is set.
 
 ### Changed
 
@@ -657,6 +664,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `GetExclude`, the exclusions of `FormOptions` apply as before. Add the
   names to `ExcludeFields` to keep both. The new `forms.ReplaceExclude`
   option replaces the exclusions of the options before it.
+- Templates print a list or a map as Python prints it (`['a', 'b']`,
+  `{'k': 1}`), not in Go syntax (`[a b]`, `map[k:1]`). This also holds for
+  `stringformat:"s"`, and `stringformat:"r"` gives Python's repr. `make_list`
+  splits a value into its characters, also a number. `forloop.parentloop` is
+  an empty map outside a nested loop, as in Django. Update templates and
+  tests that expect Go's format.
 
 ### Fixed
 

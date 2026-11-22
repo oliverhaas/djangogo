@@ -201,14 +201,32 @@ func (l *sourceLoader) find(name string) (data []byte, found bool, tried []Tried
 // of a failed search, the read error of a source, or an inheritance cycle. It
 // returns nil when the template loads fine and the failure lies elsewhere.
 func (l *sourceLoader) missing(name string) error {
-	data, found, tried, err := l.find(name)
+	base, _, isPartial := cutPartial(name)
+	if base == "" {
+		return &TemplateDoesNotExist{Name: name}
+	}
+	data, found, tried, err := l.find(base)
 	if err != nil {
 		return err
 	}
-	if found {
-		return l.checkExtends(name, data)
+	switch {
+	case !found:
+		return &TemplateDoesNotExist{Name: base, Tried: tried}
+	case isPartial:
+		return nil
 	}
-	return &TemplateDoesNotExist{Name: name, Tried: tried}
+	return l.checkExtends(name, data)
+}
+
+// cutPartial splits "page.html#card" into the template name and the partial
+// name. The template name is empty for a name no template has, such as
+// "#card" or a partial name with a line break, which no tag can define.
+func cutPartial(name string) (base, partial string, isPartial bool) {
+	base, partial, isPartial = strings.Cut(name, "#")
+	if strings.ContainsAny(partial, "\r\n") {
+		base = ""
+	}
+	return base, partial, isPartial
 }
 
 // parentOf returns the template the source src extends, or "".
@@ -245,13 +263,24 @@ func (l *sourceLoader) Abs(_, name string) string { return name }
 
 // Get returns the content of the named template for pongo2. pongo2 drops the
 // error, so the engine asks missing for the reason afterwards.
+//
+// A name such as "page.html#card" stands for the partial card of
+// page.html, Django's template partials: Get returns a source that renders
+// only that partial, see partialSource.
 func (l *sourceLoader) Get(name string) (io.Reader, error) {
-	data, found, _, err := l.find(name)
+	base, partial, isPartial := cutPartial(name)
+	if base == "" {
+		return nil, &TemplateDoesNotExist{Name: name}
+	}
+	data, found, _, err := l.find(base)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		return nil, &TemplateDoesNotExist{Name: name}
+		return nil, &TemplateDoesNotExist{Name: base}
+	}
+	if isPartial {
+		return bytes.NewReader(partialSource(data, partial)), nil
 	}
 	if err := l.checkExtends(name, data); err != nil {
 		return nil, err

@@ -255,20 +255,20 @@ func filterWordwrap(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 
 // filterStringformat implements Django's stringformat: the value formatted
 // with a printf verb given without its percent sign ("03d", ".2f", "s"). A
-// verb that does not fit the value gives an empty string.
+// verb that does not fit the value gives an empty string. "s" formats
+// Python's str() of the value and "r" its repr().
 func filterStringformat(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	spec := param.String()
 	if spec == "" {
 		return keep(in, "")
 	}
-	arg := in.Interface()
-	if mv, ok := arg.(modelView); ok {
-		arg = mv.label()
-	}
+	var arg any
 	flags, verb := spec[:len(spec)-1], spec[len(spec)-1]
 	switch verb {
-	case 's', 'r':
-		verb = 'v'
+	case 's':
+		arg = pyStr(in)
+	case 'r':
+		arg, verb = pyRepr(in), 's'
 	case 'i', 'u':
 		verb = 'd'
 	}
@@ -283,7 +283,7 @@ func filterStringformat(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) 
 			return keep(in, "")
 		}
 		arg = in.Float()
-	case 'v':
+	case 's':
 	default:
 		return keep(in, "")
 	}
@@ -292,6 +292,18 @@ func filterStringformat(in, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) 
 		return keep(in, "")
 	}
 	return keep(in, out)
+}
+
+// filterMakeList implements Django's make_list: the characters of the
+// value's text, so a number gives its digits and a list the characters of
+// its repr. pongo2's filter takes the Go formatting of the value.
+func filterMakeList(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	s := text(in)
+	out := make([]any, 0, len(s))
+	for _, r := range s {
+		out = append(out, string(r))
+	}
+	return pongo2.AsValue(out), nil
 }
 
 // filterPluralize implements Django's pluralize: the plural suffix ("s", or

@@ -30,7 +30,6 @@ templates alone with `python3 fidelity/oracle/render.py`.
 | Case | Django | This engine |
 | --- | --- | --- |
 | `print_none` | `{{ n }}` prints `None` | prints nothing |
-| `print_list` | `['a', 'b']` (Python repr) | Go's formatting of the value; the same holds for maps and for `stringformat:"s"` and `make_list` of a list |
 | `lorem_words` | `{% lorem 3 w %}` prints `lorem ipsum dolor` | pongo2's tag prints `Lorem ipsum dolor` with punctuation |
 | `urlize_bracket_punctuation` | 6.0.3 drops the `.` of `(see www.example.com).`, a bug its main branch fixed | keeps it, as Django's main branch does |
 
@@ -63,7 +62,16 @@ templates alone with `python3 fidelity/oracle/render.py`.
 - Methods of Python types (`text.upper`, `mapping.items` outside a `{% for %}`
   tag) do not exist. `{% for k, v in mapping.items %}`, `.keys` and `.values`
   work, in sorted key order where Python keeps insertion order. `json_script`
-  sorts keys for the same reason.
+  sorts keys for the same reason, and so does a map that prints as Python's
+  repr (`{{ mapping }}`, `pprint`, `{% debug %}`).
+- Go has no tuple and no set: a slice prints as a list (`[1, 2]`), also where
+  Django's value is a tuple, such as `stringformat:"s"` of a tuple.
+- `{% debug %}` lists the Go modules of the binary where Django lists the
+  imported Python modules, and prints nothing unless `Engine.SetDebug(true)`
+  is set, as Django prints nothing outside `DEBUG`.
+- A partial loaded as `"page.html#name"` gives a `TemplateDoesNotExist` for a
+  partial the template does not define, as Django does, but the error has no
+  `tried` list.
 - A `time.Time` always has a zone, so there is no counterpart of a naive
   `datetime`.
 - `upper` keeps `ß`, where Python writes `SS`.
@@ -102,8 +110,6 @@ templates alone with `python3 fidelity/oracle/render.py`.
 
 ### Missing
 
-- Tags: `regroup`, `querystring`, `debug`, `partialdef`,
-  `partial`, and the `i18n`, `l10n`, `tz` and `cache` libraries.
-- Filters: `pprint`.
+- Tags: the `i18n`, `l10n`, `tz` and `cache` libraries.
 - `forloop.Counter` and the other capitalized pongo2 loop names; use Django's
   lowercase names.

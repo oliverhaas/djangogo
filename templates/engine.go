@@ -71,7 +71,8 @@ func (e *Engine) SetResolver(r Resolver) { e.resolver = r }
 
 // SetDebug switches template caching off (true) or on (false, the default).
 // With debug on every render reads and compiles the template again, so an
-// edit shows without a restart, as with Django's loaders under DEBUG.
+// edit shows without a restart, as with Django's loaders under DEBUG, and
+// {% debug %} prints the context.
 func (e *Engine) SetDebug(debug bool) { e.set.Debug = debug }
 
 // AddSource appends sources to the search order, after the ones the engine
@@ -183,6 +184,11 @@ func (e *Engine) loadError(err error) error {
 		if miss := e.loader.missing(perr.Filename); miss != nil {
 			return miss
 		}
+	}
+	// A "name#partial" whose template does not define the partial.
+	var miss *TemplateDoesNotExist
+	if perr != nil && errors.As(perr.OrigError, &miss) {
+		return miss
 	}
 	return wrapPongo(err)
 }

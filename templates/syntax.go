@@ -39,6 +39,9 @@ const outFilter = "_out"
 //   - {{ block.super }}, which pongo2 only knows as {{ block.Super }};
 //   - the conditions of {% if %} and {% elif %}, see rewriteCondition;
 //   - a loop over mapping.items, .keys or .values, see dictViewFilter;
+//   - the key of {% regroup %}, see regroupSyntax;
+//   - the partial names of {% partialdef %} and {% partial %}, see
+//     partialSyntax;
 //   - a backslash in a string literal, see keepBackslashes;
 //   - string literals, which Django never escapes, see trustLiterals and
 //     safeLiteral;
@@ -49,11 +52,15 @@ const outFilter = "_out"
 //
 // A rewrite keeps the line of every tag, so the lines in error messages stay
 // right; a column may shift by a few characters.
-func djangoSyntax(src []byte) []byte {
+func djangoSyntax(src []byte) []byte { return rewrite(src, false) }
+
+// rewrite is djangoSyntax. With dropExtends it also removes the
+// {% extends %} tag, for the source of a partial, see partialSource.
+func rewrite(src []byte, dropExtends bool) []byte {
 	if bytes.IndexByte(src, '{') < 0 {
 		return src
 	}
-	r := rewriter{autoescape: []bool{true}, out: make([]byte, 0, len(src)+len(src)/8)}
+	r := rewriter{autoescape: []bool{true}, out: make([]byte, 0, len(src)+len(src)/8), dropExtends: dropExtends}
 	last := 0
 	for _, loc := range tagRe.FindAllIndex(src, -1) {
 		r.addText(src[last:loc[0]])
@@ -77,6 +84,8 @@ type rewriter struct {
 	verbatim string
 	// commentTag is, inside a {% comment %} block, the tag that opened it.
 	commentTag []byte
+	// dropExtends removes the {% extends %} tag.
+	dropExtends bool
 }
 
 // addText adds text of the template. Inside a comment only its line breaks
@@ -170,6 +179,12 @@ func (r *rewriter) block(tag []byte) []byte {
 	case "comment":
 		r.commentTag = tag
 		return nil
+	case "partialdef", "endpartialdef", "partial":
+		return partialSyntax(tag)
+	case "extends":
+		if r.dropExtends {
+			return nil
+		}
 	case "autoescape":
 		switch strings.TrimSpace(args) {
 		case "on":
@@ -206,8 +221,61 @@ func (r *rewriter) block(tag []byte) []byte {
 		repl = dictViewRe.ReplaceAll(repl, []byte("$1$2.$3|_dict_$3:$2$4"))
 	case "with", "include":
 		repl = safeAssignments(repl)
+	case "regroup":
+		repl = regroupSyntax(repl)
 	}
 	return repl
+}
+
+// partialSyntax checks the arguments of {% partialdef %}, {% endpartialdef %}
+// and {% partial %} as Django does, and quotes the partial name for pongo2.
+// A name is any word, such as "card-1", "{curly}" or "'two words'" with its
+// quotes.
+func partialSyntax(tag []byte) []byte {
+	head, name, args, tail := tagParts(tag)
+	bits := splitBits(args)
+	switch name {
+	case "partialdef":
+		switch {
+		case len(bits) == 0:
+			return syntaxError("'partialdef' tag requires a name")
+		case len(bits) > 2:
+			return syntaxError("'partialdef' tag takes at most 2 arguments")
+		case len(bits) == 2 && bits[1] != "inline":
+			return syntaxError("The 'inline' argument does not have any parameters; " +
+				"either use 'inline' or remove it completely.")
+		}
+		bits[0] = quoteName(bits[0])
+	case "partial":
+		if len(bits) != 1 {
+			return syntaxError("'partial' tag requires a single argument")
+		}
+		bits[0] = quoteName(bits[0])
+	default:
+		// Django compares everything after "endpartialdef" with the name.
+		if len(bits) > 0 {
+			bits = []string{quoteName(strings.Join(bits, " "))}
+		}
+	}
+	return []byte(head + " " + strings.Join(bits, " ") + " " + tail)
+}
+
+// regroupSyntax checks the arguments of a {% regroup %} tag as Django does
+// and prefixes the key with the variable name: Django evaluates
+// "name.key" with each element of the list bound to name.
+func regroupSyntax(tag []byte) []byte {
+	head, _, args, tail := tagParts(tag)
+	bits := splitBits(args)
+	switch {
+	case len(bits) != 5:
+		return syntaxError("'regroup' tag takes five arguments")
+	case bits[1] != "by":
+		return syntaxError("second argument to 'regroup' tag must be 'by'")
+	case bits[3] != "as":
+		return syntaxError("next-to-last argument to 'regroup' tag must be 'as'")
+	}
+	bits[2] = bits[4] + "." + bits[2]
+	return []byte(head + " " + strings.Join(bits, " ") + " " + tail)
 }
 
 // assignedLiteralRe matches a {% with %} or {% include ... with %} argument

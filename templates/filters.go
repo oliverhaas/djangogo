@@ -55,6 +55,8 @@ func registerFilters() {
 		"slice":         filterSlice,
 		"last":          filterLast,
 		"random":        filterRandom,
+		"pprint":        filterPprint,
+		"make_list":     filterMakeList,
 		outFilter:       filterOut,
 
 		safeLiteralFilter: filterSafeLiteral,

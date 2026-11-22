@@ -84,6 +84,12 @@ func registerTags() {
 	mustReplace("now", nowTagParser)
 	mustReplace("firstof", firstofTagParser)
 	mustReplace("spaceless", spacelessTagParser)
+	mustRegister("regroup", regroupTagParser)
+	mustRegister("querystring", querystringTagParser)
+	mustRegister("debug", debugTagParser)
+	mustRegister("partialdef", partialDefTagParser)
+	mustRegister("partial", partialTagParser)
+	mustRegister(partialTemplateTag, partialTemplateTagParser)
 }
 
 // mustRegister registers a tag and panics if pongo2 rejects it. A rejection means

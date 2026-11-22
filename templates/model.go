@@ -16,6 +16,10 @@ import (
 // mirrors Python's dunder so it never collides with a real snake_case attribute.
 const modelLabelKey = "__str__"
 
+// modelClassKey is the ModelMap key under which the name of the model is
+// stored, for the repr of an instance, <Name: label>.
+const modelClassKey = "__class__"
+
 // maxModelDepth bounds how deep loaded relations and nested containers are
 // followed, so that objects pointing at each other cannot loop.
 const maxModelDepth = 12
@@ -52,6 +56,15 @@ func (m modelView) String() string {
 func (m modelView) label() string {
 	s, _ := m[modelLabelKey].(string)
 	return s
+}
+
+// className returns the name of the model, "object" when the view does not
+// know it.
+func (m modelView) className() string {
+	if s, ok := m[modelClassKey].(string); ok && s != "" {
+		return s
+	}
+	return "object"
 }
 
 // ModelLookup finds the model a value is an instance of. *orm.Registry
@@ -353,7 +366,8 @@ func (c converter) convertSlice(v any, rv reflect.Value, depth int) (any, bool) 
 // or a pointer to it.
 func (c converter) instance(m *orm.Model, rv reflect.Value, depth int) map[string]any {
 	fields := m.Fields()
-	out := make(map[string]any, len(fields)+4)
+	out := make(map[string]any, len(fields)+5)
+	out[modelClassKey] = m.Name()
 	if !rv.IsValid() {
 		out[modelLabelKey] = ""
 		return out

@@ -85,8 +85,9 @@ func filterSafeLiteral(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 // escapes only values that are strings; a value it prints through its String
 // method, such as a model instance or any other fmt.Stringer, would reach the
 // page unescaped. filterOut turns such a value into its text, which
-// autoescape then escapes like any other string. A value marked safe stays
-// as it is, and an HTMLer becomes its HTML marked safe.
+// autoescape then escapes like any other string. A list or a map prints as
+// its Python repr. A value marked safe stays as it is, and an HTMLer becomes
+// its HTML marked safe.
 func filterOut(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	for {
 		inner, ok := in.Interface().(*pongo2.Value)
@@ -103,6 +104,9 @@ func filterOut(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	}
 	if in.IsFloat() {
 		return pongo2.AsValue(pyFloatText(in.Float())), nil
+	}
+	if isContainer(in.Interface()) {
+		return pongo2.AsValue(pyRepr(in)), nil
 	}
 	switch v := in.Interface().(type) {
 	case modelView:

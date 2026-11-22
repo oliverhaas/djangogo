@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"fmt"
 	"html/template"
 	"reflect"
 	"strings"
@@ -46,8 +47,9 @@ func safeHTML(v *pongo2.Value) (string, bool) {
 }
 
 // text returns the text of a template value for a filter that works on
-// strings. A model instance gives its label unescaped, where String would
-// give the escaped form meant for direct output.
+// strings, Python's str(). A model instance gives its label unescaped, where
+// String would give the escaped form meant for direct output, and a list or
+// a map gives its Python repr.
 func text(v *pongo2.Value) string {
 	if mv, ok := v.Interface().(modelView); ok {
 		return mv.label()
@@ -55,7 +57,25 @@ func text(v *pongo2.Value) string {
 	if h, ok := safeHTML(v); ok {
 		return h
 	}
+	if isContainer(v.Interface()) {
+		return pyRepr(v)
+	}
 	return v.String()
+}
+
+// isContainer reports whether v is a list or a map, which Python prints as
+// its repr. A model instance and a value with a String method, such as a
+// uuid.UUID, are not.
+func isContainer(v any) bool {
+	switch v.(type) {
+	case modelView, fmt.Stringer:
+		return false
+	}
+	switch reflect.ValueOf(v).Kind() {
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return true
+	}
+	return false
 }
 
 // isSafe reports whether v is HTML that needs no escaping: marked by the
