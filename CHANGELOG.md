@@ -721,6 +721,15 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `SaveAsNew`, the `QuerySet` of the rows and Django's defaults (three extra
   forms, `CanDelete` and the prefix `<app>-<model>-<ct field>-<fk field>`)
   work as for an inline formset.
+- Admin: `admin.GenericTabularInline[T]` and `admin.GenericStackedInline[T]`
+  edit the rows of `T` that point at the edited row through a generic foreign
+  key, on the add and change pages of any model, as Django's generic inlines
+  of `django.contrib.contenttypes.admin` do. `CTField` and `CTFKField` of
+  `InlineModelAdmin` name the two fields when they are not `content_type` and
+  `object_id`. The checks report a model without a matching generic foreign
+  key (`admin.E301` to `admin.E304`). The forms keep the permission guards and
+  the check of protected rows of the other inlines, which Django's generic
+  inlines leave out.
 
 ### Changed
 

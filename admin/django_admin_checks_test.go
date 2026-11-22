@@ -77,6 +77,15 @@ type CheckCity struct {
 	State orm.FK[CheckState] `orm:"on_delete=cascade"`
 }
 
+// CheckInfluence stands in for tests/admin_checks/models.py::Influence.
+type CheckInfluence struct {
+	ID            int64
+	Name          string `orm:"type=text"`
+	ContentType   orm.FK[contenttypes.ContentType]
+	ObjectID      int64 `orm:"type=positive_int"`
+	ContentObject contenttypes.GenericForeignKey
+}
+
 // adminChecksModels returns the model set of the ported
 // tests/admin_checks/tests.py tests.
 func adminChecksModels() []any {
@@ -86,7 +95,7 @@ func adminChecksModels() []any {
 		admin.App{},
 		djangotest.App("admin_checks",
 			&CheckAlbum{}, &CheckSong{}, &CheckAuthor{}, &CheckBook{}, &CheckAuthorsBooks{},
-			&CheckTwoAlbumFKAndAnE{}, &CheckState{}, &CheckCity{},
+			&CheckTwoAlbumFKAndAnE{}, &CheckState{}, &CheckCity{}, &CheckInfluence{},
 		),
 	}
 }
@@ -255,9 +264,9 @@ func TestAdminChecksFieldLayout(t *testing.T) {
 // Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_nonexistent_field_on_inline
 func TestAdminChecksInlines(t *testing.T) {
 	// No Go counterpart: test_exclude_in_inline checks the type of exclude,
-	// which Go fixes at compile time. test_explicit_through_override and the
-	// generic inline tests need an inline of a many-to-many through model and
-	// generic inlines, which the Go admin does not have.
+	// which Go fixes at compile time. test_explicit_through_override needs an
+	// inline of a many-to-many through model, which the Go admin does not
+	// have.
 	twoFK := admin.TabularInline[CheckAlbum, CheckTwoAlbumFKAndAnE]
 	albumSite := func(t *testing.T, db *orm.DB, inline admin.Inline) *admin.AdminSite {
 		t.Helper()
@@ -309,6 +318,60 @@ func TestAdminChecksInlines(t *testing.T) {
 			assertInlineIsInvalid(t, site, "admin_checks.CheckCity",
 				"The value of 'readonly_fields[0]' refers to 'i_dont_exist', which is not a callable, "+
 					"an attribute of 'InlineModelAdmin', or an attribute of 'admin_checks.CheckCity'.", "admin.E035")
+		})
+	})
+}
+
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_valid_generic_inline_model_admin
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_generic_inline_model_admin_non_generic_model
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_generic_inline_model_admin_bad_ct_field
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_generic_inline_model_admin_bad_fk_field
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_generic_inline_model_admin_non_gfk_ct_field
+// Ported from Django: tests/admin_checks/tests.py::SystemChecksTestCase.test_generic_inline_model_admin_non_gfk_fk_field
+func TestAdminChecksGenericInlines(t *testing.T) {
+	const influence = "admin_checks.CheckInfluence"
+	songSite := func(t *testing.T, db *orm.DB, inline admin.Inline) *admin.AdminSite {
+		t.Helper()
+		return checkSite(t, db, func(site *admin.AdminSite) {
+			admin.Register[CheckSong](site, admin.ModelAdmin{Inlines: []admin.Inline{inline}})
+		})
+	}
+	djangotest.EachDB(t, adminChecksModels(), func(t *testing.T, db *orm.DB) {
+		t.Run("test_valid_generic_inline_model_admin", func(t *testing.T) {
+			// Generic inlines don't look for normal ForeignKey relations
+			// (#22034).
+			assertIsValid(t, songSite(t, db, admin.GenericStackedInline[CheckInfluence](admin.InlineModelAdmin{})))
+		})
+
+		t.Run("test_generic_inline_model_admin_non_generic_model", func(t *testing.T) {
+			assertInlineIsInvalid(t, songSite(t, db, admin.GenericStackedInline[CheckBook](admin.InlineModelAdmin{})),
+				"admin_checks.CheckBook", "'admin_checks.CheckBook' has no GenericForeignKey.", "admin.E301")
+		})
+
+		t.Run("test_generic_inline_model_admin_bad_ct_field", func(t *testing.T) {
+			site := songSite(t, db, admin.GenericStackedInline[CheckInfluence](admin.InlineModelAdmin{CTField: "nonexistent"}))
+			assertInlineIsInvalid(t, site, influence,
+				"'ct_field' references 'nonexistent', which is not a field on 'admin_checks.CheckInfluence'.", "admin.E302")
+		})
+
+		t.Run("test_generic_inline_model_admin_bad_fk_field", func(t *testing.T) {
+			site := songSite(t, db, admin.GenericStackedInline[CheckInfluence](admin.InlineModelAdmin{CTFKField: "nonexistent"}))
+			assertInlineIsInvalid(t, site, influence,
+				"'ct_fk_field' references 'nonexistent', which is not a field on 'admin_checks.CheckInfluence'.", "admin.E303")
+		})
+
+		t.Run("test_generic_inline_model_admin_non_gfk_ct_field", func(t *testing.T) {
+			site := songSite(t, db, admin.GenericStackedInline[CheckInfluence](admin.InlineModelAdmin{CTField: "name"}))
+			assertInlineIsInvalid(t, site, influence,
+				"'admin_checks.CheckInfluence' has no GenericForeignKey using content type field 'name' and "+
+					"object ID field 'object_id'.", "admin.E304")
+		})
+
+		t.Run("test_generic_inline_model_admin_non_gfk_fk_field", func(t *testing.T) {
+			site := songSite(t, db, admin.GenericStackedInline[CheckInfluence](admin.InlineModelAdmin{CTFKField: "name"}))
+			assertInlineIsInvalid(t, site, influence,
+				"'admin_checks.CheckInfluence' has no GenericForeignKey using content type field 'content_type' and "+
+					"object ID field 'name'.", "admin.E304")
 		})
 	})
 }

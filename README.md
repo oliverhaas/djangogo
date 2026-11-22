@@ -223,8 +223,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   per form, where Django loads them on each render, and their widget options
   do not carry the model instance.
 - **Admin:** a registered model needs an integer primary key. An
-  inline cannot edit the auto-created through model of a many-to-many field,
-  and there are no generic inlines.
+  inline cannot edit the auto-created through model of a many-to-many field.
   The `FormClass` of `FormfieldOverrides` does not apply to a relation, which
   keeps its choice field. The scripts and
   pages are in English only. The date
@@ -246,7 +245,6 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   fallback storage. A message added after the response
   headers are written is lost, and reading `messages` in a template, also in
   `{% if messages %}`, marks them as read.
-- **contenttypes:** no generic inline formsets.
 - **Commands:** `runserver` has no autoreload, and `shell` is a query shell over
   the models, not a Go REPL. `collectstatic` has no post-processing (manifest
   or hashed names), and `collectstatic --link` copies the embedded static

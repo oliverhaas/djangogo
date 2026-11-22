@@ -53,7 +53,7 @@ func (GenericForeignKey) AssignPrivateField(ctx context.Context, db *orm.DB, _ *
 // foreign key pf of m is a foreign key to ContentType and that its object id
 // field exists, Django's GenericForeignKey checks.
 func (GenericForeignKey) ResolvePrivateField(m *orm.Model, pf *orm.PrivateField) error {
-	_, _, err := gfkFields(m, pf)
+	_, _, err := GenericForeignKeyFields(m, pf)
 	return err
 }
 
@@ -98,9 +98,10 @@ func (GenericForeignKey) CacheObject(pf *orm.PrivateField, instance, obj any) {
 	reflect.ValueOf(instance).Elem().Field(pf.Index).Set(reflect.ValueOf(GenericForeignKey{obj: obj, cached: true}))
 }
 
-// gfkFields returns the content type field and the object id field of the
-// generic foreign key pf of m.
-func gfkFields(m *orm.Model, pf *orm.PrivateField) (ct, fk *orm.Field, err error) {
+// GenericForeignKeyFields returns the content type field and the object id
+// field of the generic foreign key pf of m, the fields that the ct_field and
+// fk_field of Django's GenericForeignKey name.
+func GenericForeignKeyFields(m *orm.Model, pf *orm.PrivateField) (ct, fk *orm.Field, err error) {
 	ctName, fkName := "content_type", "object_id"
 	for token := range strings.SplitSeq(pf.Tag, ";") {
 		token = strings.TrimSpace(token)
@@ -201,7 +202,7 @@ func lookupGFK(db *orm.DB, instance any, name string) (gfkTarget, error) {
 	if !ok || pf.Type != reflect.TypeFor[GenericForeignKey]() {
 		return gfkTarget{}, &orm.FieldError{Model: m.Name(), Message: "no generic foreign key '" + name + "'"}
 	}
-	ct, fk, err := gfkFields(m, pf)
+	ct, fk, err := GenericForeignKeyFields(m, pf)
 	if err != nil {
 		return gfkTarget{}, fmt.Errorf("contenttypes: model %s field %s: %w", m.Name(), pf.Name, err)
 	}

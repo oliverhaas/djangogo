@@ -490,8 +490,8 @@ type ModelAdmin struct {
 	// AutocompleteFields (Django's get_autocomplete_fields).
 	GetAutocompleteFields func(r *http.Request) []string
 	// Inlines edit the rows of other models that point at the edited row on
-	// its add and change pages (Django's inlines), made by TabularInline or
-	// StackedInline.
+	// its add and change pages (Django's inlines), made by TabularInline,
+	// StackedInline, GenericTabularInline or GenericStackedInline.
 	Inlines []Inline
 	// GetInlines returns the inlines for r and obj, nil on the add page, in
 	// place of Inlines (Django's get_inlines).

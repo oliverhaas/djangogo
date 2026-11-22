@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/oliverhaas/djangogo/checks"
+	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/templates"
@@ -22,15 +23,23 @@ import (
 const defaultInlineExtra = 3
 
 // InlineModelAdmin configures the inline editing of the rows of a model that
-// point at the edited row through a foreign key, Django's InlineModelAdmin.
+// point at the edited row through a foreign key, Django's InlineModelAdmin,
+// or through a generic foreign key, Django's GenericInlineModelAdmin.
 // TabularInline and StackedInline turn it into an Inline for
-// ModelAdmin.Inlines. The fields shared with ModelAdmin mean the same for the
+// ModelAdmin.Inlines, and GenericTabularInline and GenericStackedInline into
+// a generic one. The fields shared with ModelAdmin mean the same for the
 // forms of the inline. The obj argument of the hooks is the edited row of the
 // parent model, nil on the add page.
 type InlineModelAdmin struct {
 	// FKName names the foreign key to the parent model, Django's fk_name. It
 	// is needed when the model has more than one.
 	FKName string
+	// CTField names the foreign key to contenttypes.ContentType of a generic
+	// inline, Django's ct_field (default "content_type").
+	CTField string
+	// CTFKField names the object id field of a generic inline, Django's
+	// ct_fk_field (default "object_id").
+	CTFKField string
 	// Extra is the number of empty forms shown for new rows (default 3).
 	Extra *int
 	// MinNum is the number of forms shown at least, Django's min_num.
@@ -144,11 +153,13 @@ type InlineModelAdmin struct {
 }
 
 // Inline is an inline of a ModelAdmin, made by TabularInline or
-// StackedInline for a parent model P.
+// StackedInline for a parent model P, or by GenericTabularInline or
+// GenericStackedInline for any parent model.
 type Inline struct {
 	cfg      InlineModelAdmin
 	template string
-	parent   reflect.Type
+	// parent is the type of the parent model, nil for a generic inline.
+	parent reflect.Type
 	// resolve builds the admin of the inline on site. When the model of
 	// the inline is registered but its foreign key to the parent is not
 	// usable, it returns the admin without a foreign key together with the
@@ -200,22 +211,135 @@ func newInline[P, T any](cfg InlineModelAdmin, template string) Inline {
 			in.fk = probe.FK()
 			in.newFormSet = func(parent any, ordering []string, none, saveAsNew bool, opts []forms.ModelFormOption) inlineSet {
 				fs := forms.NewInlineFormSet[P, T](db, cfg.FKName, opts...)
-				qs := orm.Query[T](db)
-				if len(ordering) > 0 {
-					qs = qs.OrderBy(ordering...)
-				}
-				if none {
-					qs = qs.Filter("pk__in", []any{})
-				}
-				fs.QuerySet = qs
+				fs.QuerySet = inlineQuerySet[T](db, ordering, none)
 				p, _ := parent.(*P)
 				set := fs.WithInstance(p)
 				set.SaveAsNew = saveAsNew
-				return &typedInlineSet[P, T]{fs: set}
+				return &typedInlineSet[T]{fs: set.ModelFormSet, rebind: func(data url.Values) *forms.ModelFormSet[T] {
+					return set.Bind(data).ModelFormSet
+				}}
 			}
 			return in, nil
 		},
 	}
+}
+
+// GenericTabularInline returns an inline that edits the rows of T that point
+// at the edited row, of any model, through a generic foreign key, as the rows
+// of a table, Django's GenericTabularInline. CTField and CTFKField of cfg
+// name the fields of the generic foreign key.
+func GenericTabularInline[T any](cfg InlineModelAdmin) Inline {
+	return newGenericInline[T](cfg, "admin/edit_inline/tabular.html")
+}
+
+// GenericStackedInline returns an inline that edits the rows of T that point
+// at the edited row, of any model, through a generic foreign key, one below
+// the other, Django's GenericStackedInline.
+func GenericStackedInline[T any](cfg InlineModelAdmin) Inline {
+	return newGenericInline[T](cfg, "admin/edit_inline/stacked.html")
+}
+
+// newGenericInline returns the generic inline of T drawn with template. Its
+// forms keep the permission guards and the check of protected rows of the
+// other inlines, which Django's GenericInlineModelAdmin leaves out.
+func newGenericInline[T any](cfg InlineModelAdmin, template string) Inline {
+	if cfg.CTField == "" {
+		cfg.CTField = "content_type"
+	}
+	if cfg.CTFKField == "" {
+		cfg.CTFKField = "object_id"
+	}
+	return Inline{
+		cfg:      cfg,
+		template: template,
+		resolve: func(site *AdminSite) (*inlineAdmin, error) {
+			db := site.db
+			var zero T
+			m, ok := db.Registry().ModelOf(zero)
+			if !ok {
+				return nil, fmt.Errorf("admin: inline: no ORM model registered for %T", zero)
+			}
+			in := &inlineAdmin{
+				cfg:      cfg,
+				template: template,
+				entry: &entry{
+					app:   m.App(),
+					slug:  strings.ToLower(m.Name()),
+					model: m,
+					admin: cfg.modelAdmin(),
+					ops:   buildOps[T](db, m),
+				},
+			}
+			if err := genericInlineError(m, cfg.CTField, cfg.CTFKField); err != nil {
+				return in, err
+			}
+			in.newFormSet = func(parent any, ordering []string, none, saveAsNew bool, opts []forms.ModelFormOption) inlineSet {
+				fs := forms.NewGenericInlineFormSet[T](db, cfg.CTField, cfg.CTFKField, opts...)
+				fs.QuerySet = inlineQuerySet[T](db, ordering, none)
+				set := fs.WithInstance(parent)
+				set.SaveAsNew = saveAsNew
+				return &typedInlineSet[T]{fs: set.ModelFormSet, rebind: func(data url.Values) *forms.ModelFormSet[T] {
+					return set.Bind(data).ModelFormSet
+				}}
+			}
+			return in, nil
+		},
+	}
+}
+
+// genericInlineError returns the problem of a generic inline of m whose
+// generic foreign key has the content type field ctName and the object id
+// field fkName, Django's GenericInlineModelAdminChecks._check_relation
+// (admin.E301 to admin.E304).
+func genericInlineError(m *orm.Model, ctName, fkName string) error {
+	var gfks [][2]string
+	for _, pf := range m.PrivateFields() {
+		if pf.Type != reflect.TypeFor[contenttypes.GenericForeignKey]() {
+			continue
+		}
+		if ct, fk, err := contenttypes.GenericForeignKeyFields(m, pf); err == nil {
+			gfks = append(gfks, [2]string{ct.Attr, fk.Attr})
+		}
+	}
+	if len(gfks) == 0 {
+		return &inlineCheckError{id: "admin.E301", msg: fmt.Sprintf("'%s' has no GenericForeignKey.", m.Label())}
+	}
+	if _, ok := m.FieldByAttr(ctName); !ok {
+		return &inlineCheckError{id: "admin.E302", msg: fmt.Sprintf(
+			"'ct_field' references '%s', which is not a field on '%s'.", ctName, m.Label())}
+	}
+	if _, ok := m.FieldByAttr(fkName); !ok {
+		return &inlineCheckError{id: "admin.E303", msg: fmt.Sprintf(
+			"'ct_fk_field' references '%s', which is not a field on '%s'.", fkName, m.Label())}
+	}
+	if slices.Contains(gfks, [2]string{ctName, fkName}) {
+		return nil
+	}
+	return &inlineCheckError{id: "admin.E304", msg: fmt.Sprintf(
+		"'%s' has no GenericForeignKey using content type field '%s' and object ID field '%s'.",
+		m.Label(), ctName, fkName)}
+}
+
+// inlineCheckError is a problem of an inline that the checks report with
+// the ID of a Django check.
+type inlineCheckError struct {
+	id, msg string
+}
+
+// Error returns the message.
+func (e *inlineCheckError) Error() string { return "admin: " + e.msg }
+
+// inlineQuerySet returns the rows of T for the formset of an inline, ordered
+// by ordering, none of them when none is true.
+func inlineQuerySet[T any](db *orm.DB, ordering []string, none bool) *orm.QuerySet[T] {
+	qs := orm.Query[T](db)
+	if len(ordering) > 0 {
+		qs = qs.OrderBy(ordering...)
+	}
+	if none {
+		qs = qs.Filter("pk__in", []any{})
+	}
+	return qs
 }
 
 // modelAdmin returns the ModelAdmin with the options of the inline that the
@@ -252,8 +376,9 @@ func (c InlineModelAdmin) modelAdmin() ModelAdmin {
 type inlineAdmin struct {
 	cfg      InlineModelAdmin
 	template string
-	fk       *orm.Field
-	entry    *entry
+	// fk is the foreign key to the parent model, nil for a generic inline.
+	fk    *orm.Field
+	entry *entry
 	// newFormSet returns the formset of the rows of parent, ordered by
 	// ordering, empty when none is true. saveAsNew makes every form add a
 	// row, Django's save_as_new.
@@ -282,19 +407,31 @@ type changedRow struct {
 	fields []string
 }
 
-// typedInlineSet is the inlineSet of an InlineFormSet of T in P.
-type typedInlineSet[P, T any] struct {
-	fs *forms.InlineFormSet[P, T]
+// fkAttr returns the name of the foreign key to the parent model, "" for a
+// generic inline.
+func (in *inlineAdmin) fkAttr() string {
+	if in.fk == nil {
+		return ""
+	}
+	return in.fk.Attr
+}
+
+// typedInlineSet is the inlineSet of an InlineFormSet or a
+// GenericInlineFormSet of T, through its model formset.
+type typedInlineSet[T any] struct {
+	fs *forms.ModelFormSet[T]
+	// rebind binds the inline formset to data and returns its model formset.
+	rebind func(data url.Values) *forms.ModelFormSet[T]
 }
 
 // base returns the formset.
-func (t *typedInlineSet[P, T]) base() *forms.FormSet { return t.fs.FormSet }
+func (t *typedInlineSet[T]) base() *forms.FormSet { return t.fs.FormSet }
 
 // bind binds the formset to data.
-func (t *typedInlineSet[P, T]) bind(data url.Values) { t.fs = t.fs.Bind(data) }
+func (t *typedInlineSet[T]) bind(data url.Values) { t.fs = t.rebind(data) }
 
 // instances returns the instance of each form, aligned with Forms.
-func (t *typedInlineSet[P, T]) instances() []any {
+func (t *typedInlineSet[T]) instances() []any {
 	mfs := t.fs.ModelForms()
 	out := make([]any, len(mfs))
 	for i, mf := range mfs {
@@ -304,13 +441,13 @@ func (t *typedInlineSet[P, T]) instances() []any {
 }
 
 // save saves the rows of the forms.
-func (t *typedInlineSet[P, T]) save(ctx context.Context) error {
+func (t *typedInlineSet[T]) save(ctx context.Context) error {
 	_, err := t.fs.Save(ctx)
 	return err
 }
 
 // changes returns the rows that the last save added, changed and deleted.
-func (t *typedInlineSet[P, T]) changes() (added []any, changed []changedRow, deleted []any) {
+func (t *typedInlineSet[T]) changes() (added []any, changed []changedRow, deleted []any) {
 	for _, o := range t.fs.NewObjects() {
 		added = append(added, o)
 	}
@@ -425,9 +562,9 @@ func (s *AdminSite) inlineAdmins(r *http.Request, e *entry, obj any) ([]*inlineA
 	out := make([]*inlineAdmin, 0, len(inlines))
 	for _, inline := range inlines {
 		if inline.resolve == nil {
-			return nil, errors.New("admin: an Inline must be made by TabularInline or StackedInline")
+			return nil, errors.New("admin: an Inline must be made by TabularInline, StackedInline or their generic counterparts")
 		}
-		if parent := reflect.TypeOf(e.ops.newPtr()).Elem(); inline.parent != parent {
+		if parent := reflect.TypeOf(e.ops.newPtr()).Elem(); inline.parent != nil && inline.parent != parent {
 			return nil, fmt.Errorf("admin: an inline of %v cannot edit %v", inline.parent, parent)
 		}
 		in, err := inline.resolve(s)
@@ -563,7 +700,7 @@ func (s *AdminSite) buildInlineFormSet(r *http.Request, ifs *inlineFormSet, pare
 	fs := ifs.formSet()
 	fs.Extra = in.extra(r, obj)
 	fs.MinNum = in.minNum(r, obj)
-	if !in.fk.Unique && in.fk.Rel.Kind != orm.RelO2O {
+	if in.fk == nil || (!in.fk.Unique && in.fk.Rel.Kind != orm.RelO2O) {
 		if n, ok := in.maxNum(r, obj); ok {
 			fs.MaxNum = n
 		}
@@ -585,7 +722,7 @@ func (s *AdminSite) buildInlineFormSet(r *http.Request, ifs *inlineFormSet, pare
 		syncAutocompleteRequired(form)
 		s.wrapRelatedWidgets(r, ie, form, built)
 		if choices == nil {
-			choices = s.relationChoices(r, ie, form, in.fk.Attr)
+			choices = s.relationChoices(r, ie, form, in.fkAttr())
 		}
 		for name, c := range choices {
 			form.SetChoices(name, c)
@@ -881,7 +1018,7 @@ func (s *AdminSite) inlineFormContext(
 		shown = ie.ops.newPtr()
 		ie.model.ApplyDefaults(shown)
 	}
-	af := &adminForm{form: form, sets: ifs.sets, readonly: readonly, obj: shown, opts: ie.admin.FormOptions, skip: in.fk.Attr}
+	af := &adminForm{form: form, sets: ifs.sets, readonly: readonly, obj: shown, opts: ie.admin.FormOptions, skip: in.fkAttr()}
 	sets := s.fieldsetContext(ctx, ie, af)
 
 	out := map[string]any{
@@ -921,7 +1058,7 @@ func (s *AdminSite) inlineFormContext(
 			out["pk_field"] = templates.MarkSafe(bf.String())
 		}
 	}
-	if bf := form.Field(in.fk.Attr); bf != nil {
+	if bf := form.Field(in.fkAttr()); bf != nil {
 		out["fk_field"] = templates.MarkSafe(bf.String())
 	}
 	if bf := form.Field(forms.DeletionFieldName); bf != nil {
@@ -961,7 +1098,7 @@ func (s *AdminSite) inlineHeaders(ifs *inlineFormSet, empty *forms.Form) []map[s
 	var out []map[string]any
 	for _, name := range flattenFieldsets(ifs.sets) {
 		attr := formName(ie.model, name)
-		if attr == ifs.in.fk.Attr {
+		if attr == ifs.in.fkAttr() {
 			continue
 		}
 		bf := empty.Field(attr)
@@ -995,9 +1132,10 @@ func (s *AdminSite) inlineHeaders(ifs *inlineFormSet, empty *forms.Form) []map[s
 // inline of a type that is not a registered model (admin.E106). On each
 // inline, named "InlineModelAdmin of <app>.<Model>": the checks that a
 // ModelAdmin has too (see checkBase), a foreign key to the parent that is
-// missing or ambiguous (admin.E202), and an ExcludeFields that names that
-// foreign key (admin.E201). Register already rejects an Inline that
-// TabularInline or StackedInline did not make for the model (Django's
+// missing or ambiguous (admin.E202), an ExcludeFields that names that
+// foreign key (admin.E201), and for a generic inline the fields of its
+// generic foreign key (admin.E301 to admin.E304). Register already rejects
+// an Inline that no inline function made for the model (Django's
 // admin.E104). Django's checks of extra, max_num, min_num and formset
 // (admin.E203 to admin.E206) have no Go counterpart: the types of the
 // options already hold them.
@@ -1013,13 +1151,18 @@ func (s *AdminSite) checkInlines(e *entry, parent adminObject) []checks.Message 
 		obj := adminObject{kind: "InlineModelAdmin", model: in.entry.model}
 		out = append(out, s.checkBase(in.entry, obj)...)
 		if err != nil {
-			msg := strings.TrimPrefix(err.Error(), "forms: ")
-			out = append(out, checks.Error(msg, checks.Obj(obj), checks.ID("admin.E202")))
+			id, msg := "admin.E202", strings.TrimPrefix(err.Error(), "forms: ")
+			var ce *inlineCheckError
+			if errors.As(err, &ce) {
+				id, msg = ce.id, ce.msg
+			}
+			out = append(out, checks.Error(msg, checks.Obj(obj), checks.ID(id)))
 			continue
 		}
-		// Django skips the check when the exclude check failed.
+		// Django skips the check when the exclude check failed. A generic
+		// inline has no foreign key to exclude.
 		exclude := in.cfg.ExcludeFields
-		if len(duplicates(in.entry.model, exclude)) > 0 {
+		if in.fk == nil || len(duplicates(in.entry.model, exclude)) > 0 {
 			continue
 		}
 		if slices.Contains(formNames(in.entry.model, exclude), in.fk.Attr) {

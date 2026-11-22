@@ -576,7 +576,7 @@ func TestInlinesCheck(t *testing.T) {
 			// An admin.Inline that TabularInline or StackedInline did not
 			// make stands in for a class that is not an InlineModelAdmin.
 			// Register rejects it at boot, where Django reports admin.E104.
-			assertPanics(t, "admin: Register: an Inline must be made by TabularInline or StackedInline", func() {
+			assertPanics(t, "admin: Register: an Inline must be made by TabularInline, StackedInline or their generic counterparts", func() {
 				inlineSite(t, db, admin.Inline{})
 			})
 		})

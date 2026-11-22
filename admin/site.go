@@ -267,7 +267,8 @@ func (s *AdminSite) emptyValue() string {
 // Register adds model T (which must already be registered in db's ORM registry)
 // to site with the given ModelAdmin. It panics when T has no registered model,
 // or when an inline was not made by TabularInline or StackedInline with T as
-// the parent, since that is a boot-time programmer error.
+// the parent, or by a generic inline function, since that is a boot-time
+// programmer error.
 func Register[T any](site *AdminSite, ma ModelAdmin) {
 	var zero T
 	m, ok := site.db.Registry().ModelOf(zero)
@@ -276,9 +277,9 @@ func Register[T any](site *AdminSite, ma ModelAdmin) {
 	}
 	for _, inline := range ma.Inlines {
 		if inline.resolve == nil {
-			panic("admin: Register: an Inline must be made by TabularInline or StackedInline")
+			panic("admin: Register: an Inline must be made by TabularInline, StackedInline or their generic counterparts")
 		}
-		if inline.parent != reflect.TypeFor[T]() {
+		if inline.parent != nil && inline.parent != reflect.TypeFor[T]() {
 			panic(fmt.Sprintf("admin: Register: an inline of %v cannot edit %T", inline.parent, zero))
 		}
 	}
