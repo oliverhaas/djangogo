@@ -283,3 +283,36 @@ func assertErrContains(t *testing.T, err error, want string) {
 		t.Errorf("error %v, want one containing %q", err, want)
 	}
 }
+
+// Inventory is the Inventory model of Django's tests/model_forms/models.py,
+// without its parent foreign key, which needs to_field="barcode".
+type Inventory struct {
+	ID      int64
+	Barcode uint32 `orm:"unique"`
+	Name    string `orm:"max_length=20"`
+}
+
+// Meta orders the items by name, as Django's Inventory.Meta.ordering.
+func (Inventory) Meta() orm.Meta { return orm.Meta{Ordering: []string{"name"}} }
+
+// String returns the name, the __str__ of Django's Inventory.
+func (i Inventory) String() string { return i.Name }
+
+// Color is the Color model of Django's tests/model_forms/models.py.
+type Color struct {
+	ID   int64
+	Name string `orm:"max_length=50"`
+}
+
+// String returns the name, the __str__ of Django's Color.
+func (c Color) String() string { return c.Name }
+
+// ColorfulItem is the ColorfulItem model of Django's
+// tests/model_forms/models.py. It embeds orm.RelCache to keep its prefetched
+// colors.
+type ColorfulItem struct {
+	orm.RelCache
+	ID     int64
+	Name   string `orm:"max_length=50"`
+	Colors orm.M2M[Color]
+}

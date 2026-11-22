@@ -363,8 +363,8 @@ func (s *ModelFormSet[T]) pkField(mf *ModelForm[T], required bool) Field {
 	}
 	field := newModelChoiceField(collectOptions(opts))
 	model := s.model
-	field.charPK = isStringPK(model)
-	field.pkOf = func(value any) (string, bool) { return instancePK(model, value) }
+	field.charKey = isStringField(keyField(model, ""))
+	field.keyOf = func(value any) (string, bool) { return instancePK(model, value) }
 	field.load = s.loadPKRows
 	return field
 }
@@ -402,7 +402,7 @@ func (s *ModelFormSet[T]) loadPKRows(ctx context.Context) ([]modelRow, error) {
 	s.st.pkRows = make([]modelRow, len(objs))
 	for i, obj := range objs {
 		key, _ := instancePK(s.model, obj)
-		s.st.pkRows[i] = modelRow{pk: key, value: obj}
+		s.st.pkRows[i] = modelRow{key: key, value: obj}
 	}
 	s.st.pkRowsLoaded = true
 	return s.st.pkRows, nil

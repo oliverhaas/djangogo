@@ -572,6 +572,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `Page.TemplateValue` returns a `TemplatePage`. The model instances, times
   and dates in a template value of a type defined as `map[string]any`, such
   as a page or a form, are now converted as in a plain map.
+- Forms: `NewModelChoiceField` and `NewModelMultipleChoiceField` take the
+  options `ToFieldName`, Django's `to_field_name`, and `LabelFromInstance`,
+  Django's `label_from_instance`. With `ToFieldName("slug")` the widget
+  submits the slug and the field selects the row by it. A model form shows
+  the keys of the related rows as the initial value of such a many-to-many
+  field. Both constructors panic on a field name the model does not have or
+  a label function for another model.
 
 ### Changed
 

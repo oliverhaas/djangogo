@@ -632,6 +632,107 @@ func TestOtherModelFormChoicesType(t *testing.T) {
 	})
 }
 
+// Ported from Django: tests/model_forms/tests.py::OtherModelFormTests.test_prefetch_related_queryset
+//
+// ModelChoiceField should respect a prefetch_related() on its queryset. Two
+// queries load the items and their colors, the count Django asserts on PyPy
+// and Python 3.14.
+func TestOtherModelFormPrefetchRelatedQueryset(t *testing.T) {
+	djangotest.EachDB(t, []any{&Color{}, &ColorfulItem{}}, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		blue, red := &Color{Name: "blue"}, &Color{Name: "red"}
+		multicolorItem, redItem := &ColorfulItem{}, &ColorfulItem{}
+		for _, err := range []error{
+			orm.Query[Color](db).Create(ctx, blue),
+			orm.Query[Color](db).Create(ctx, red),
+			orm.Query[ColorfulItem](db).Create(ctx, multicolorItem),
+			orm.Many[Color](db, multicolorItem, "colors").Add(ctx, blue, red),
+			orm.Query[ColorfulItem](db).Create(ctx, redItem),
+			orm.Many[Color](db, redItem, "colors").Add(ctx, red),
+		} {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		field := forms.NewModelChoiceField(db, orm.Query[ColorfulItem](db).PrefetchRelated("colors").OrderBy("id"),
+			forms.LabelFromInstance(func(obj *ColorfulItem) string {
+				colors, _ := orm.Prefetched[Color](obj, "colors")
+				names := make([]string, len(colors))
+				for i, c := range colors {
+					names[i] = c.Name
+				}
+				return strings.Join(names, ", ")
+			}))
+		djangotest.AssertNumQueries(t, db, 2, func() {
+			djangotest.AssertEqual(t, choiceOptions(t, field), [][2]string{
+				choiceBlank,
+				{choiceID(multicolorItem.ID), "blue, red"},
+				{choiceID(redItem.ID), "red"},
+			})
+		})
+	})
+}
+
+// Ported from Django: tests/model_forms/tests.py::OtherModelFormTests.test_foreignkeys_which_use_to_field
+func TestOtherModelFormForeignkeysWhichUseToField(t *testing.T) {
+	djangotest.EachDB(t, []any{&Inventory{}, &Category{}}, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		apple := &Inventory{Barcode: 86, Name: "Apple"}
+		pear := &Inventory{Barcode: 22, Name: "Pear"}
+		core := &Inventory{Barcode: 87, Name: "Core"}
+		for _, item := range []*Inventory{apple, pear, core} {
+			if err := orm.Query[Inventory](db).Create(ctx, item); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		field := forms.NewModelChoiceField(db, orm.Query[Inventory](db), forms.ToFieldName("barcode"))
+		djangotest.AssertEqual(t, choiceOptions(t, field), [][2]string{
+			choiceBlank, {"86", "Apple"}, {"87", "Core"}, {"22", "Pear"},
+		})
+
+		categoryForm := forms.NewModelForm[Category](db,
+			forms.WithFields("description", "url"),
+			forms.WithFormField("description", forms.NewCharField()),
+		)
+		djangotest.AssertEqual(t, categoryForm.FieldNames(), []string{"description", "url"})
+		assertHTMLEqual(t, categoryForm.String(),
+			`<div><label for="id_description">Description:</label><input type="text" `+
+				`name="description" required id="id_description"></div><div>`+
+				`<label for="id_url">The URL:</label><input type="text" name="url" `+
+				`maxlength="40" required id="id_url"></div>`)
+
+		// to_field_name should also work on ModelMultipleChoiceField.
+		multiple := forms.NewModelMultipleChoiceField(db, orm.Query[Inventory](db), forms.ToFieldName("barcode"))
+		djangotest.AssertEqual(t, multiOptions(t, multiple), [][2]string{{"86", "Apple"}, {"87", "Core"}, {"22", "Pear"}})
+		cleaned, err := multiLoaded(t, multiple).Clean([]any{86})
+		if err != nil {
+			t.Fatal(err)
+		}
+		djangotest.AssertEqual(t, inventoryNames(cleaned), []string{"Apple"})
+
+		form := forms.New(forms.F("items",
+			forms.NewModelMultipleChoiceField(db, orm.Query[Inventory](db), forms.ToFieldName("barcode")),
+		)).Bind(vals("items", "87", "items", "22"))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+		djangotest.AssertEqual(t, len(form.CleanedData()), 1)
+		djangotest.AssertEqual(t, inventoryNames(form.CleanedData()["items"]), []string{"Core", "Pear"})
+
+		t.Skip("FIXME-PORT: Go: a foreign key has no to_field, so Inventory has no parent and there is no InventoryForm, Django: the parent select submits the barcode of the parent")
+	})
+}
+
+// inventoryNames returns the names of the cleaned value of a model multiple
+// choice field over Inventory.
+func inventoryNames(cleaned any) []string {
+	items, _ := cleaned.([]*Inventory)
+	names := make([]string, len(items))
+	for i, item := range items {
+		names[i] = item.Name
+	}
+	return names
+}
+
 // Ported from Django: tests/model_forms/tests.py::ModelFormCustomErrorTests.test_custom_error_messages
 func TestModelFormCustomErrorMessages(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {

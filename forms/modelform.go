@@ -430,8 +430,9 @@ func (mf *ModelForm[T]) WithInstance(obj *T) *ModelForm[T] {
 
 // manyInitial returns the loader of the initial values of the many-to-many
 // fields of the form, Django's model_to_dict for them: the primary keys of
-// the rows related to obj, and none for an unsaved obj. An initial value the
-// caller set wins.
+// the rows related to obj, and none for an unsaved obj. A field with
+// ToFieldName gets the keys of the rows instead, which Django's prepare_value
+// takes from the related objects. An initial value the caller set wins.
 func (mf *ModelForm[T]) manyInitial(obj *T) func(ctx context.Context, f *Form) error {
 	model, db, included := mf.model, mf.db, mf.includedFields
 	return func(ctx context.Context, f *Form) error {
@@ -454,9 +455,30 @@ func (mf *ModelForm[T]) manyInitial(obj *T) func(ctx context.Context, f *Form) e
 				return fmt.Errorf("forms: initial value of %s: %w", field.Attr, err)
 			}
 			f.Initial[field.Attr] = pks
+			if err := keyedInitial(ctx, f, field, pks); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
+}
+
+// keyedInitial replaces the initial primary keys of the many-to-many field
+// with the keys of a form field that has ToFieldName. It loads the form field
+// to map them and keeps the loaded field, so that the form does not load it
+// again.
+func keyedInitial(ctx context.Context, f *Form, field *orm.Field, pks []any) error {
+	mf, ok := f.fields[field.Attr].(*ModelMultipleChoiceField)
+	if !ok || mf.toFieldName == "" {
+		return nil
+	}
+	loaded, err := mf.WithContext(ctx)
+	if err != nil {
+		return fmt.Errorf("forms: initial value of %s: %w", field.Attr, err)
+	}
+	f.fields[field.Attr] = loaded
+	f.Initial[field.Attr] = loaded.(*ModelMultipleChoiceField).keysOfPKs(field.Rel.Target, pks)
+	return nil
 }
 
 // hasPK reports whether obj, an instance of m, has a primary key value.

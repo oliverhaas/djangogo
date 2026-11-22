@@ -264,6 +264,8 @@ type fieldOptions struct {
 	maxDigits     int
 	decimalPlaces int
 	emptyLabel    *string
+	toFieldName   string
+	labelOf       any // func(*T) string for the model T of the field
 	allowUnicode  bool
 	assumeScheme  string
 	protocol      string
@@ -447,6 +449,23 @@ func EmptyLabel(label string) FieldOption {
 // (empty_label=None).
 func NoEmptyLabel() FieldOption {
 	return func(o *fieldOptions) { o.emptyLabel = nil }
+}
+
+// ToFieldName makes a model choice field select a row by the named model
+// field instead of the primary key (to_field_name=): the widget submits that
+// field's value. The field should be unique. NewModelChoiceField and
+// NewModelMultipleChoiceField panic on a name that is not a field of the
+// model.
+func ToFieldName(name string) FieldOption {
+	return func(o *fieldOptions) { o.toFieldName = name }
+}
+
+// LabelFromInstance sets the label of each option of a model choice field,
+// Django's label_from_instance(). Without it the label is the model's String
+// method. NewModelChoiceField and NewModelMultipleChoiceField panic when T is
+// not their model.
+func LabelFromInstance[T any](label func(obj *T) string) FieldOption {
+	return func(o *fieldOptions) { o.labelOf = label }
 }
 
 // AllowUnicode lets a slug field accept Unicode letters (allow_unicode=True).

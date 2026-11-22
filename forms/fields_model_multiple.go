@@ -12,7 +12,8 @@ import (
 
 // ModelMultipleChoiceField is a field whose value is any number of the rows of
 // a model, the counterpart of Django's ModelMultipleChoiceField. It renders as
-// a <select multiple> without an empty option and submits the primary keys.
+// a <select multiple> without an empty option and submits the primary keys, or
+// the values of the field named with ToFieldName.
 //
 // The cleaned value depends on the constructor: NewModelMultipleChoiceField
 // yields the selected objects ([]*T, in the order of the rows), a many-to-many
@@ -23,9 +24,9 @@ type ModelMultipleChoiceField struct {
 
 	// collect returns the cleaned value of the selected rows.
 	collect func(rows []modelRow) any
-	// pkValid reports whether a submitted key can be a primary key at all; nil
-	// accepts any key.
-	pkValid func(key string) bool
+	// keyValid reports whether a submitted key can be a value of the key field
+	// at all; nil accepts any key.
+	keyValid func(key string) bool
 }
 
 // newModelMultipleChoiceField returns a ModelMultipleChoiceField without a
@@ -51,17 +52,19 @@ func rowValues(rows []modelRow) any {
 
 // NewModelMultipleChoiceField returns a field that offers the rows of qs, or
 // every row of T when qs is nil. The cleaned value is a []*T of the selected
-// rows.
+// rows. Beside the common options it reads ToFieldName and LabelFromInstance.
 //
 // The rows are loaded when the form renders or validates, with the context
 // given to Form.SetContext.
 func NewModelMultipleChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ...FieldOption) *ModelMultipleChoiceField {
-	f := newModelMultipleChoiceField(collectOptions(opts))
+	o := collectOptions(opts)
+	f := newModelMultipleChoiceField(o)
 	model, _ := db.Registry().ModelOf(new(T))
-	f.charPK = isStringPK(model)
-	f.pkValid = pkValidator(model)
-	f.pkOf = func(value any) (string, bool) { return instancePK(model, value) }
-	f.load = queryRows(db, qs, model)
+	key := keyField(model, o.toFieldName)
+	f.charKey, f.toFieldName = isStringField(key), o.toFieldName
+	f.keyValid = keyValidator(key)
+	f.keyOf = func(value any) (string, bool) { return instanceKey(model, key, value) }
+	f.load = queryRows(db, qs, model, key, labelFunc[T](o))
 	f.collect = func(rows []modelRow) any {
 		out := make([]*T, len(rows))
 		for i, r := range rows {
@@ -78,9 +81,9 @@ func NewModelMultipleChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ..
 // primary keys.
 func newRelatedMultipleChoiceField(db *orm.DB, target *orm.Model, o *fieldOptions) *ModelMultipleChoiceField {
 	f := newModelMultipleChoiceField(o)
-	f.charPK = isStringPK(target)
-	f.pkValid = pkValidator(target)
-	f.pkOf = func(value any) (string, bool) { return instancePK(target, value) }
+	f.charKey = isStringField(keyField(target, ""))
+	f.keyValid = keyValidator(keyField(target, ""))
+	f.keyOf = func(value any) (string, bool) { return instancePK(target, value) }
 	if db != nil && target != nil {
 		f.load = func(ctx context.Context) ([]modelRow, error) {
 			pairs, err := orm.LabeledRowsOrdered(ctx, db, target, nil, nil)
@@ -93,14 +96,14 @@ func newRelatedMultipleChoiceField(db *orm.DB, target *orm.Model, o *fieldOption
 	return f
 }
 
-// pkValidator returns the check of Django's invalid_pk_value for the primary
-// key of m: an integer key must parse as an integer. It is nil for any other
-// key.
-func pkValidator(m *orm.Model) func(string) bool {
-	if m == nil || m.PrimaryKey() == nil {
+// keyValidator returns the check of Django's invalid_pk_value for the key
+// field f: the key of an integer field must parse as an integer. It is nil for
+// any other field.
+func keyValidator(f *orm.Field) func(string) bool {
+	if f == nil {
 		return nil
 	}
-	switch m.PrimaryKey().Kind {
+	switch f.Kind {
 	case orm.KindAuto, orm.KindInt, orm.KindSmallInt, orm.KindBigInt,
 		orm.KindPositiveSmallInt, orm.KindPositiveInt, orm.KindPositiveBigInt:
 		return func(key string) bool {
@@ -165,8 +168,8 @@ func unhashable(v any) bool {
 	}
 }
 
-// PrepareValue returns the primary keys of a list of objects or keys as
-// strings, and the primary key of a single object.
+// PrepareValue returns the keys of a list of objects or keys as strings, and
+// the key of a single object.
 func (f *ModelMultipleChoiceField) PrepareValue(value any) any {
 	if items, ok := listItems(value); ok {
 		out := make([]string, len(items))
@@ -210,16 +213,16 @@ func (f *ModelMultipleChoiceField) Clean(value any) (any, error) {
 		if err := ProhibitNullCharactersValidator(key); err != nil {
 			return nil, err
 		}
-		if f.pkValid != nil && !f.pkValid(key) {
+		if f.keyValid != nil && !f.keyValid(key) {
 			return nil, f.Error("invalid_pk_value", map[string]any{"pk": key})
 		}
 	}
 	var chosen []modelRow
 	found := make(map[string]bool, len(keys))
 	for _, r := range f.rows {
-		if wanted[r.pk] {
+		if wanted[r.key] {
 			chosen = append(chosen, r)
-			found[r.pk] = true
+			found[r.key] = true
 		}
 	}
 	for _, key := range keys {

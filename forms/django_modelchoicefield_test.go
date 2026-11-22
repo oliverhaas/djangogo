@@ -197,7 +197,17 @@ func TestModelChoiceFieldCleanModelInstance(t *testing.T) {
 
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_clean_to_field_name
 func TestModelChoiceFieldCleanToFieldName(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: ModelChoiceField has no to_field_name, a row is selected by primary key only, Django: to_field_name=\"slug\" selects by slug")
+	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
+		c1, _, _ := choiceCategories(t, db)
+		f := choiceLoaded(t, forms.NewModelChoiceField(db, choiceAllCategories(db), forms.ToFieldName("slug")))
+		for _, value := range []any{c1.Slug, c1} {
+			got, err := f.Clean(value)
+			if err != nil {
+				t.Fatalf("Clean(%#v): %v", value, err)
+			}
+			equal(t, *got.(*ChoiceCategory), *c1)
+		}
+	})
 }
 
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_model_choice_null_characters
@@ -210,8 +220,8 @@ func TestModelChoiceFieldNullCharacters(t *testing.T) {
 
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_choices
 //
-// Go cannot change the queryset of a field, so each queryset gets its own
-// field.
+// Go cannot change the queryset or the label function of a field, so each
+// queryset gets its own field, and the label function is an option.
 func TestModelChoiceFieldChoices(t *testing.T) {
 	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
 		c1, c2, c3 := choiceCategories(t, db)
@@ -241,7 +251,15 @@ func TestModelChoiceFieldChoices(t *testing.T) {
 		djangotest.AssertEqual(t, choiceOptions(t, f), want)
 		djangotest.AssertEqual(t, choiceOptions(t, f), want)
 
-		t.Skip("FIXME-PORT: Go: a label is the model's String() and cannot be replaced per field (no label_from_instance), Django: f.label_from_instance = lambda obj: \"category \" + str(obj)")
+		// Overriding label_from_instance() to print custom labels.
+		f = forms.NewModelChoiceField(db, orm.Query[ChoiceCategory](db).OrderBy("pk"), forms.Required(false),
+			forms.LabelFromInstance(func(obj *ChoiceCategory) string { return "category " + obj.String() }))
+		djangotest.AssertEqual(t, choiceOptions(t, f), [][2]string{
+			choiceBlank,
+			{choiceID(c1.ID), "category Entertainment"},
+			{choiceID(c2.ID), "category A test"},
+			{choiceID(c3.ID), "category Third"},
+		})
 	})
 }
 
@@ -356,8 +374,20 @@ func TestModelChoiceFieldQuerysetNone(t *testing.T) {
 }
 
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_no_extra_query_when_accessing_attrs
+//
+// ModelChoiceField with RadioSelect widget doesn't produce unnecessary db
+// queries when accessing its BoundField's attrs. The Go form loads the rows
+// when the bound field is taken, so the block covers that step too.
 func TestModelChoiceFieldNoExtraQueryWhenAccessingAttrs(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no query counter and a rendered field loads its rows once per WithContext, Django: assertNumQueries(1) around a template render")
+	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
+		choiceCategories(t, db)
+		form := forms.New(forms.F("category",
+			forms.NewModelChoiceField(db, orm.Query[ChoiceCategory](db), forms.UseWidget(forms.RadioSelect{}))))
+		djangotest.AssertNumQueries(t, db, 1, func() {
+			field := form.Field("category")
+			renderTemplate(t, "{{ field.name }}{{ field }}{{ field.help_text }}", map[string]any{"field": field})
+		})
+	})
 }
 
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_disabled_modelchoicefield
@@ -397,5 +427,130 @@ func TestModelChoiceFieldDisabledInitialModelInstance(t *testing.T) {
 		form := forms.New(forms.F("categories",
 			forms.NewModelChoiceField(db, choiceAllCategories(db), forms.Disabled(), forms.Initial(c1))))
 		equal(t, form.Bind(vals("categories", choiceID(c1.ID))).IsValid(), true)
+	})
+}
+
+// Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_disabled_multiplemodelchoicefield
+func TestModelChoiceFieldDisabledMultiple(t *testing.T) {
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		category1 := &Category{Name: "cat1"}
+		category2 := &Category{Name: "cat2"}
+		writer := &Writer{Name: "Test writer"}
+		for _, err := range []error{
+			orm.Query[Category](db).Create(ctx, category1),
+			orm.Query[Category](db).Create(ctx, category2),
+			orm.Query[Writer](db).Create(ctx, writer),
+		} {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		article := &Article{PubDate: date(1988, 1, 4), Created: date(2024, 1, 1)}
+		article.Writer.SetPK(writer.ID)
+		if err := orm.Query[Article](db).Create(ctx, article); err != nil {
+			t.Fatal(err)
+		}
+		if err := orm.Many[Category](db, article, "categories").Set(ctx, []*Category{category1}); err != nil {
+			t.Fatal(err)
+		}
+		articleForm := func(opts ...forms.FieldOption) *forms.ModelForm[Article] {
+			opts = append([]forms.FieldOption{forms.Required(false)}, opts...)
+			return forms.NewModelForm[Article](db,
+				forms.WithFields("categories"),
+				forms.WithFormField("categories", forms.NewModelMultipleChoiceField(db, orm.Query[Category](db), opts...)),
+			).WithInstance(article).Bind(vals("categories", choiceID(category2.ID)))
+		}
+		cleanedPKs := func(form *forms.ModelForm[Article]) []int64 {
+			t.Helper()
+			djangotest.AssertEqual(t, form.Errors().Messages(), map[string][]string{})
+			cats, _ := form.CleanedData()["categories"].([]*Category)
+			pks := make([]int64, len(cats))
+			for i, c := range cats {
+				pks[i] = c.ID
+			}
+			return pks
+		}
+
+		djangotest.AssertEqual(t, cleanedPKs(articleForm()), []int64{category2.ID})
+		// Disabled fields use the value from `instance` rather than `data`.
+		djangotest.AssertEqual(t, cleanedPKs(articleForm(forms.Disabled())), []int64{category1.ID})
+	})
+}
+
+// Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_disabled_modelmultiplechoicefield_has_changed
+func TestModelChoiceFieldDisabledModelMultipleHasChanged(t *testing.T) {
+	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
+		f := forms.NewModelMultipleChoiceField(db, orm.Query[ChoiceAuthor](db), forms.Disabled())
+		equal(t, f.HasChanged("x", "y"), false)
+	})
+}
+
+// No Go counterpart: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_overridable_choice_iterator
+// and test_choice_value_hash: Go has no ModelChoiceIterator or
+// ModelChoiceIteratorValue class to subclass or hash.
+
+// Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_choice_iterator_passes_model_to_widget
+func TestModelChoiceFieldChoiceIteratorPassesModelToWidget(t *testing.T) {
+	t.Skip("FIXME-PORT: Go: a widget option carries only its value and label and a widget has no create_option hook, Django: create_option reads value.instance to add data-slug")
+}
+
+// Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_custom_choice_iterator_passes_model_to_widget
+func TestModelChoiceFieldCustomChoiceIteratorPassesModelToWidget(t *testing.T) {
+	t.Skip("FIXME-PORT: Go: a field has no replaceable choice iterator and a widget has no create_option hook, Django: a custom iterator wraps each value with its object for the widget")
+}
+
+// Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_choices_not_fetched_when_not_rendering
+//
+// Django cleans with one query for the selected row. The Go field cleans
+// against the rows it loaded, so its one query loads them all.
+func TestModelChoiceFieldChoicesNotFetchedWhenNotRendering(t *testing.T) {
+	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
+		c1, _, _ := choiceCategories(t, db)
+		djangotest.AssertNumQueries(t, db, 1, func() {
+			field := choiceLoaded(t, forms.NewModelChoiceField(db, orm.Query[ChoiceCategory](db).OrderBy("-name")))
+			got, err := field.Clean(c1.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			equal(t, got.(*ChoiceCategory).Name, "Entertainment")
+		})
+	})
+}
+
+// Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_queryset_manager
+//
+// Django passes the manager Category.objects; Go passes a nil queryset.
+func TestModelChoiceFieldQuerysetManager(t *testing.T) {
+	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
+		c1, c2, c3 := choiceCategories(t, db)
+		got := choiceOptions(t, forms.NewModelChoiceField[ChoiceCategory](db, nil))
+		equal(t, len(got), 4)
+		djangotest.AssertSequenceEqual(t, got, [][2]string{
+			choiceBlank,
+			{choiceID(c1.ID), "Entertainment"},
+			{choiceID(c2.ID), "A test"},
+			{choiceID(c3.ID), "Third"},
+		}, djangotest.Unordered())
+	})
+}
+
+// Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_num_queries
+//
+// Widgets that render multiple subwidgets shouldn't make more than one
+// database query.
+func TestModelChoiceFieldNumQueries(t *testing.T) {
+	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
+		choiceCategories(t, db)
+		categories := orm.Query[ChoiceCategory](db)
+		djangotest.AssertNumQueries(t, db, 2, func() {
+			form := forms.New(
+				forms.F("radio", forms.NewModelChoiceField(db, categories, forms.UseWidget(forms.RadioSelect{}))),
+				forms.F("checkbox", forms.NewModelMultipleChoiceField(db, categories,
+					forms.UseWidget(forms.CheckboxSelectMultiple{}))),
+			)
+			renderTemplate(t, "{% for widget in form.checkbox %}{{ widget }}{% endfor %}"+
+				"{% for widget in form.radio %}{{ widget }}{% endfor %}", map[string]any{"form": form})
+		})
 	})
 }

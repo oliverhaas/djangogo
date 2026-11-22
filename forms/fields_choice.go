@@ -2,6 +2,7 @@ package forms
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strconv"
 
@@ -270,7 +271,7 @@ func (f *TypedMultipleChoiceField) Clean(value any) (any, error) {
 
 // modelRow is one selectable object of a ModelChoiceField.
 type modelRow struct {
-	pk    string
+	key   string // the submitted value: the primary key or the ToFieldName field
 	label string
 	value any // the cleaned value: the object or its primary key
 }
@@ -286,9 +287,9 @@ type ContextField interface {
 
 // ModelChoiceField is a field whose options are the rows of a model, the
 // counterpart of Django's ModelChoiceField. It renders as a <select> with an
-// empty first option and submits the primary key. As in Django, the empty
-// option is left out for a required field with an initial value and for a
-// RadioSelect unless Blank is set.
+// empty first option and submits the primary key, or the field named with
+// ToFieldName. As in Django, the empty option is left out for a required field
+// with an initial value and for a RadioSelect unless Blank is set.
 //
 // The cleaned value depends on the constructor: NewModelChoiceField yields the
 // selected object (*T), a foreign key of a model form yields the primary key
@@ -302,25 +303,40 @@ type ModelChoiceField struct {
 	// field.
 	Blank bool
 
-	rows   []modelRow
-	loaded bool
-	charPK bool
-	load   func(ctx context.Context) ([]modelRow, error)
-	// pkOf returns the primary key of an initial value that is an object.
-	pkOf func(value any) (string, bool)
+	rows    []modelRow
+	loaded  bool
+	charKey bool
+	// toFieldName is the attribute of ToFieldName, empty for the primary key.
+	toFieldName string
+	load        func(ctx context.Context) ([]modelRow, error)
+	// keyOf returns the submitted key of an initial value that is an object.
+	keyOf func(value any) (string, bool)
 }
 
-// isStringPK reports whether m has a character-based primary key whose input
-// must prohibit NUL characters, matching Django's ModelChoiceField validation.
-func isStringPK(m *orm.Model) bool {
+// keyField returns the field of m whose value a model choice field submits:
+// the primary key, or the field that ToFieldName names. It panics when m has
+// no such field, a programming error.
+func keyField(m *orm.Model, toFieldName string) *orm.Field {
 	if m == nil {
+		return nil
+	}
+	if toFieldName == "" {
+		return m.PrimaryKey()
+	}
+	f, ok := m.FieldByAttr(toFieldName)
+	if !ok {
+		panic(fmt.Sprintf("forms: ToFieldName(%q): model %s has no such field", toFieldName, m.Name()))
+	}
+	return f
+}
+
+// isStringField reports whether f is a character-based field whose input
+// must prohibit NUL characters, matching Django's ModelChoiceField validation.
+func isStringField(f *orm.Field) bool {
+	if f == nil {
 		return false
 	}
-	pk := m.PrimaryKey()
-	if pk == nil {
-		return false
-	}
-	switch pk.Kind {
+	switch f.Kind {
 	case orm.KindChar, orm.KindText, orm.KindSlug, orm.KindEmail, orm.KindURL:
 		return true
 	default:
@@ -340,22 +356,40 @@ func newModelChoiceField(o *fieldOptions) *ModelChoiceField {
 
 // NewModelChoiceField returns a field that offers the rows of qs, or every row
 // of T when qs is nil. The cleaned value is the selected *T. Beside the common
-// options it reads EmptyLabel and NoEmptyLabel.
+// options it reads EmptyLabel, NoEmptyLabel, ToFieldName and
+// LabelFromInstance.
 //
 // The rows are loaded when the form renders or validates, with the context
 // given to Form.SetContext.
 func NewModelChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ...FieldOption) *ModelChoiceField {
-	f := newModelChoiceField(collectOptions(opts))
+	o := collectOptions(opts)
+	f := newModelChoiceField(o)
 	model, _ := db.Registry().ModelOf(new(T))
-	f.charPK = isStringPK(model)
-	f.pkOf = func(value any) (string, bool) { return instancePK(model, value) }
-	f.load = queryRows(db, qs, model)
+	key := keyField(model, o.toFieldName)
+	f.charKey, f.toFieldName = isStringField(key), o.toFieldName
+	f.keyOf = func(value any) (string, bool) { return instanceKey(model, key, value) }
+	f.load = queryRows(db, qs, model, key, labelFunc[T](o))
 	return f
 }
 
+// labelFunc returns the function of LabelFromInstance, nil without one. It
+// panics when the function is for another model than T.
+func labelFunc[T any](o *fieldOptions) func(*T) string {
+	if o.labelOf == nil {
+		return nil
+	}
+	fn, ok := o.labelOf.(func(*T) string)
+	if !ok {
+		panic(fmt.Sprintf("forms: LabelFromInstance: got a %T for a field of %s", o.labelOf, reflect.TypeFor[T]()))
+	}
+	return fn
+}
+
 // queryRows returns the loader of the rows of qs, or of every row of T when
-// qs is nil, whose cleaned values are the objects (*T).
-func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model) func(context.Context) ([]modelRow, error) {
+// qs is nil, whose cleaned values are the objects (*T). The key of a row is
+// the value of key, and its label comes from labelOf or, when it is nil, the
+// model's String method.
+func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model, key *orm.Field, labelOf func(*T) string) func(context.Context) ([]modelRow, error) {
 	if qs == nil {
 		qs = orm.Query[T](db)
 	}
@@ -367,12 +401,14 @@ func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model) func(co
 		rows := make([]modelRow, len(objs))
 		for i := range objs {
 			obj := &objs[i]
-			pk, _ := instancePK(model, obj)
-			label, err := orm.LabelContext(ctx, db, model, obj)
-			if err != nil {
+			k, _ := instanceKey(model, key, obj)
+			var label string
+			if labelOf != nil {
+				label = labelOf(obj)
+			} else if label, err = orm.LabelContext(ctx, db, model, obj); err != nil {
 				return nil, err
 			}
-			rows[i] = modelRow{pk: pk, label: label, value: obj}
+			rows[i] = modelRow{key: k, label: label, value: obj}
 		}
 		return rows, nil
 	}
@@ -383,8 +419,8 @@ func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model) func(co
 // set with Form.SetChoices. The cleaned value is the primary key.
 func newRelatedChoiceField(db *orm.DB, target *orm.Model, o *fieldOptions) *ModelChoiceField {
 	f := newModelChoiceField(o)
-	f.charPK = isStringPK(target)
-	f.pkOf = func(value any) (string, bool) { return instancePK(target, value) }
+	f.charKey = isStringField(keyField(target, ""))
+	f.keyOf = func(value any) (string, bool) { return instancePK(target, value) }
 	if db == nil || target == nil {
 		return f
 	}
@@ -407,7 +443,7 @@ func pairRows(pairs [][2]string) []modelRow {
 		if pk, err := strconv.ParseInt(p[0], 10, 64); err == nil {
 			value = pk
 		}
-		rows[i] = modelRow{pk: p[0], label: p[1], value: value}
+		rows[i] = modelRow{key: p[0], label: p[1], value: value}
 	}
 	return rows
 }
@@ -416,7 +452,14 @@ func pairRows(pairs [][2]string) []modelRow {
 // widget submits. The second result is false when value is not an instance of
 // the model.
 func instancePK(m *orm.Model, value any) (string, bool) {
-	if m == nil || value == nil {
+	return instanceKey(m, keyField(m, ""), value)
+}
+
+// instanceKey returns the value of the field key of a model instance as the
+// string a widget submits. The second result is false when value is not an
+// instance of the model.
+func instanceKey(m *orm.Model, key *orm.Field, value any) (string, bool) {
+	if m == nil || key == nil || value == nil {
 		return "", false
 	}
 	rv := reflect.ValueOf(value)
@@ -426,14 +469,13 @@ func instancePK(m *orm.Model, value any) (string, bool) {
 		}
 		rv = rv.Elem()
 	}
-	pk := m.PrimaryKey()
-	if pk == nil || rv.Type() != m.GoType() {
+	if rv.Type() != m.GoType() {
 		return "", false
 	}
-	v := rv.Field(pk.Index).Interface()
-	// A primary key that is a relation, such as a one-to-one field, is the
+	v := rv.Field(key.Index).Interface()
+	// A key that is a relation, such as a one-to-one primary key, is the
 	// primary key of its row.
-	if rel, ok := v.(interface{ PK() int64 }); ok && pk.Rel != nil {
+	if rel, ok := v.(interface{ PK() int64 }); ok && key.Rel != nil {
 		return strconv.FormatInt(rel.PK(), 10), true
 	}
 	return pyString(v), true
@@ -462,7 +504,7 @@ func (f *ModelChoiceField) widgetChoices() []Choice {
 		out = append(out, Choice{Value: "", Label: *f.EmptyLabel})
 	}
 	for _, r := range f.rows {
-		out = append(out, Choice{Value: r.pk, Label: r.label})
+		out = append(out, Choice{Value: r.key, Label: r.label})
 	}
 	return out
 }
@@ -502,34 +544,53 @@ func (f *ModelChoiceField) setChoices(choices []Choice) {
 	f.rows, f.loaded = pairRows(pairs), true
 }
 
-// PrepareValue returns the primary key of an object and any other value
-// unchanged.
+// PrepareValue returns the submitted key of an object, its primary key or the
+// ToFieldName field, and any other value unchanged.
 func (f *ModelChoiceField) PrepareValue(value any) any {
-	if f.pkOf != nil {
-		if pk, ok := f.pkOf(value); ok {
+	if f.keyOf != nil {
+		if pk, ok := f.keyOf(value); ok {
 			return pk
 		}
 	}
 	return value
 }
 
-// ToGo returns the cleaned value of the row whose primary key was submitted.
+// ToGo returns the cleaned value of the row whose key was submitted.
 func (f *ModelChoiceField) ToGo(value any) (any, error) {
 	if isEmpty(value) {
 		return nil, nil
 	}
 	key := pyString(f.PrepareValue(value))
-	if f.charPK {
+	if f.charKey {
 		if err := ProhibitNullCharactersValidator(key); err != nil {
 			return nil, err
 		}
 	}
 	for _, r := range f.rows {
-		if r.pk == key {
+		if r.key == key {
 			return r.value, nil
 		}
 	}
 	return nil, f.Error("invalid_choice", map[string]any{"value": key})
+}
+
+// keysOfPKs returns the keys of the loaded rows of target whose primary keys
+// are pks, in the order of pks. A primary key without a loaded row is left
+// out.
+func (f *ModelChoiceField) keysOfPKs(target *orm.Model, pks []any) []any {
+	byPK := make(map[string]string, len(f.rows))
+	for _, r := range f.rows {
+		if pk, ok := instancePK(target, r.value); ok {
+			byPK[pk] = r.key
+		}
+	}
+	out := make([]any, 0, len(pks))
+	for _, pk := range pks {
+		if key, ok := byPK[pyString(pk)]; ok {
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
 // HasChanged compares the submitted key with the key of the initial value.

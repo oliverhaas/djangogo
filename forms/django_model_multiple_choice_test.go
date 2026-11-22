@@ -134,8 +134,8 @@ func TestModelMultipleChoiceField(t *testing.T) {
 
 // Ported from Django: tests/model_forms/tests.py::ModelMultipleChoiceFieldTests.test_model_multiple_choice_required_false
 //
-// Go cannot change the queryset of a field, so each queryset gets its own
-// field.
+// Go cannot change the queryset or the label function of a field, so each
+// queryset gets its own field, and the label function is an option.
 func TestModelMultipleChoiceRequiredFalse(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		c1, c2, c3 := multiCategories(t, db)
@@ -159,7 +159,13 @@ func TestModelMultipleChoiceRequiredFalse(t *testing.T) {
 		rejects(t, multiLoaded(t, f), []int64{c3.ID}, third)
 		rejects(t, multiLoaded(t, f), []string{choiceID(c2.ID), choiceID(c3.ID)}, third)
 
-		t.Skip("FIXME-PORT: Go: a label is the model's String() and cannot be replaced per field (no label_from_instance), Django: f.label_from_instance = lambda obj: \"multicategory \" + str(obj)")
+		f = forms.NewModelMultipleChoiceField(db, orm.Query[Category](db), forms.Required(false),
+			forms.LabelFromInstance(func(obj *Category) string { return "multicategory " + obj.String() }))
+		djangotest.AssertSequenceEqual(t, multiOptions(t, f), [][2]string{
+			{choiceID(c1.ID), "multicategory Entertainment"},
+			{choiceID(c2.ID), "multicategory It&#x27;s a test"},
+			{choiceID(c3.ID), "multicategory Third"},
+		}, djangotest.Unordered())
 	})
 }
 
@@ -288,7 +294,32 @@ func TestModelMultipleChoiceCleanDoesDeduplicateValues(t *testing.T) {
 
 // Ported from Django: tests/model_forms/tests.py::ModelMultipleChoiceFieldTests.test_to_field_name_with_initial_data
 func TestModelMultipleChoiceToFieldNameWithInitialData(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: ModelMultipleChoiceField has no to_field_name, a row is selected by primary key only, Django: to_field_name=\"slug\" selects by slug")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		_, c2, c3 := multiCategories(t, db)
+		writer := &Writer{Name: "Test writer"}
+		if err := orm.Query[Writer](db).Create(ctx, writer); err != nil {
+			t.Fatal(err)
+		}
+		article := &Article{
+			Headline: "Test article", Slug: "test-article", PubDate: date(1988, 1, 4),
+			Created: date(2024, 1, 1), Article: "Hello.",
+		}
+		article.Writer.SetPK(writer.ID)
+		if err := orm.Query[Article](db).Create(ctx, article); err != nil {
+			t.Fatal(err)
+		}
+		if err := orm.Many[Category](db, article, "categories").Add(ctx, c2, c3); err != nil {
+			t.Fatal(err)
+		}
+		form := forms.NewModelForm[Article](db,
+			forms.WithFields("categories"),
+			forms.WithFormField("categories", forms.NewModelMultipleChoiceField(db, orm.Query[Category](db),
+				forms.ToFieldName("slug"))),
+		).WithInstance(article)
+		value, _ := form.Field("categories").Value().([]string)
+		djangotest.AssertSequenceEqual(t, value, []string{c2.Slug, c3.Slug}, djangotest.Unordered())
+	})
 }
 
 // ChoiceModel is the ChoiceModel model of Django's tests/forms_tests/models.py,
