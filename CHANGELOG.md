@@ -559,6 +559,14 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   itself, directly or through other templates, with no namesake left fails
   with a `TemplateDoesNotExist` whose `Tried` entry says "Skipped to avoid
   recursion".
+- Forms: a template can loop over a form, a field and a formset, as in
+  Django. `{% for field in form %}` yields the fields in order, and
+  `{% for form in formset %}` the forms. `{% for radio in form.language %}`
+  yields the radio buttons, checkboxes or `<option>`s of the widget, with
+  Django's `tag`, `choice_label`, `id_for_label` and `data`. A template no
+  longer needs `form.fields` or `formset.forms` for this. In Go,
+  `BoundField.Subwidgets` returns the same parts, and a type that implements
+  `templates.Iterable` defines what a loop over it yields.
 
 ### Changed
 

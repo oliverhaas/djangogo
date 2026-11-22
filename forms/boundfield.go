@@ -159,10 +159,21 @@ func (bf *BoundField) widget(w Widget) Widget {
 // AsWidget renders the field with the given widget, or with its own when w is
 // nil. attrs are added to the widget's attributes.
 func (bf *BoundField) AsWidget(w Widget, attrs Attrs) string {
+	w, built, subRequired := bf.widgetAttrs(w, attrs)
+	if subRequired != nil {
+		return w.(MultiValueWidget).RenderRequired(bf.HTMLName(), bf.Value(), built, subRequired)
+	}
+	return w.Render(bf.HTMLName(), bf.Value(), built)
+}
+
+// widgetAttrs returns the widget AsWidget renders, with its choices, and the
+// attributes the field adds to those of the widget, Django's
+// build_widget_attrs. subRequired is not nil for a MultiValueField whose
+// subwidgets get the required attribute one by one, see subwidgetsRequired.
+func (bf *BoundField) widgetAttrs(w Widget, attrs Attrs) (_ Widget, built Attrs, subRequired []bool) {
 	w = bf.widget(w)
 	base := bf.field.Base()
-	built := mergeAttrs(bf.field.WidgetAttrs(w), attrs)
-	var subRequired []bool
+	built = mergeAttrs(bf.field.WidgetAttrs(w), attrs)
 	if w.UseRequiredAttribute(bf.Initial()) && base.Required && bf.form.UseRequiredAttribute {
 		if subRequired = bf.subwidgetsRequired(w); subRequired == nil {
 			built["required"] = true
@@ -186,10 +197,7 @@ func (bf *BoundField) AsWidget(w Widget, attrs Attrs) string {
 			}
 		}
 	}
-	if subRequired != nil {
-		return w.(MultiValueWidget).RenderRequired(bf.HTMLName(), bf.Value(), built, subRequired)
-	}
-	return w.Render(bf.HTMLName(), bf.Value(), built)
+	return w, built, subRequired
 }
 
 // subwidgetsRequired returns whether each subwidget of w gets the required

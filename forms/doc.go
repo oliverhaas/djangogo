@@ -67,11 +67,11 @@
 //
 //	{{ form }}  {{ form.as_p }}  {{ form.non_field_errors }}
 //	{{ form.title }}  {{ form.title.label_tag }}  {{ form.title.errors }}
-//	{% for field in form.visible_fields %}{{ field.label_tag }} {{ field }}{% endfor %}
+//	{% for field in form %}{{ field.label_tag }} {{ field }}{% endfor %}
+//	{% for radio in form.language %}{{ radio.tag }} {{ radio.choice_label }}{% endfor %}
 //
-// views.Render converts a form in the context through TemplateValue. The
-// template engine cannot iterate a form itself, so {% for field in form %} is
-// written {% for field in form.fields %}.
+// views.Render converts a form in the context through TemplateValue. A loop
+// over a field yields its subwidgets, see BoundField.Subwidgets.
 //
 // # Model forms
 //
@@ -110,7 +110,7 @@
 // form_kwargs. A clean() method of the formset is a function registered with
 // FormSet.CleanWith; its errors are the non-form errors. In a template a
 // formset is used as in Django: {{ formset.management_form }}, {% for form in
-// formset.forms %} and {{ formset.empty_form }}.
+// formset %} and {{ formset.empty_form }}.
 //
 // # Model formsets
 //
@@ -136,6 +136,5 @@
 // # Not covered
 //
 // File uploads (FileField, ImageField, ClearableFileInput), option groups in
-// choices, iteration over the inputs of a RadioSelect in a template and
-// localized input formats are not part of this package.
+// choices and localized input formats are not part of this package.
 package forms

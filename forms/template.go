@@ -2,7 +2,10 @@ package forms
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
+
+	"github.com/oliverhaas/djangogo/templates"
 )
 
 // The types of this file are what a template sees of a form. The template
@@ -110,8 +113,13 @@ func (d *ErrorDict) TemplateValue() any {
 // is_hidden, use_fieldset, css_classes, aria_describedby, widget_type,
 // label_tag, legend_tag, as_widget, as_text, as_textarea, as_hidden,
 // as_field_group, and field (required, disabled, label, help_text, initial,
-// widget.attrs, widget.is_hidden).
+// widget.attrs, widget.is_hidden). A loop over it yields its subwidgets, see
+// BoundField.Subwidgets:
+//
+//	{% for radio in form.language %}{{ radio }}{% endfor %}
 type TemplateField map[string]any
+
+var _ templates.Iterable = TemplateField(nil)
 
 // templateSelf is the key under which a template map keeps the object it was
 // built from. It is not an identifier, so a template cannot reach it.
@@ -127,6 +135,59 @@ func (t TemplateField) String() string {
 
 // HTML returns the rendered markup; templates print it without escaping.
 func (t TemplateField) HTML() string { return t.String() }
+
+// TemplateIter returns the subwidgets of the field, for a loop over it.
+func (t TemplateField) TemplateIter() []any {
+	bf, ok := t[templateSelf].(*BoundField)
+	if !ok {
+		return nil
+	}
+	subwidgets := bf.Subwidgets()
+	out := make([]any, len(subwidgets))
+	for i, w := range subwidgets {
+		out[i] = w.TemplateValue()
+	}
+	return out
+}
+
+// TemplateWidget is a subwidget in a template, see BoundWidget. Printed, it
+// is its HTML. Its keys are the attributes of Django's BoundWidget: tag,
+// choice_label, id_for_label, and data (name, value, label, selected, index,
+// attrs).
+type TemplateWidget map[string]any
+
+// String returns the HTML of the subwidget.
+func (t TemplateWidget) String() string {
+	if w, ok := t[templateSelf].(BoundWidget); ok {
+		return w.String()
+	}
+	return ""
+}
+
+// HTML returns the rendered markup; templates print it without escaping.
+func (t TemplateWidget) HTML() string { return t.String() }
+
+// TemplateValue returns the subwidget in the form a template uses.
+func (w BoundWidget) TemplateValue() any {
+	attrs := make(map[string]any, len(w.Attrs))
+	for k, v := range w.Attrs {
+		attrs[k] = v
+	}
+	return TemplateWidget{
+		templateSelf:   w,
+		"tag":          lazyHTML(w.Tag),
+		"choice_label": w.Label,
+		"id_for_label": w.IDForLabel(),
+		"data": map[string]any{
+			"name":     w.Name,
+			"value":    w.Value,
+			"label":    w.Label,
+			"selected": w.Selected,
+			"index":    strconv.Itoa(w.Index),
+			"attrs":    attrs,
+		},
+	}
+}
 
 // lazyHTML defers the rendering of a part until a template asks for it.
 func lazyHTML(fn func() string) func() SafeHTML {
@@ -193,11 +254,25 @@ func (bf *BoundField) TemplateValue() any {
 // attributes of Django's Form: errors, non_field_errors, hidden_fields,
 // visible_fields, as_div, as_p, as_table, as_ul, is_bound, is_valid,
 // is_multipart, prefix and cleaned_data. A field name wins over an attribute
-// of the same name, as in Django.
-//
-// The engine cannot iterate a map in field order, so {% for field in form %}
-// is written {% for field in form.fields %}; fields lists every bound field.
+// of the same name, as in Django. A loop over it yields the fields in order,
+// {% for field in form %}.
 type TemplateForm map[string]any
+
+var _ templates.Iterable = TemplateForm(nil)
+
+// TemplateIter returns the fields in order, for a loop over the form.
+func (t TemplateForm) TemplateIter() []any {
+	f, ok := t[templateSelf].(*Form)
+	if !ok {
+		return nil
+	}
+	fields := f.Fields()
+	out := make([]any, len(fields))
+	for i, bf := range fields {
+		out[i] = t[bf.Name]
+	}
+	return out
+}
 
 // String returns the form in its default layout.
 func (t TemplateForm) String() string {

@@ -81,6 +81,14 @@ type ContextValuer interface {
 	TemplateValue() any
 }
 
+// Iterable is implemented by a value that a {% for %} loop iterates in an
+// order of its own, as Python iterates an object with __iter__. A form, which
+// a template holds as a map, implements it to yield its fields in order. The
+// items are used as they are returned, in the form a template uses.
+type Iterable interface {
+	TemplateIter() []any
+}
+
 // modelLookupMu guards the process-global model lookup.
 var (
 	modelLookupMu sync.RWMutex

@@ -18,6 +18,8 @@ import (
 // Inside the loop forloop has Django's attributes: counter, counter0,
 // revcounter, revcounter0, first, last, length and parentloop. It replaces
 // pongo2's tag, whose forloop has capitalized Go names.
+//
+// A value that implements Iterable is iterated over the items it returns.
 type forTagNode struct {
 	vars     []string
 	iterable pongo2.IEvaluator
@@ -41,6 +43,9 @@ func (n *forTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.TemplateWrit
 	obj, err := n.iterable.Evaluate(forCtx)
 	if err != nil {
 		return err
+	}
+	if it, ok := obj.Interface().(Iterable); ok {
+		obj = pongo2.AsValue(it.TemplateIter())
 	}
 	obj.IterateOrder(func(idx, count int, key, value *pongo2.Value) bool {
 		n.assign(forCtx, key, value)

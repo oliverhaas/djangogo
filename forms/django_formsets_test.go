@@ -913,8 +913,15 @@ func TestFormsetIteration(t *testing.T) {
 	}
 }
 
-// test_formset_nonzero has no Go counterpart: it checks the truth value of
-// a Python object.
+// Ported from Django: tests/forms_tests/tests/test_formsets.py::FormsFormsetTestCase.test_formset_nonzero
+func TestFormsetNonzero(t *testing.T) {
+	fs := choiceFormSet()
+	fs.Extra = 0
+	equal(t, len(fs.Forms()), 0)
+	got := renderTemplate(t, "{% if formset %}true{% else %}false{% endif %}",
+		map[string]any{"formset": fs.TemplateValue()})
+	equal(t, got, "true")
+}
 
 // Ported from Django: tests/forms_tests/tests/test_formsets.py::FormsFormsetTestCase.test_formset_splitdatetimefield
 func TestFormsetSplitDateTimeField(t *testing.T) {
@@ -1392,6 +1399,12 @@ func TestFormsetTemplateValue(t *testing.T) {
 		`<p>Choice: <input type="text" name="choices-__prefix__-choice"></p>`+
 		`<p>Votes: <input type="number" name="choices-__prefix__-votes"></p>`+
 		`choices 0 False`)
+	loop := renderTemplate(t, `{% for form in formset %}{{ form.as_p }}{% endfor %}`, ctx)
+	listed := renderTemplate(t, `{% for form in formset.forms %}{{ form.as_p }}{% endfor %}`, ctx)
+	if loop != listed || !strings.Contains(loop, "choices-1-votes") {
+		t.Errorf("a loop over the formset rendered %q, a loop over its forms %q", loop, listed)
+	}
+
 	bound := makeChoiceFormSet([2]string{"Calexico", ""})
 	got = renderTemplate(t, `{% if formset.is_valid %}valid{% else %}{{ formset.total_error_count }} {{ formset }}{% endif %}`,
 		map[string]any{"formset": bound.TemplateValue()})

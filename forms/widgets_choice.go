@@ -80,11 +80,7 @@ func renderSelect(name string, choices []Choice, value any, multiple bool, layer
 	b.WriteString(`<select name="` + escape(name) + `"` + RenderAttrs(attrs) + ">")
 	selected := selectedIndexes(choices, value, multiple)
 	for i, c := range choices {
-		b.WriteString("\n  <option value=\"" + escape(c.Value) + `"`)
-		if selected[i] {
-			b.WriteString(" selected")
-		}
-		b.WriteString(">" + escape(c.Label) + "</option>")
+		b.WriteString("\n  " + selectOption(c, selected[i]))
 	}
 	b.WriteString("\n</select>")
 	return b.String()
@@ -111,6 +107,11 @@ func (w Select) Attributes() Attrs { return w.Attrs }
 func (w Select) WithChoices(choices []Choice) Widget {
 	w.Choices = choices
 	return w
+}
+
+// options implements optionWidget.
+func (w Select) options(name string, value any, _ Attrs) []BoundWidget {
+	return selectOptions(name, w.Choices, value, false)
 }
 
 // UseRequiredAttribute allows the required attribute only when the first
@@ -147,13 +148,23 @@ func nullBoolean(value any) any {
 	return nil
 }
 
+// nullBooleanOption returns the value of the option a NullBooleanSelect
+// selects for value.
+func nullBooleanOption(value any) string {
+	if b, ok := nullBoolean(value).(bool); ok {
+		return strconv.FormatBool(b)
+	}
+	return "unknown"
+}
+
 // Render implements Widget.
 func (w NullBooleanSelect) Render(name string, value any, attrs Attrs) string {
-	selected := "unknown"
-	if b, ok := nullBoolean(value).(bool); ok {
-		selected = strconv.FormatBool(b)
-	}
-	return renderSelect(name, nullBooleanChoices, selected, false, w.Attrs, attrs)
+	return renderSelect(name, nullBooleanChoices, nullBooleanOption(value), false, w.Attrs, attrs)
+}
+
+// options implements optionWidget.
+func (NullBooleanSelect) options(name string, value any, _ Attrs) []BoundWidget {
+	return selectOptions(name, nullBooleanChoices, nullBooleanOption(value), false)
 }
 
 // Attributes implements Widget.
@@ -190,6 +201,11 @@ func (w SelectMultiple) WithChoices(choices []Choice) Widget {
 	return w
 }
 
+// options implements optionWidget.
+func (w SelectMultiple) options(name string, value any, _ Attrs) []BoundWidget {
+	return selectOptions(name, w.Choices, value, true)
+}
+
 // ValueFromData returns every value submitted under name.
 func (SelectMultiple) ValueFromData(data url.Values, name string) any {
 	return append([]string{}, data[name]...)
@@ -213,23 +229,8 @@ func renderInputGroup(inputType, name string, choices []Choice, value any, multi
 		b.WriteString(` class="` + escape(pyString(class)) + `"`)
 	}
 	b.WriteString(">")
-	selected := selectedIndexes(choices, value, multiple)
-	for i, c := range choices {
-		option := mergeAttrs(attrs)
-		label := "<label>"
-		if id != "" {
-			optionID := id + "_" + strconv.Itoa(i)
-			option["id"] = optionID
-			label = `<label for="` + escape(optionID) + `">`
-		}
-		if selected[i] {
-			option["checked"] = true
-		}
-		b.WriteString("<div>\n    " + label)
-		// The value attribute is written even when empty, so that the empty
-		// choice submits "" and not the browser default "on".
-		b.WriteString(`<input type="` + inputType + `" name="` + escape(name) + `" value="` + escape(c.Value) + `"`)
-		b.WriteString(RenderAttrs(option) + "> " + escape(c.Label) + "</label></div>")
+	for _, option := range inputOptions(inputType, name, choices, value, multiple, attrs) {
+		b.WriteString("<div>\n    " + option.String() + "</div>")
 	}
 	b.WriteString("\n</div>")
 	return b.String()
@@ -256,6 +257,11 @@ func (w RadioSelect) Attributes() Attrs { return w.Attrs }
 func (w RadioSelect) WithChoices(choices []Choice) Widget {
 	w.Choices = choices
 	return w
+}
+
+// options implements optionWidget.
+func (w RadioSelect) options(name string, value any, attrs Attrs) []BoundWidget {
+	return inputOptions("radio", name, w.Choices, value, false, mergeAttrs(w.Attrs, attrs))
 }
 
 // IDForLabel returns the empty string: a label pointing at the first button
@@ -286,6 +292,11 @@ func (w CheckboxSelectMultiple) Attributes() Attrs { return w.Attrs }
 func (w CheckboxSelectMultiple) WithChoices(choices []Choice) Widget {
 	w.Choices = choices
 	return w
+}
+
+// options implements optionWidget.
+func (w CheckboxSelectMultiple) options(name string, value any, attrs Attrs) []BoundWidget {
+	return inputOptions("checkbox", name, w.Choices, value, true, mergeAttrs(w.Attrs, attrs))
 }
 
 // ValueFromData returns every value submitted under name.

@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/oliverhaas/djangogo/templates"
 )
 
 // The names of the management form fields and of the fields a formset adds to
@@ -787,9 +789,17 @@ func AllValid(sets ...*FormSet) bool {
 // management_form, forms, initial_forms, extra_forms, empty_form, errors,
 // non_form_errors, total_error_count, is_bound, is_valid, is_multipart,
 // prefix, media, can_order, can_delete, min_num, max_num, as_div, as_p,
-// as_table and as_ul. {% for form in formset %} is written
-// {% for form in formset.forms %}.
+// as_table and as_ul. A loop over it yields its forms, as a loop over forms
+// does: {% for form in formset %}.
 type TemplateFormSet map[string]any
+
+var _ templates.Iterable = TemplateFormSet(nil)
+
+// TemplateIter returns the forms, for a loop over the formset.
+func (t TemplateFormSet) TemplateIter() []any {
+	forms, _ := t["forms"].([]any)
+	return forms
+}
 
 // String returns the formset in its default layout.
 func (t TemplateFormSet) String() string {
