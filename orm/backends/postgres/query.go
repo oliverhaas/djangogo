@@ -28,7 +28,7 @@ const maxQueryParams = 65535
 // Features reports the SQL capabilities of PostgreSQL: row locking with
 // SELECT ... FOR UPDATE and the protocol's parameter cap.
 func (Dialect) Features() orm.Features {
-	return orm.Features{MaxQueryParams: maxQueryParams, SelectForUpdate: true, UniqueNullsNotDistinct: true}
+	return orm.Features{MaxQueryParams: maxQueryParams, SelectForUpdate: true, UniqueNullsNotDistinct: true, CastJoinColumns: true}
 }
 
 // LookupSQL returns the SQL of the text matching lookups. The column is cast

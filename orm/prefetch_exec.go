@@ -2,6 +2,7 @@ package orm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -40,8 +41,11 @@ func isStepFetched(parentModel *Model, sv reflect.Value, step prefetchStep, cach
 	case stepReverseO2O:
 		_, _, ok := getReverseOneCache(parentModel, sv, cacheKey)
 		return ok
-	case stepReverseFK, stepForwardM2M, stepReverseM2M:
+	case stepReverseFK, stepForwardM2M, stepReverseM2M, stepGeneric, stepGenericOwner:
 		_, _, ok := getPrefetchListCache(parentModel, sv, cacheKey)
+		return ok
+	case stepObject:
+		_, ok := reflect.Zero(step.private.Type).Interface().(ObjectPrefetcher).CachedObject(step.private, sv.Addr().Interface())
 		return ok
 	default:
 		return false
@@ -103,7 +107,7 @@ func collectStepObjects(parentModel *Model, objs []reflect.Value, step prefetchS
 			if obj, missing, ok := getReverseOneCache(parentModel, sv, cacheKey); ok && !missing && obj != nil {
 				appendPtr(reflect.ValueOf(obj))
 			}
-		case stepReverseFK, stepForwardM2M, stepReverseM2M:
+		case stepReverseFK, stepForwardM2M, stepReverseM2M, stepGeneric, stepGenericOwner:
 			if items, _, ok := getPrefetchListCache(parentModel, sv, cacheKey); ok {
 				appendSlice(items)
 			}
@@ -186,6 +190,8 @@ func prefetchOneLevel(
 		return prefetchReverseFK(ctx, db, parentModel, parents, step, customQ, cacheKey, isToAttr, nestedSpecs)
 	case stepForwardM2M, stepReverseM2M:
 		return prefetchM2M(ctx, db, parentModel, parents, step, customQ, cacheKey)
+	case stepGenericOwner:
+		return prefetchGenericOwners(ctx, db, parentModel, parents, step, customQ, cacheKey)
 	default:
 		return nil, fmt.Errorf("orm: unsupported prefetch step kind %d", step.kind)
 	}
@@ -445,6 +451,420 @@ func prefetchReverseFK(
 		setPrefetchListCache(parentModel, sv, cacheKey, typedSlice.Interface(), targetModel)
 	}
 	return nextObjs, nil
+}
+
+// genericJob is one group of parents whose generic relation PrefetchRelated
+// loads.
+type genericJob struct {
+	group    prefetchGroup
+	step     prefetchStep
+	parents  []reflect.Value // the parents without a cached result
+	cacheKey string
+}
+
+// genericRelKey identifies the fields of a generic foreign key on the related
+// model of a generic relation.
+type genericRelKey struct {
+	related     *Model
+	contentType *Field
+	objectID    *Field
+}
+
+// prefetchGeneric loads the rows of the generic relations of jobs and stores
+// each parent's typed []Child slice in RelCache. The jobs that share a
+// related model load with one query per chunk, as Django ORs one condition
+// per content type.
+func prefetchGeneric(ctx context.Context, db *DB, jobs []genericJob, customQ *query) error {
+	var order []genericRelKey
+	byKey := make(map[genericRelKey][]genericJob)
+	for _, job := range jobs {
+		if len(job.parents) == 0 {
+			continue
+		}
+		gr := job.step.generic
+		key := genericRelKey{related: gr.Related, contentType: gr.ContentType, objectID: gr.ObjectID}
+		if _, ok := byKey[key]; !ok {
+			order = append(order, key)
+		}
+		byKey[key] = append(byKey[key], job)
+	}
+	for _, key := range order {
+		if err := prefetchGenericRows(ctx, db, byKey[key], customQ); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// genericJobKeys holds the primary keys of the parents of one genericJob.
+type genericJobKeys struct {
+	ctID      int64
+	parentPKs []any // per parent, nil for an unsaved one
+	pks       []any // distinct
+	children  map[any][]reflect.Value
+}
+
+// prefetchGenericRows loads the rows of jobs, whose generic relations share
+// the related model and its fields.
+func prefetchGenericRows(ctx context.Context, db *DB, jobs []genericJob, customQ *query) error {
+	gr := jobs[0].step.generic
+	targetModel := gr.Related
+	multi := len(jobs) > 1
+	keys := make([]genericJobKeys, len(jobs))
+	jobByCT := make(map[int64]int, len(jobs))
+	for i, job := range jobs {
+		k := &keys[i]
+		k.parentPKs = make([]any, len(job.parents))
+		k.children = make(map[any][]reflect.Value)
+		seen := make(map[any]bool, len(job.parents))
+		for j, sv := range job.parents {
+			pk, zero, err := extractModelPK(job.group.model, sv)
+			if err != nil {
+				return err
+			}
+			if zero {
+				continue
+			}
+			k.parentPKs[j] = pk
+			if !seen[pk] {
+				seen[pk] = true
+				k.pks = append(k.pks, pk)
+			}
+		}
+		if multi {
+			id, err := job.step.generic.impl.ContentTypeID(ctx, db, job.group.model)
+			if err != nil {
+				return err
+			}
+			if k.ctID, err = toInt64(id); err != nil {
+				return fmt.Errorf("orm: content type id %v of %s: %w", id, job.group.model.Name(), err)
+			}
+			jobByCT[k.ctID] = i
+		}
+	}
+
+	base := customQ
+	if base == nil {
+		base = newQuery(db, targetModel)
+	}
+	var convErr error
+	collect := func(row reflect.Value, _ *rowPlan, _ []any) {
+		job := 0
+		if multi {
+			ct, ok := row.Field(gr.ContentType.Index).Interface().(interface{ PK() int64 })
+			if !ok {
+				return
+			}
+			if job, ok = jobByCT[ct.PK()]; !ok {
+				return
+			}
+		}
+		fv := row.Field(gr.ObjectID.Index)
+		if fv.Kind() == reflect.Pointer {
+			if fv.IsNil() {
+				return
+			}
+			fv = fv.Elem()
+		}
+		key, err := convertPrefetchParentKey(jobs[job].group.model.pk, fv.Interface())
+		if err != nil {
+			convErr = err
+			return
+		}
+		keys[job].children[key] = append(keys[job].children[key], row)
+	}
+	run := func(q *query) error {
+		if err := q.fetch(ctx, collect); err != nil {
+			return err
+		}
+		return convErr
+	}
+
+	bs := prefetchBatchSize(db)
+	if !multi {
+		pks := keys[0].pks
+		for start := 0; start < len(pks); start += bs {
+			if err := run(base.genericFilter(gr, pks[start:min(start+bs, len(pks))])); err != nil {
+				return err
+			}
+		}
+	} else {
+		var (
+			conds []Cond
+			size  int
+		)
+		flush := func() error {
+			if len(conds) == 0 {
+				return nil
+			}
+			cond := conds[0].Or(conds[1:]...)
+			conds, size = nil, 0
+			return run(base.filter([]any{cond}, false))
+		}
+		for _, k := range keys {
+			for start := 0; start < len(k.pks); start += bs {
+				chunk := k.pks[start:min(start+bs, len(k.pks))]
+				if size+len(chunk) > bs {
+					if err := flush(); err != nil {
+						return err
+					}
+				}
+				conds = append(conds, Q(gr.ContentType.Attr, k.ctID, gr.ObjectID.Attr+"__in", chunk))
+				size += len(chunk)
+			}
+		}
+		if err := flush(); err != nil {
+			return err
+		}
+	}
+
+	sliceType := reflect.SliceOf(targetModel.goType)
+	for i, job := range jobs {
+		for j, sv := range job.parents {
+			rows := keys[i].children[keys[i].parentPKs[j]]
+			typedSlice := reflect.MakeSlice(sliceType, len(rows), len(rows))
+			for n, child := range rows {
+				getRelCache(targetModel, child, true)
+				typedSlice.Index(n).Set(child)
+			}
+			setPrefetchListCache(job.group.model, sv, job.cacheKey, typedSlice.Interface(), targetModel)
+		}
+	}
+	return nil
+}
+
+// prefetchGenericOwners loads, for each parent, an instance of the related
+// model of a generic relation, the row of the model that declares the
+// relation that its generic foreign key refers to. Django reaches it through
+// the related_query_name of the GenericRelation. Each parent's typed slice,
+// with one row at most, goes to RelCache.
+func prefetchGenericOwners(
+	ctx context.Context,
+	db *DB,
+	parentModel *Model,
+	parents []reflect.Value,
+	step prefetchStep,
+	customQ *query,
+	cacheKey string,
+) ([]reflect.Value, error) {
+	gr := step.generic
+	targetModel := step.targetModel
+	id, err := gr.impl.ContentTypeID(ctx, db, targetModel)
+	if err != nil {
+		return nil, err
+	}
+	ctID, err := toInt64(id)
+	if err != nil {
+		return nil, fmt.Errorf("orm: content type id %v of %s: %w", id, targetModel.Name(), err)
+	}
+	keys := make([]any, len(parents))
+	var pks []any
+	seen := make(map[any]bool, len(parents))
+	for i, sv := range parents {
+		ct, ok := sv.Field(gr.ContentType.Index).Interface().(interface{ PK() int64 })
+		if !ok || ct.PK() != ctID {
+			continue
+		}
+		fv := sv.Field(gr.ObjectID.Index)
+		if fv.Kind() == reflect.Pointer {
+			if fv.IsNil() {
+				continue
+			}
+			fv = fv.Elem()
+		}
+		key, err := convertPrefetchParentKey(targetModel.pk, fv.Interface())
+		if err != nil {
+			return nil, fmt.Errorf("orm: %s.%s: %w", parentModel.Name(), gr.ObjectID.Name, err)
+		}
+		keys[i] = key
+		if key != nil && !seen[key] {
+			seen[key] = true
+			pks = append(pks, key)
+		}
+	}
+
+	byPK := make(map[any]reflect.Value, len(pks))
+	base := customQ
+	if base == nil {
+		base = newQuery(db, targetModel)
+	}
+	bs := prefetchBatchSize(db)
+	for start := 0; start < len(pks); start += bs {
+		var pkErr error
+		err := base.filter([]any{"pk__in", pks[start:min(start+bs, len(pks))]}, false).fetch(ctx,
+			func(row reflect.Value, _ *rowPlan, _ []any) {
+				pk, _, err := extractModelPK(targetModel, row)
+				if err != nil {
+					pkErr = err
+					return
+				}
+				byPK[pk] = row
+			})
+		if err == nil {
+			err = pkErr
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	sliceType := reflect.SliceOf(targetModel.goType)
+	var nextObjs []reflect.Value
+	for i, sv := range parents {
+		row, ok := byPK[keys[i]]
+		n := 0
+		if ok {
+			n = 1
+		}
+		typedSlice := reflect.MakeSlice(sliceType, n, n)
+		if ok {
+			slot := typedSlice.Index(0)
+			slot.Set(row)
+			getRelCache(targetModel, slot, true)
+			nextObjs = append(nextObjs, slot)
+		}
+		setPrefetchListCache(parentModel, sv, cacheKey, typedSlice.Interface(), targetModel)
+	}
+	return nextObjs, nil
+}
+
+// prefetchObjects loads the objects that the private field of step refers to
+// on the instances of g, with one query per model, and caches each object on
+// its instance. querysets hold at most one custom queryset per model, and
+// their nested prefetches run on the objects they load. It returns every
+// object the instances refer to, grouped by model.
+func prefetchObjects(
+	ctx context.Context,
+	db *DB,
+	g prefetchGroup,
+	step prefetchStep,
+	querysets []*query,
+	cacheKey string,
+	isToAttr bool,
+) ([]prefetchGroup, error) {
+	pf := step.private
+	impl := reflect.Zero(pf.Type).Interface().(ObjectPrefetcher)
+	custom := make(map[*Model]*query, len(querysets))
+	for _, q := range querysets {
+		if _, dup := custom[q.model]; dup {
+			return nil, errors.New("orm: only one queryset is allowed for each content type")
+		}
+		custom[q.model] = q
+	}
+
+	type target struct {
+		model *Model
+		pk    any
+	}
+	var models []*Model
+	pksByModel := make(map[*Model][]any)
+	seen := make(map[target]bool)
+	targets := make([]target, len(g.objs))
+	fetched := make([]bool, len(g.objs))
+	for i, sv := range g.objs {
+		if isStepFetched(g.model, sv, step, cacheKey, isToAttr) {
+			fetched[i] = true
+			continue
+		}
+		m, raw, err := impl.PrefetchTarget(ctx, db, pf, sv.Addr().Interface())
+		if err != nil {
+			return nil, err
+		}
+		if m == nil || raw == nil {
+			continue
+		}
+		pk, err := convertPrefetchParentKey(m.pk, raw)
+		if err != nil {
+			return nil, fmt.Errorf("orm: %s.%s: %w", g.model.Name(), pf.Name, err)
+		}
+		t := target{model: m, pk: pk}
+		targets[i] = t
+		if seen[t] {
+			continue
+		}
+		seen[t] = true
+		if _, ok := pksByModel[m]; !ok {
+			models = append(models, m)
+		}
+		pksByModel[m] = append(pksByModel[m], pk)
+	}
+
+	loaded := make(map[target]any)
+	bs := prefetchBatchSize(db)
+	for _, m := range models {
+		base := custom[m]
+		if base == nil {
+			base = newQuery(db, m)
+		}
+		var nested []Prefetch
+		if len(base.prefetchRelated) > 0 {
+			nested = base.prefetchRelated
+			base = base.clone()
+			base.prefetchRelated = nil
+		}
+		var rows []reflect.Value
+		pks := pksByModel[m]
+		for start := 0; start < len(pks); start += bs {
+			q := base.filter([]any{"pk__in", pks[start:min(start+bs, len(pks))]}, false)
+			var pkErr error
+			err := q.fetch(ctx, func(row reflect.Value, _ *rowPlan, _ []any) {
+				pk, _, err := extractModelPK(m, row)
+				if err != nil {
+					pkErr = err
+					return
+				}
+				loaded[target{model: m, pk: pk}] = row.Addr().Interface()
+				rows = append(rows, row)
+			})
+			if err == nil {
+				err = pkErr
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		if len(nested) > 0 {
+			if err := prefetchRelatedObjects(ctx, db, m, rows, nested); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	var reached []prefetchGroup
+	seenObj := make(map[any]bool)
+	for i, sv := range g.objs {
+		var obj any
+		if fetched[i] {
+			if isToAttr {
+				obj, _, _ = getReverseOneCache(g.model, sv, cacheKey)
+			} else {
+				obj, _ = impl.CachedObject(pf, sv.Addr().Interface())
+			}
+		} else {
+			if targets[i].model != nil {
+				obj = loaded[targets[i]]
+			}
+			switch {
+			case isToAttr && obj != nil:
+				setReverseOneCacheModel(g.model, sv, cacheKey, obj, targets[i].model, false)
+			case isToAttr:
+				setReverseOneCacheModel(g.model, sv, cacheKey, nil, nil, true)
+			default:
+				impl.CacheObject(pf, sv.Addr().Interface(), obj)
+			}
+		}
+		p := reflect.ValueOf(obj)
+		if obj == nil || p.Kind() != reflect.Pointer || p.IsNil() || seenObj[obj] {
+			continue
+		}
+		seenObj[obj] = true
+		m, ok := db.Registry().ModelOf(obj)
+		if !ok {
+			continue
+		}
+		reached = addPrefetchGroup(reached, m, []reflect.Value{p.Elem()})
+	}
+	return reached, nil
 }
 
 // prefetchM2M fetches forward or reverse many-to-many targets in one batched

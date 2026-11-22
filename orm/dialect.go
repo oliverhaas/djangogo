@@ -26,6 +26,11 @@ type Features struct {
 	// UniqueNullsNotDistinct reports that a unique index can treat NULL
 	// values as equal (NULLS NOT DISTINCT, PostgreSQL 15).
 	UniqueNullsNotDistinct bool
+	// CastJoinColumns reports that a join of two columns of different types,
+	// such as a generic relation from an integer primary key to a text object
+	// id, needs a cast of the joined column to the type of the other, as on
+	// PostgreSQL (Django's prepare_join_on_clause).
+	CastJoinColumns bool
 }
 
 // FeatureDialect is an optional capability of a Dialect: it reports the

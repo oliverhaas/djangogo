@@ -345,6 +345,55 @@ func TestBulkCreateNullableFields(t *testing.T) {
 	})
 }
 
+// bcFKObject returns a foreign key that holds parent, saved or not.
+func bcFKObject(parent *bcNoFields) orm.FK[bcNoFields] {
+	var fk orm.FK[bcNoFields]
+	fk.SetObject(parent, parent.ID)
+	return fk
+}
+
+// Ported from Django: tests/bulk_create/tests.py::BulkCreateTests.test_nullable_fk_after_parent
+//
+// The child is read back by primary key: the port of NullableFields has no
+// integer_field.
+func TestBulkCreateNullableFKAfterParent(t *testing.T) {
+	djangotest.EachDB(t, bcModels(), func(t *testing.T, db *orm.DB) {
+		parent := &bcNoFields{}
+		child := &bcNullableFields{AutoField: bcFKObject(parent)}
+		create(t, db, parent)
+		bcCreate(t, db, []*bcNullableFields{child})
+		got, err := orm.Query[bcNullableFields](db).Get(context.Background(), "pk", child.ID)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, got.AutoField.PK(), parent.ID)
+	})
+}
+
+// Ported from Django: tests/bulk_create/tests.py::BulkCreateTests.test_nullable_fk_after_parent_bulk_create
+func TestBulkCreateNullableFKAfterParentBulkCreate(t *testing.T) {
+	djangotest.EachDB(t, bcModels(), func(t *testing.T, db *orm.DB) {
+		parent := &bcNoFields{}
+		child := &bcNullableFields{AutoField: bcFKObject(parent)}
+		bcCreate(t, db, []*bcNoFields{parent})
+		bcCreate(t, db, []*bcNullableFields{child})
+		got, err := orm.Query[bcNullableFields](db).Get(context.Background(), "pk", child.ID)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, got.AutoField.PK(), parent.ID)
+	})
+}
+
+// Ported from Django: tests/bulk_create/tests.py::BulkCreateTests.test_unsaved_parent
+func TestBulkCreateUnsavedParent(t *testing.T) {
+	djangotest.EachDB(t, bcModels(), func(t *testing.T, db *orm.DB) {
+		parent := &bcNoFields{}
+		err := orm.Query[bcNullableFields](db).BulkCreate(context.Background(),
+			[]*bcNullableFields{{AutoField: bcFKObject(parent)}})
+		if err == nil || !strings.Contains(err.Error(),
+			"bulk_create() prohibited to prevent data loss due to unsaved related object 'auto_field'") {
+			t.Fatalf("BulkCreate error = %v, want the unsaved related object error", err)
+		}
+	})
+}
+
 // bcAssertSaved checks that the row with the primary key of want holds the
 // values of want.
 func bcAssertSaved(t *testing.T, db *orm.DB, want *bcCountry) {

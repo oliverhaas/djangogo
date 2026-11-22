@@ -26,6 +26,9 @@ type Model struct {
 	byReverseQuery        map[string]*ReverseRelation
 	ambiguousReverseName  map[string]bool
 	ambiguousReverseQuery map[string]bool
+	privateFields         []*PrivateField
+	genericRels           []*GenericRelation
+	byGenericQuery        map[string]*GenericRelation
 	ordering              []string
 	uniqueTogether        [][]string
 	indexes               []Index

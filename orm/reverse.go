@@ -209,8 +209,10 @@ func lookupReverseForChild[Child any](ownerModel *Model, name string, wantKind R
 }
 
 // Related returns a QuerySet of Child rows related to owner via the reverse
-// FK relation or forward/reverse M2M relation named name (the field attribute,
-// related_name tag, or "<child>_set" by default).
+// FK relation, forward/reverse M2M relation or generic relation named name
+// (the field attribute, related_name tag, or "<child>_set" by default). The
+// related_query_name of a generic relation names the rows of the model that
+// declares it whose relation holds owner.
 //
 // owner may be a model struct value or pointer. Any lookup error (unknown or
 // hidden relation name, wrong Child type, or an unsaved owner with a zero
@@ -223,6 +225,12 @@ func Related[Child any](db *DB, owner any, name string) *QuerySet[Child] {
 			}
 			if rev, found, _ := ownerModel.lookupReverseAccessor(name); found && rev.Kind == RelM2M {
 				return Many[Child](db, owner, name).QuerySet()
+			}
+			if _, isGeneric := ownerModel.GenericRelation(name); isGeneric {
+				return GenericSet[Child](db, owner, name).QuerySet()
+			}
+			if gr, ok := ownerModel.byGenericQuery[name]; ok {
+				return genericOwners[Child](db, owner, gr)
 			}
 		}
 	}

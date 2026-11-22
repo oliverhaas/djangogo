@@ -692,6 +692,23 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   keys once every table exists, as Django's schema editor does. The test
   databases of `djangotest` use it, so mutual foreign keys work in tests on
   PostgreSQL too. A dialect provides this through `orm.ForeignKeyDialect`.
+- contenttypes: generic relations. A `contenttypes.GenericForeignKey` field
+  points a row at an object of any model through a content type and an object
+  id, and `contenttypes.GetObject` and `SetObject` read and set it. A
+  `contenttypes.GenericRelation[T]` field gives the reverse side:
+  `orm.GenericSet` adds, removes, sets and clears the rows, filters and
+  `OrderBy` follow it (`Filter("tags__tag", "lion")`), and annotations
+  aggregate over it. Its `related_query_name` tag lets the rows filter back
+  on the owners (`Filter("bookmarks__url", ...)`), and `orm.Related` lists the
+  owners of a row. `PrefetchRelated` loads a generic foreign key, also across
+  content types, with one query per content type, and loads a generic
+  relation in one query. `orm.Prefetch{QuerySets: ...}` gives a queryset per
+  content type, as Django's `GenericPrefetch` does. Deleting an object deletes
+  the rows of its generic relations and sends their delete signals.
+  `GetOrCreate` and `UpdateOrCreate` take a generic foreign key in their
+  defaults. The object id can be an integer or a text column, and the target
+  can have an integer, text or UUID primary key. On PostgreSQL, a join from
+  an integer primary key to a text object id casts the column, as Django does.
 
 ### Changed
 
@@ -907,6 +924,17 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `template.HTML`, so a column built with HTML showed its tags as text. It
   now shows the HTML, as Django shows a `SafeString`. A column whose value is
   a date or a time no longer wraps, as in Django.
+- ORM: a filter that compared a text field with an integer, such as
+  `Filter("title", 9)`, failed on PostgreSQL with "unable to encode". The
+  integer is now sent as its text, as Django's `CharField.get_prep_value`
+  does.
+- ORM: a filter on an annotation whose name holds `__`, such as the default
+  name `links__sum` in `Filter("links__sum__isnull", true)`, failed with
+  "unsupported lookup". It now finds the annotation, as Django does.
+- ORM: `BulkCreate` stored a foreign key that held a parent saved after the
+  child was built as NULL, and accepted a parent that was never saved. It now
+  takes the primary key of the saved parent and rejects an unsaved one with
+  Django's "bulk_create() prohibited to prevent data loss" error.
 
 ### Security
 

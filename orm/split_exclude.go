@@ -83,10 +83,19 @@ func (c *compiler) splitExclude(path fieldPath, transforms []string, lookup stri
 		targetJoin = restJoins[len(restJoins)-1]
 	}
 	pred.lhs = withColumn(pred.lhs, colNode{join: targetJoin, field: path.field})
+	var inner sqlNode = colNode{join: subJS.base, field: &Field{Column: firstHop.toColumn}}
+	if typ := genericCastType(c.d, firstHop.generic, firstHop.genericOnParent); typ != "" {
+		inner = castNode{node: inner, typ: typ}
+	}
 	corrPred := &predicate{
 		lookup: lookupExact,
-		lhs:    colNode{join: subJS.base, field: &Field{Column: firstHop.toColumn}},
+		lhs:    inner,
 		rhs:    []sqlNode{colNode{join: outerJoin, field: &Field{Column: firstHop.fromColumn}}},
+	}
+	children := []whereChild{{pred: pred}, {pred: corrPred}}
+	if firstHop.generic != nil && !firstHop.genericOnParent {
+		// The rows of a generic relation also need the owner's content type.
+		children = append(children, whereChild{pred: contentTypePredicate(subJS.base, firstHop.generic)})
 	}
 	subC := &compiler{
 		q:     c.q,
@@ -94,7 +103,7 @@ func (c *compiler) splitExclude(path fieldPath, transforms []string, lookup stri
 		joins: subJS,
 		where: &whereNode{
 			conn:     connAnd,
-			children: []whereChild{{pred: pred}, {pred: corrPred}},
+			children: children,
 		},
 	}
 	stmt := &selectStmt{

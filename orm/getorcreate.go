@@ -40,7 +40,7 @@ func (qs *QuerySet[T]) GetOrCreate(ctx context.Context, defaults Defaults, args 
 		return zero, false, err
 	}
 	var fresh T
-	if err := qs.populate(&fresh, args, defaults); err != nil {
+	if err := qs.populate(ctx, &fresh, args, defaults); err != nil {
 		return zero, false, err
 	}
 	createErr := qs.q.db.Atomic(ctx, func(ctx context.Context) error {
@@ -62,7 +62,9 @@ func (qs *QuerySet[T]) GetOrCreate(ctx context.Context, defaults Defaults, args 
 // Django's update_or_create(). It reports whether the row was created. The
 // whole operation runs in one Atomic block, with the row locked where the
 // dialect supports it. An update goes through Save, restricted to the fields
-// in defaults and the auto_now fields, and fires the save signals.
+// in defaults and the auto_now fields, and fires the save signals. When
+// defaults name a private field, such as a generic foreign key, the update
+// writes every field, as in Django.
 func (qs *QuerySet[T]) UpdateOrCreate(ctx context.Context, defaults Defaults, args ...any) (T, bool, error) {
 	var (
 		out     T
@@ -77,29 +79,47 @@ func (qs *QuerySet[T]) UpdateOrCreate(ctx context.Context, defaults Defaults, ar
 		if created {
 			return nil
 		}
-		m := qs.q.model
-		keys := sortedKeys(defaults)
-		elem := reflect.ValueOf(&out).Elem()
-		for _, key := range keys {
-			if err := setAttr(qs.q.db.Registry(), m, elem, key, defaults[key]); err != nil {
-				return err
-			}
+		opts, ok, err := applyUpdateDefaults(ctx, qs.q.db, qs.q.model, &out, defaults)
+		if err != nil || !ok {
+			return err
 		}
-		for _, f := range m.fields {
-			if f.AutoNow {
-				keys = append(keys, f.Attr)
-			}
-		}
-		if len(keys) == 0 {
-			return nil
-		}
-		return qs.Save(ctx, &out, UpdateFields(keys...))
+		return qs.Save(ctx, &out, opts...)
 	})
 	if err != nil {
 		var zero T
 		return zero, false, err
 	}
 	return out, created, nil
+}
+
+// applyUpdateDefaults sets the fields of obj, an instance of m, named in
+// defaults, and returns the options of the Save that writes them: the fields
+// in defaults and the auto_now fields, or every field when defaults name a
+// private field. It reports false when there is nothing to save.
+func applyUpdateDefaults(ctx context.Context, db *DB, m *Model, obj any, defaults Defaults) ([]SaveOption, bool, error) {
+	keys := sortedKeys(defaults)
+	elem := reflect.ValueOf(obj).Elem()
+	full := false
+	for _, key := range keys {
+		if err := setAttr(ctx, db, m, elem, key, defaults[key]); err != nil {
+			return nil, false, err
+		}
+		if _, ok := m.PrivateField(key); ok {
+			full = true
+		}
+	}
+	if full {
+		return nil, true, nil
+	}
+	for _, f := range m.fields {
+		if f.AutoNow {
+			keys = append(keys, f.Attr)
+		}
+	}
+	if len(keys) == 0 {
+		return nil, false, nil
+	}
+	return []SaveOption{UpdateFields(keys...)}, true, nil
 }
 
 // sortedKeys returns the keys of d in sorted order, so that the statements
@@ -117,9 +137,8 @@ func sortedKeys(d Defaults) []string {
 // from defaults, which win over the conditions. Conditions that are Q objects,
 // span a relation, or carry a lookup only take part in the lookup, as in
 // Django.
-func (qs *QuerySet[T]) populate(obj *T, args []any, defaults Defaults) error {
-	m := qs.q.model
-	reg := qs.q.db.Registry()
+func (qs *QuerySet[T]) populate(ctx context.Context, obj *T, args []any, defaults Defaults) error {
+	m, db := qs.q.model, qs.q.db
 	elem := reflect.ValueOf(obj).Elem()
 	for i := 0; i < len(args); i++ {
 		key, ok := args[i].(string)
@@ -130,12 +149,12 @@ func (qs *QuerySet[T]) populate(obj *T, args []any, defaults Defaults) error {
 		if i >= len(args) || strings.Contains(key, lookupSep) {
 			continue
 		}
-		if err := setAttr(reg, m, elem, key, args[i]); err != nil {
+		if err := setAttr(ctx, db, m, elem, key, args[i]); err != nil {
 			return err
 		}
 	}
 	for _, key := range sortedKeys(defaults) {
-		if err := setAttr(reg, m, elem, key, defaults[key]); err != nil {
+		if err := setAttr(ctx, db, m, elem, key, defaults[key]); err != nil {
 			return err
 		}
 	}
@@ -143,8 +162,21 @@ func (qs *QuerySet[T]) populate(obj *T, args []any, defaults Defaults) error {
 }
 
 // setAttr sets the field of the struct elem named by key to value. A foreign
-// key takes a primary key, an orm.FK[T], or a model instance.
-func setAttr(reg *Registry, m *Model, elem reflect.Value, key string, value any) error {
+// key takes a primary key, an orm.FK[T], or a model instance. A private field
+// takes what its PrivateFieldAssigner accepts, e.g. a model instance for a
+// generic foreign key.
+func setAttr(ctx context.Context, db *DB, m *Model, elem reflect.Value, key string, value any) error {
+	if pf, ok := m.PrivateField(key); ok {
+		assigner, ok := reflect.Zero(pf.Type).Interface().(PrivateFieldAssigner)
+		if !ok {
+			return fmt.Errorf("orm: field %s.%s cannot be assigned", m.Name(), pf.Name)
+		}
+		if fn, ok := value.(func() any); ok {
+			value = fn()
+		}
+		return assigner.AssignPrivateField(ctx, db, m, pf, elem.Addr().Interface(), value)
+	}
+	reg := db.Registry()
 	f, ok := lookupField(m, key)
 	if !ok {
 		return &FieldError{Model: m.Name(), Message: "invalid field name(s) for model " + m.Name() + ": '" + key + "'."}
@@ -173,6 +205,24 @@ func setAttr(reg *Registry, m *Model, elem reflect.Value, key string, value any)
 		return nil
 	}
 	rv := reflect.ValueOf(value)
+	if fv.Kind() == reflect.Pointer && rv.Kind() != reflect.Pointer {
+		// A nullable field takes its plain value.
+		ptr := reflect.New(fv.Type().Elem())
+		if err := assignValue(ptr.Elem(), rv); err != nil {
+			return fmt.Errorf("orm: cannot assign a %T value to field %s.%s", value, m.Name(), f.Name)
+		}
+		fv.Set(ptr)
+		return nil
+	}
+	if err := assignValue(fv, rv); err != nil {
+		return fmt.Errorf("orm: cannot assign a %T value to field %s.%s", value, m.Name(), f.Name)
+	}
+	return nil
+}
+
+// assignValue sets fv to rv, converting between numeric kinds and between
+// types of the same kind.
+func assignValue(fv, rv reflect.Value) error {
 	switch {
 	case rv.Type().AssignableTo(fv.Type()):
 		fv.Set(rv)
@@ -180,7 +230,7 @@ func setAttr(reg *Registry, m *Model, elem reflect.Value, key string, value any)
 		rv.Kind() == fv.Kind() && rv.Type().ConvertibleTo(fv.Type()):
 		fv.Set(rv.Convert(fv.Type()))
 	default:
-		return fmt.Errorf("orm: cannot assign a %T value to field %s.%s", value, m.Name(), f.Name)
+		return errors.New("orm: incompatible value")
 	}
 	return nil
 }

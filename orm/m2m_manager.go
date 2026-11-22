@@ -21,6 +21,7 @@ type m2mCoreFilter struct {
 type manyConfig struct {
 	throughDefaults Defaults
 	clear           bool
+	noBulk          bool
 }
 
 // ManyOption configures M2M operations such as AddWith, Set, SetPKs, and Create.
@@ -37,6 +38,13 @@ func ThroughDefaults(defaults Defaults) ManyOption {
 // the new ones, mirroring Django's set(..., clear=True).
 func SetClear() ManyOption {
 	return func(c *manyConfig) { c.clear = true }
+}
+
+// Bulk selects how Set of a generic relation adds objects. Bulk(false) adds
+// them through AddSave, one Save per object, instead of one UPDATE, as
+// Django's set(..., bulk=False) does. The default is true.
+func Bulk(bulk bool) ManyOption {
+	return func(c *manyConfig) { c.noBulk = !bulk }
 }
 
 // parseManyConfig applies opts into a manyConfig.
@@ -430,7 +438,7 @@ func (m *ManyManager[T]) GetOrCreate(ctx context.Context, defaults Defaults, arg
 			return err
 		}
 		var fresh T
-		if err := Query[T](m.core.db).populate(&fresh, filterArgs, defaults); err != nil {
+		if err := Query[T](m.core.db).populate(txCtx, &fresh, filterArgs, defaults); err != nil {
 			return err
 		}
 		if err := Query[T](m.core.db).Create(txCtx, &fresh); err != nil {
@@ -471,23 +479,11 @@ func (m *ManyManager[T]) UpdateOrCreate(ctx context.Context, defaults Defaults, 
 		if created {
 			return nil
 		}
-		model := m.core.targetModel
-		keys := sortedKeys(defaults)
-		elem := reflect.ValueOf(&obj).Elem()
-		for _, key := range keys {
-			if err := setAttr(m.core.db.Registry(), model, elem, key, defaults[key]); err != nil {
-				return err
-			}
+		opts, ok, err := applyUpdateDefaults(txCtx, m.core.db, m.core.targetModel, &obj, defaults)
+		if err != nil || !ok {
+			return err
 		}
-		for _, f := range model.fields {
-			if f.AutoNow {
-				keys = append(keys, f.Attr)
-			}
-		}
-		if len(keys) == 0 {
-			return nil
-		}
-		return Query[T](m.core.db).Save(txCtx, &obj, UpdateFields(keys...))
+		return Query[T](m.core.db).Save(txCtx, &obj, opts...)
 	})
 	if err != nil {
 		return zero, false, err

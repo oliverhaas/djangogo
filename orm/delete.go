@@ -98,7 +98,7 @@ func hasModelDeleteHandlers(m *Model) bool {
 // canFastDelete reports whether Delete on m can execute as a single SQL DELETE
 // statement without running the collector.
 func canFastDelete(r *Registry, m *Model) bool {
-	if hasModelDeleteHandlers(m) {
+	if hasModelDeleteHandlers(m) || len(m.genericRels) > 0 {
 		return false
 	}
 	for _, inc := range incomingFKs(r, m) {
@@ -361,6 +361,22 @@ func (c *deleteCollector) collect(ctx context.Context, model *Model, pks []any, 
 				model.Name(), strings.Join(protectedKeys, ", "),
 			),
 			ProtectedObjects: objs,
+		}
+	}
+
+	// The rows of a generic relation are deleted with the rows they belong
+	// to, like Django's bulk_related_objects. They have no foreign key to the
+	// model, so the order of the deletes does not matter.
+	for _, gr := range model.genericRels {
+		childPKs, err := newQuery(c.db, gr.Related).genericFilter(gr, newPKs).pks(ctx)
+		if err != nil {
+			return err
+		}
+		if len(childPKs) == 0 {
+			continue
+		}
+		if err := c.collect(ctx, gr.Related, childPKs, false); err != nil {
+			return err
 		}
 	}
 

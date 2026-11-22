@@ -589,9 +589,54 @@ func (c *compiler) renderFrom(w *sqlWriter) {
 		w.write(" ON (")
 		w.column(j.parent.alias, j.fromColumn)
 		w.write(" = ")
-		w.column(j.alias, j.toColumn)
+		if typ := genericCastType(w.d, j.generic, j.genericOnParent); typ != "" {
+			w.write("CAST(")
+			w.column(j.alias, j.toColumn)
+			w.write(" AS " + typ + ")")
+		} else {
+			w.column(j.alias, j.toColumn)
+		}
+		if j.generic != nil {
+			ctAlias := j.alias
+			if j.genericOnParent {
+				ctAlias = j.parent.alias
+			}
+			w.write(" AND ")
+			renderContentTypeRestriction(w, ctAlias, j.generic)
+		}
 		w.write(")")
 	}
+}
+
+// genericCastType returns the type that the far column of a hop of the
+// generic relation gr is cast to when it is compared with the near one, or ""
+// when it is compared as it is. The hop goes from the primary key to the
+// object id, or back with onParent. Only a generic relation compares columns
+// of different types, and only a dialect with CastJoinColumns needs the cast.
+func genericCastType(d Dialect, gr *GenericRelation, onParent bool) string {
+	if gr == nil || !dialectFeatures(d).CastJoinColumns {
+		return ""
+	}
+	from, to := gr.Model.pk, gr.ObjectID
+	if onParent {
+		from, to = to, from
+	}
+	if typ := castType(d, from); typ != castType(d, to) {
+		return typ
+	}
+	return ""
+}
+
+// castType returns the column type of f without the column constraints, the
+// type that a CAST to the type of f names. An auto primary key casts to its
+// integer type.
+func castType(d Dialect, f *Field) string {
+	bare := *f
+	bare.Column, bare.Null, bare.Unique, bare.PrimaryKey = "", true, false, false
+	if bare.Kind == KindAuto {
+		bare.Kind = KindBigInt
+	}
+	return d.ColumnType(&bare)
 }
 
 // renderLimit writes the LIMIT and OFFSET clauses. An offset without a limit

@@ -39,7 +39,7 @@ func (qs *QuerySet[T]) Create(ctx context.Context, obj *T) error {
 func (qs *QuerySet[T]) insertOne(ctx context.Context, obj *T) error {
 	db, m := qs.q.db, qs.q.model
 	v := reflect.ValueOf(obj).Elem()
-	if err := syncLoadedRelations(v, m.fields); err != nil {
+	if err := syncLoadedRelations(db.Registry(), m, v, "save"); err != nil {
 		return err
 	}
 	applyDefaults(v, m.fields)
@@ -86,7 +86,7 @@ func (qs *QuerySet[T]) Save(ctx context.Context, obj *T, opts ...SaveOption) err
 	db, m := qs.q.db, qs.q.model
 	pk := m.PrimaryKey()
 	v := reflect.ValueOf(obj).Elem()
-	if err := syncLoadedRelations(v, m.fields); err != nil {
+	if err := syncLoadedRelations(db.Registry(), m, v, "save"); err != nil {
 		return err
 	}
 	if pk == nil || pkFieldIsZero(pk, v.Field(pk.Index)) {
@@ -425,12 +425,14 @@ func (db *DB) rowExists(ctx context.Context, m *Model, v reflect.Value) (bool, e
 	return exists, nil
 }
 
-// syncLoadedRelations checks every relation field of v that holds a loaded
-// object with pk == 0. If the referenced object has since been saved (non-zero
-// PK), its PK is copied back into the relation field; if it is still unsaved,
-// Save/Create is rejected with Django's unsaved-related-object error.
-func syncLoadedRelations(v reflect.Value, fields []*Field) error {
-	for _, f := range fields {
+// syncLoadedRelations checks every relation field of v, a struct of model m,
+// that holds a loaded object with pk == 0. If the referenced object has since
+// been saved (non-zero PK), its PK is copied back into the relation field; if
+// it is still unsaved, the operation is rejected with Django's
+// unsaved-related-object error. A private field that holds an unsaved object
+// is rejected too. operation names the operation in the error, e.g. "save".
+func syncLoadedRelations(reg *Registry, m *Model, v reflect.Value, operation string) error {
+	for _, f := range m.fields {
 		if f.Rel == nil || f.Rel.Target == nil {
 			continue
 		}
@@ -452,12 +454,37 @@ func syncLoadedRelations(v reflect.Value, fields []*Field) error {
 			return err
 		}
 		if targetPK == 0 {
-			return fmt.Errorf(
-				"orm: save() prohibited to prevent data loss due to unsaved related object '%s'",
-				f.Attr,
-			)
+			return unsavedRelatedError(operation, f.Attr)
 		}
 		setForwardObject(v, f, res[0], targetPK)
 	}
+	for _, pf := range m.privateFields {
+		holder, ok := v.Field(pf.Index).Interface().(ObjectHolder)
+		if !ok {
+			continue
+		}
+		obj := holder.HeldObject()
+		if obj == nil {
+			continue
+		}
+		target, ok := reg.ModelOf(obj)
+		if !ok {
+			return fmt.Errorf("orm: field %s.%s holds %T, which is not a registered model", m.Name(), pf.Name, obj)
+		}
+		pk, zero, err := extractModelPK(target, reflect.Indirect(reflect.ValueOf(obj)))
+		if err != nil {
+			return err
+		}
+		// Django checks for a pk of None, and an empty text pk is a valid one.
+		if _, text := pk.(string); zero && !text {
+			return unsavedRelatedError(operation, pf.Attr)
+		}
+	}
 	return nil
+}
+
+// unsavedRelatedError is Django's error for an operation on an object whose
+// relation field attr holds an unsaved object.
+func unsavedRelatedError(operation, attr string) error {
+	return fmt.Errorf("orm: %s() prohibited to prevent data loss due to unsaved related object '%s'", operation, attr)
 }

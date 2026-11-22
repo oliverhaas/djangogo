@@ -18,6 +18,11 @@ type join struct {
 	// read reports that the statement reads a column of the table. A join that
 	// is only reserved is left out of the FROM clause.
 	read bool
+	// generic and genericOnParent come from the hop of a generic relation: the
+	// ON clause also restricts the content type column, of this table or, with
+	// genericOnParent, of the parent's.
+	generic         *GenericRelation
+	genericOnParent bool
 }
 
 // joinSet is the set of tables a query reads. A single-valued relation
@@ -101,13 +106,15 @@ func (js *joinSet) follow(parent *join, hops []hop, read bool, canReuse map[*joi
 		j := js.find(parent, h, canReuse)
 		if j == nil {
 			j = &join{
-				alias:      js.newAlias(h.target.Table()),
-				model:      h.target,
-				parent:     parent,
-				fromColumn: h.fromColumn,
-				toColumn:   h.toColumn,
-				nullable:   h.nullable,
-				outer:      h.nullable || parent.outer,
+				alias:           js.newAlias(h.target.Table()),
+				model:           h.target,
+				parent:          parent,
+				fromColumn:      h.fromColumn,
+				toColumn:        h.toColumn,
+				nullable:        h.nullable,
+				outer:           h.nullable || parent.outer,
+				generic:         h.generic,
+				genericOnParent: h.genericOnParent,
 			}
 			js.joins = append(js.joins, j)
 		}
@@ -126,7 +133,8 @@ func (js *joinSet) follow(parent *join, hops []hop, read bool, canReuse map[*joi
 // contains that join (same Filter call).
 func (js *joinSet) find(parent *join, h hop, canReuse map[*join]bool) *join {
 	for _, j := range js.joins {
-		if j.parent == parent && j.model == h.target && j.fromColumn == h.fromColumn && j.toColumn == h.toColumn {
+		if j.parent == parent && j.model == h.target && j.fromColumn == h.fromColumn && j.toColumn == h.toColumn &&
+			j.generic == h.generic && j.genericOnParent == h.genericOnParent {
 			if h.many && canReuse != nil && !canReuse[j] {
 				continue
 			}

@@ -235,6 +235,27 @@ func (n colNode) vtype() valueType { return fieldValueType(n.field) }
 // aggregate is false: a column is not an aggregate.
 func (colNode) aggregate() bool { return false }
 
+// castNode casts node to the column type typ, e.g. the text object id of a
+// generic relation to the integer type of the primary key it holds.
+type castNode struct {
+	node sqlNode
+	typ  string
+}
+
+// render writes CAST(node AS typ).
+func (n castNode) render(w *sqlWriter) {
+	w.write("CAST(")
+	n.node.render(w)
+	w.write(" AS " + n.typ + ")")
+}
+
+// vtype is the type of node: the cast keeps the value comparable with the
+// column it is cast for.
+func (n castNode) vtype() valueType { return n.node.vtype() }
+
+// aggregate reports whether node holds an aggregate call.
+func (n castNode) aggregate() bool { return n.node.aggregate() }
+
 // paramNode is a value bound as a query parameter. literal marks the literal
 // of an expression, which has no column next to it that gives it a type.
 type paramNode struct {

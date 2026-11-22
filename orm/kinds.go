@@ -764,6 +764,12 @@ func bindField(d Dialect, f *Field, v any) (any, error) {
 		return bindJSON(f, v)
 	case KindBinary:
 		return bindBinary(f, v)
+	case KindChar, KindText, KindSlug, KindEmail, KindURL:
+		// Bind a number as its text, as Django's CharField.get_prep_value
+		// does, e.g. an integer primary key compared with a text object id.
+		if rv := reflect.ValueOf(v); rv.CanInt() || rv.CanUint() {
+			return fmt.Sprint(v), nil
+		}
 	}
 
 	// Let ValueDialect customize any other kind if needed.

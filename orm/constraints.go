@@ -508,12 +508,7 @@ type instanceValue struct {
 func (v *instanceValue) render(w *sqlWriter) {
 	typ := ""
 	if _, ok := w.d.(LiteralDialect); ok {
-		bare := *v.field
-		bare.Column, bare.Null, bare.Unique, bare.PrimaryKey = "", true, false, false
-		if bare.Kind == KindAuto {
-			bare.Kind = KindBigInt
-		}
-		typ = w.d.ColumnType(&bare)
+		typ = castType(w.d, v.field)
 	} else if v.field.Kind == KindDecimal {
 		typ = "NUMERIC"
 	}

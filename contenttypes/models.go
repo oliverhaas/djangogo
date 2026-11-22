@@ -19,6 +19,21 @@
 // Django ("auth", "permission"). A model registered without an app has an empty
 // app label.
 //
+// # Generic relations
+//
+//	GenericForeignKey("content_type", "object_id")   contenttypes.GenericForeignKey `orm:"ct_field=content_type;fk_field=object_id"`
+//	GenericRelation(TaggedItem)                      contenttypes.GenericRelation[TaggedItem]
+//	tag.content_object                               contenttypes.GetObject(ctx, db, &tag, "content_object")
+//	tag.content_object = obj                         contenttypes.SetObject(ctx, db, &tag, "content_object", obj)
+//	animal.tags.add(tag)                             orm.GenericSet[TaggedItem](db, &animal, "tags").Add(ctx, &tag)
+//	TaggedItem.objects.filter(animal__name="Lion")   orm.Query[TaggedItem](db).Filter("animal__name", "Lion")
+//	tag.animal.all() (related_query_name)            orm.Related[Animal](db, &tag, "animal")
+//	prefetch_related("content_object")               PrefetchRelated("content_object")
+//	GenericPrefetch("content_object", [qs1, qs2])    orm.Prefetch{Lookup: "content_object", QuerySets: []any{qs1, qs2}}
+//
+// Deleting an instance deletes the rows of its generic relations. GetOrCreate
+// and UpdateOrCreate take a generic foreign key in their defaults.
+//
 // # Differences from Django
 //
 // The pair (app_label, model) is unique in Django through a database

@@ -314,8 +314,14 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 	parts := strings.Split(key, lookupSep)
 	c.used = c.used[:0]
 
-	if n, ok := c.annots[parts[0]]; ok {
-		lookup, _, err := c.lookupOf(parts[1:], nil)
+	// An annotation name can hold the separator, such as "links__sum", so try
+	// each prefix of the key, as Django's refs_expression does.
+	for i := 1; i <= len(parts); i++ {
+		n, ok := c.annots[strings.Join(parts[:i], lookupSep)]
+		if !ok {
+			continue
+		}
+		lookup, _, err := c.lookupOf(parts[i:], nil)
 		if err != nil {
 			return nil, nil, err
 		}

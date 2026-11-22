@@ -10,7 +10,9 @@ import (
 )
 
 // Models ported from Django's tests/prefetch_related/models.py.
-// Multi-table inheritance and GenericForeignKey/GenericRelation models are out of scope.
+// Multi-table inheritance is out of scope. The GenericForeignKey and
+// GenericRelation models, which need the contenttypes package, live in
+// contenttypes/django_prefetch_related_test.go.
 
 type prAuthor struct {
 	orm.RelCache

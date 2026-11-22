@@ -246,7 +246,8 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   fallback storage. A message added after the response
   headers are written is lost, and reading `messages` in a template, also in
   `{% if messages %}`, marks them as read.
-- **contenttypes:** no `GenericForeignKey` and no removal of stale content types.
+- **contenttypes:** no generic inline formsets and no removal of stale content
+  types.
 - **Commands:** `runserver` has no autoreload, and `shell` is a query shell over
   the models, not a Go REPL. `collectstatic` has no post-processing (manifest
   or hashed names), and `collectstatic --link` copies the embedded static

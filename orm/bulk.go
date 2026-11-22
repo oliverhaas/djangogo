@@ -78,6 +78,9 @@ func (qs *QuerySet[T]) BulkCreate(ctx context.Context, objs []*T, opts ...BulkOp
 			return fmt.Errorf("orm: bulk create %s: object %d is nil", m.Name(), i)
 		}
 		v := reflect.ValueOf(obj).Elem()
+		if err := syncLoadedRelations(db.Registry(), m, v, "bulk_create"); err != nil {
+			return err
+		}
 		applyDefaults(v, m.fields)
 		applyAutoNowOnCreate(v, m.fields, now)
 		if auto && v.Field(pk.Index).IsZero() {

@@ -82,11 +82,24 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 	// Step 4: collect concrete fields and many-to-many fields.
 	var fields []*Field
 	var m2mFields []*Field
+	var privateFields []*PrivateField
+	var genericRels []*GenericRelation
 	cacheIndex := -1
 	for i := range st.NumField() {
 		sf := st.Field(i)
 		if sf.Type == relCacheType {
 			cacheIndex = i
+			continue
+		}
+		pf, gr, private, err := parsePrivateField(sf, i)
+		if err != nil {
+			return nil, fmt.Errorf("orm: model %s: %w", name, err)
+		}
+		if private {
+			privateFields = append(privateFields, pf)
+			if gr != nil {
+				genericRels = append(genericRels, gr)
+			}
 			continue
 		}
 		f, keep, err := parseStructField(sf, i)
@@ -181,6 +194,14 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 		byM2MName[f.Name] = f
 		byM2MAttr[f.Attr] = f
 	}
+	for _, pf := range privateFields {
+		if other, dup := byAttr[pf.Attr]; dup {
+			return nil, fmt.Errorf("orm: model %s: fields %s and %s share the attribute name %s", name, other.Name, pf.Name, pf.Attr)
+		}
+		if other, dup := byM2MAttr[pf.Attr]; dup {
+			return nil, fmt.Errorf("orm: model %s: fields %s and %s share the attribute name %s", name, other.Name, pf.Name, pf.Attr)
+		}
+	}
 
 	// Apply model-declared field choices (legacy Choices() hook).
 	if err := applyWithChoices(name, byName, byAttr, byColumn, model); err != nil {
@@ -202,6 +223,9 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 		byM2MAttr:  byM2MAttr,
 		goType:     st,
 		cacheIndex: cacheIndex,
+
+		privateFields: privateFields,
+		genericRels:   genericRels,
 	}
 	if err := applyModelMeta(m, model); err != nil {
 		return nil, err
@@ -245,7 +269,7 @@ func (r *Registry) Resolve() error {
 		return err
 	}
 	r.resolveReverseRelations()
-	return nil
+	return r.resolvePrivateFields()
 }
 
 // Freeze marks the registry as read-only. After Freeze, Register will return

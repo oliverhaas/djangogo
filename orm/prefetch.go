@@ -29,6 +29,12 @@ type Prefetch struct {
 	// target model; ValuesQuerySet, ValuesListQuerySet, and RawQuerySet are
 	// rejected.
 	QuerySet any
+	// QuerySets holds the querysets of a lookup that ends in a generic
+	// foreign key, at most one per model, Django's GenericPrefetch: the
+	// objects of a model that has a queryset here are loaded through it.
+	// QuerySet, when set, counts as one more entry. A lookup that ends in any
+	// other relation takes one queryset at most.
+	QuerySets []any
 	// ToAttr optionally stores the prefetched result under a custom cache key
 	// on each parent instance's RelCache instead of the relation's default
 	// cache slot. Read it with orm.Prefetched[T] or orm.PrefetchedOne[T].
@@ -83,8 +89,11 @@ func parsePrefetchLookups(lookups []any) (specs []Prefetch, reset bool, err erro
 		if spec.Lookup == "" {
 			return nil, false, errors.New("orm: prefetch_related lookup must not be empty")
 		}
-		if spec.QuerySet != nil {
-			if _, err := extractPrefetchQuery(spec.QuerySet); err != nil {
+		for _, qs := range append([]any{spec.QuerySet}, spec.QuerySets...) {
+			if qs == nil {
+				continue
+			}
+			if _, err := extractPrefetchQuery(qs); err != nil {
 				return nil, false, err
 			}
 		}
@@ -201,6 +210,7 @@ type prefetchTask struct {
 	toAttrParts  []string
 	rawLookup    string
 	finalQS      *query
+	finalQSs     []*query // Prefetch.QuerySets
 	finalToAttr  string
 }
 
@@ -209,10 +219,26 @@ func (t *prefetchTask) prefetchTo(level int) string {
 	return strings.Join(t.toAttrParts[:level+1], lookupSep)
 }
 
-// prefetchDone caches the instances already reached at a prefetchTo path.
-type prefetchDone struct {
+// prefetchGroup holds the instances of one model that a prefetch path
+// reached. A path through a generic foreign key reaches several models.
+type prefetchGroup struct {
 	model *Model
 	objs  []reflect.Value
+}
+
+// addPrefetchGroup adds objs, instances of m, to groups, merging them into
+// the group of m when there is one.
+func addPrefetchGroup(groups []prefetchGroup, m *Model, objs []reflect.Value) []prefetchGroup {
+	if m == nil || len(objs) == 0 {
+		return groups
+	}
+	for i := range groups {
+		if groups[i].model == m {
+			groups[i].objs = append(groups[i].objs, objs...)
+			return groups
+		}
+	}
+	return append(groups, prefetchGroup{model: m, objs: objs})
 }
 
 // normalizePrefetchTasks turns Prefetch options into queued tasks, optionally
@@ -238,6 +264,17 @@ func normalizePrefetchTasks(specs []Prefetch, prefix string) ([]prefetchTask, er
 				return nil, err
 			}
 		}
+		var customQs []*query
+		for _, qs := range spec.QuerySets {
+			if qs == nil {
+				continue
+			}
+			q, err := extractPrefetchQuery(qs)
+			if err != nil {
+				return nil, err
+			}
+			customQs = append(customQs, q)
+		}
 		through := make([]string, 0, len(prefixParts)+len(parts))
 		through = append(through, prefixParts...)
 		through = append(through, parts...)
@@ -252,6 +289,7 @@ func normalizePrefetchTasks(specs []Prefetch, prefix string) ([]prefetchTask, er
 			toAttrParts:  toAttrs,
 			rawLookup:    spec.Lookup,
 			finalQS:      customQ,
+			finalQSs:     customQs,
 			finalToAttr:  spec.ToAttr,
 		})
 	}
@@ -270,6 +308,9 @@ const (
 	stepForwardM2M
 	stepReverseM2M
 	stepCachedAttr
+	stepGeneric
+	stepGenericOwner // the related_query_name of a generic relation
+	stepObject       // a private field that refers to an instance of any model
 )
 
 // prefetchStep describes one resolved hop from a parent model to its target.
@@ -277,6 +318,8 @@ type prefetchStep struct {
 	kind        prefetchStepKind
 	field       *Field
 	rev         *ReverseRelation
+	generic     *GenericRelation
+	private     *PrivateField // the field of a stepObject
 	targetModel *Model
 	through     *Model
 	sourceFK    *Field // FK on through pointing to parent
@@ -338,6 +381,18 @@ func resolvePrefetchStep(m *Model, objs []reflect.Value, part string) prefetchSt
 			}
 		}
 	}
+	if gr, ok := m.GenericRelation(part); ok && gr.Related != nil {
+		return prefetchStep{kind: stepGeneric, generic: gr, targetModel: gr.Related, cacheName: gr.Name}
+	}
+	if gr, ok := m.byGenericQuery[part]; ok {
+		return prefetchStep{kind: stepGenericOwner, generic: gr, targetModel: gr.Model, cacheName: part}
+	}
+	if pf, ok := m.PrivateField(part); ok {
+		if _, ok := reflect.Zero(pf.Type).Interface().(ObjectPrefetcher); ok {
+			return prefetchStep{kind: stepObject, private: pf, cacheName: pf.Attr, single: true}
+		}
+		return prefetchStep{kind: stepNone, nonRelField: true}
+	}
 	// Check whether part was already populated as a custom ToAttr on objs.
 	for _, sv := range objs {
 		if hasRelCacheKey(m, sv, part) {
@@ -392,6 +447,9 @@ func toAttrConflicts(m *Model, toAttr string) bool {
 	if _, found, amb := m.lookupReverseAccessor(toAttr); found || amb {
 		return true
 	}
+	if _, ok := m.PrivateField(toAttr); ok {
+		return true
+	}
 	return false
 }
 
@@ -404,7 +462,8 @@ func prefetchRelatedObjects(ctx context.Context, db *DB, rootModel *Model, roots
 	if err != nil {
 		return err
 	}
-	done := make(map[string]*prefetchDone)
+	// done holds the instances already reached at each prefetchTo path.
+	done := make(map[string][]prefetchGroup)
 
 	for len(queue) > 0 {
 		task := queue[0]
@@ -412,7 +471,7 @@ func prefetchRelatedObjects(ctx context.Context, db *DB, rootModel *Model, roots
 
 		fullKey := task.prefetchTo(len(task.throughParts) - 1)
 		if _, seen := done[fullKey]; seen {
-			if task.finalQS != nil {
+			if task.finalQS != nil || len(task.finalQSs) > 0 {
 				return fmt.Errorf(
 					"orm: '%s' lookup was already seen with a different queryset; adjust the ordering of your lookups",
 					fullKey,
@@ -421,99 +480,21 @@ func prefetchRelatedObjects(ctx context.Context, db *DB, rootModel *Model, roots
 			continue
 		}
 
-		curModel := rootModel
-		curObjs := roots
-
+		groups := []prefetchGroup{{model: rootModel, objs: roots}}
 		for level, part := range task.throughParts {
-			if len(curObjs) == 0 {
+			if len(groups) == 0 {
 				break
 			}
-			isLast := level == len(task.throughParts)-1
 			pathKey := task.prefetchTo(level)
-
 			if prev, ok := done[pathKey]; ok {
-				curModel = prev.model
-				curObjs = prev.objs
+				groups = prev
 				continue
 			}
-
-			step := resolvePrefetchStep(curModel, curObjs, part)
-			if step.kind == stepNone {
-				if step.nonRelField {
-					return fmt.Errorf(
-						"orm: '%s' does not resolve to an item that supports prefetching - this is an invalid parameter to prefetch_related()",
-						task.rawLookup,
-					)
-				}
-				return fmt.Errorf(
-					"orm: Cannot find '%s' on %s object, '%s' is an invalid parameter to prefetch_related()",
-					part, curModel.Name(), task.rawLookup,
-				)
+			next, nestedSpecs, err := prefetchLevel(ctx, db, &task, level, groups, part)
+			if err != nil {
+				return err
 			}
-
-			if step.kind == stepCachedAttr {
-				if isLast {
-					return fmt.Errorf(
-						"orm: '%s' does not resolve to an item that supports prefetching - this is an invalid parameter to prefetch_related()",
-						task.rawLookup,
-					)
-				}
-				nextModel, nextObjs := collectCachedAttr(curModel, curObjs, part)
-				curModel = nextModel
-				curObjs = nextObjs
-				continue
-			}
-
-			var (
-				customQ *query
-				toAttr  string
-			)
-			if isLast {
-				customQ = task.finalQS
-				toAttr = task.finalToAttr
-			}
-			if toAttr != "" && toAttrConflicts(curModel, toAttr) {
-				return fmt.Errorf("orm: to_attr=%s conflicts with a field on the %s model", toAttr, curModel.Name())
-			}
-
-			// Strip nested prefetches from customQ so they merge into the queue
-			// with pathKey as prefix, matching Django's deduplication.
-			var nestedSpecs []Prefetch
-			if customQ != nil {
-				if customQ.model != step.targetModel {
-					return fmt.Errorf(
-						"orm: prefetch_related queryset for '%s' is for %s, expected %s",
-						task.rawLookup, customQ.model.Name(), step.targetModel.Name(),
-					)
-				}
-				if len(customQ.prefetchRelated) > 0 {
-					nestedSpecs = append([]Prefetch(nil), customQ.prefetchRelated...)
-					customQ = customQ.clone()
-					customQ.prefetchRelated = nil
-				}
-			}
-
-			cacheKey := step.cacheName
-			if toAttr != "" {
-				cacheKey = toAttr
-			}
-
-			toFetch := filterUnfetched(curModel, curObjs, step, cacheKey, toAttr != "")
-			var nextObjs []reflect.Value
-			if len(toFetch) > 0 {
-				var err error
-				nextObjs, err = prefetchOneLevel(ctx, db, curModel, toFetch, step, customQ, cacheKey, toAttr != "", nestedSpecs)
-				if err != nil {
-					return err
-				}
-				if len(toFetch) < len(curObjs) {
-					nextObjs = collectStepObjects(curModel, curObjs, step, cacheKey, toAttr != "")
-				}
-			} else {
-				nextObjs = collectStepObjects(curModel, curObjs, step, cacheKey, toAttr != "")
-			}
-
-			done[pathKey] = &prefetchDone{model: step.targetModel, objs: nextObjs}
+			done[pathKey] = next
 			if len(nestedSpecs) > 0 {
 				added, err := normalizePrefetchTasks(nestedSpecs, pathKey)
 				if err != nil {
@@ -521,10 +502,150 @@ func prefetchRelatedObjects(ctx context.Context, db *DB, rootModel *Model, roots
 				}
 				queue = append(added, queue...)
 			}
-
-			curModel = step.targetModel
-			curObjs = nextObjs
+			groups = next
 		}
 	}
 	return nil
+}
+
+// prefetchLevel loads the relation part of every group of instances at level
+// of task. It returns the instances it reached, grouped by model, and the
+// nested lookups of the custom queryset, which join the queue.
+func prefetchLevel(
+	ctx context.Context,
+	db *DB,
+	task *prefetchTask,
+	level int,
+	groups []prefetchGroup,
+	part string,
+) ([]prefetchGroup, []Prefetch, error) {
+	isLast := level == len(task.throughParts)-1
+	var (
+		querysets []*query
+		toAttr    string
+	)
+	if isLast {
+		if task.finalQS != nil {
+			querysets = append(querysets, task.finalQS)
+		}
+		querysets = append(querysets, task.finalQSs...)
+		toAttr = task.finalToAttr
+	}
+	isToAttr := toAttr != ""
+
+	var (
+		next        []prefetchGroup
+		nestedSpecs []Prefetch
+		generic     []genericJob
+		customQ     *query
+		customDone  bool
+	)
+	// singleQuery returns the custom queryset of a relation other than a
+	// generic foreign key. Its nested prefetches are stripped so they merge
+	// into the queue with pathKey as prefix, matching Django's deduplication.
+	singleQuery := func() (*query, error) {
+		if customDone {
+			return customQ, nil
+		}
+		customDone = true
+		if len(querysets) > 1 {
+			return nil, fmt.Errorf("orm: prefetch_related lookup '%s' takes one queryset, got %d",
+				task.rawLookup, len(querysets))
+		}
+		if len(querysets) == 1 {
+			customQ = querysets[0]
+			if len(customQ.prefetchRelated) > 0 {
+				nestedSpecs = append([]Prefetch(nil), customQ.prefetchRelated...)
+				customQ = customQ.clone()
+				customQ.prefetchRelated = nil
+			}
+		}
+		return customQ, nil
+	}
+
+	for _, g := range groups {
+		step := resolvePrefetchStep(g.model, g.objs, part)
+		switch step.kind {
+		case stepNone:
+			if step.nonRelField {
+				return nil, nil, fmt.Errorf(
+					"orm: '%s' does not resolve to an item that supports prefetching - this is an invalid parameter to prefetch_related()",
+					task.rawLookup,
+				)
+			}
+			return nil, nil, fmt.Errorf(
+				"orm: Cannot find '%s' on %s object, '%s' is an invalid parameter to prefetch_related()",
+				part, g.model.Name(), task.rawLookup,
+			)
+		case stepCachedAttr:
+			if isLast {
+				return nil, nil, fmt.Errorf(
+					"orm: '%s' does not resolve to an item that supports prefetching - this is an invalid parameter to prefetch_related()",
+					task.rawLookup,
+				)
+			}
+			m, objs := collectCachedAttr(g.model, g.objs, part)
+			next = addPrefetchGroup(next, m, objs)
+			continue
+		}
+		if isToAttr && toAttrConflicts(g.model, toAttr) {
+			return nil, nil, fmt.Errorf("orm: to_attr=%s conflicts with a field on the %s model", toAttr, g.model.Name())
+		}
+		cacheKey := step.cacheName
+		if isToAttr {
+			cacheKey = toAttr
+		}
+
+		if step.kind == stepObject {
+			reached, err := prefetchObjects(ctx, db, g, step, querysets, cacheKey, isToAttr)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, r := range reached {
+				next = addPrefetchGroup(next, r.model, r.objs)
+			}
+			continue
+		}
+
+		relQ, err := singleQuery()
+		if err != nil {
+			return nil, nil, err
+		}
+		if relQ != nil && relQ.model != step.targetModel {
+			return nil, nil, fmt.Errorf(
+				"orm: prefetch_related queryset for '%s' is for %s, expected %s",
+				task.rawLookup, relQ.model.Name(), step.targetModel.Name(),
+			)
+		}
+		toFetch := filterUnfetched(g.model, g.objs, step, cacheKey, isToAttr)
+		if step.kind == stepGeneric {
+			// Generic relations of several models load with one query.
+			generic = append(generic, genericJob{group: g, step: step, parents: toFetch, cacheKey: cacheKey})
+			continue
+		}
+		var objs []reflect.Value
+		if len(toFetch) > 0 {
+			objs, err = prefetchOneLevel(ctx, db, g.model, toFetch, step, relQ, cacheKey, isToAttr, nestedSpecs)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(toFetch) < len(g.objs) {
+				objs = collectStepObjects(g.model, g.objs, step, cacheKey, isToAttr)
+			}
+		} else {
+			objs = collectStepObjects(g.model, g.objs, step, cacheKey, isToAttr)
+		}
+		next = addPrefetchGroup(next, step.targetModel, objs)
+	}
+
+	if len(generic) > 0 {
+		if err := prefetchGeneric(ctx, db, generic, customQ); err != nil {
+			return nil, nil, err
+		}
+		for _, job := range generic {
+			objs := collectStepObjects(job.group.model, job.group.objs, job.step, job.cacheKey, isToAttr)
+			next = addPrefetchGroup(next, job.step.targetModel, objs)
+		}
+	}
+	return next, nestedSpecs, nil
 }

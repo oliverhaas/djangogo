@@ -39,9 +39,17 @@ type hop struct {
 	// nullable reports that the hop may match no row, so that a filter must
 	// not silently drop the starting row (a nullable foreign key).
 	nullable bool
-	// many reports that the hop may match several rows. No relation sets it
-	// yet; it is the flag a reverse foreign key or a many-to-many hop needs.
+	// many reports that the hop may match several rows: a reverse foreign key,
+	// a many-to-many relation or a generic relation.
 	many bool
+	// generic is set when the hop follows a generic relation. The join then
+	// also requires the content type column of the related table to refer to
+	// the content type of generic.Model.
+	generic *GenericRelation
+	// genericOnParent reports that the content type column belongs to the
+	// table the hop starts from: the hop leads from the related model back
+	// to the model of the generic relation (its related_query_name).
+	genericOnParent bool
 }
 
 // relationPath describes how a named relation of a model is traversed.
@@ -160,6 +168,12 @@ func lookupName(m *Model, name string) (*Field, *relationPath, bool) {
 			reverse: rev,
 		}, true
 	}
+	if gr, ok := m.GenericRelation(name); ok && gr.Related != nil {
+		return nil, genericPath(gr), true
+	}
+	if gr, ok := m.byGenericQuery[name]; ok {
+		return nil, genericQueryPath(gr), true
+	}
 	return nil, nil, false
 }
 
@@ -208,6 +222,12 @@ func fieldChoices(m *Model, extra []string) string {
 		if !rev.Hidden {
 			seen[rev.QueryName] = true
 		}
+	}
+	for _, pf := range m.privateFields {
+		seen[pf.Attr] = true
+	}
+	for name := range m.byGenericQuery {
+		seen[name] = true
 	}
 	for _, name := range extra {
 		seen[name] = true
@@ -287,6 +307,14 @@ func resolvePath(m *Model, parts []string, extra []string) (fieldPath, error) {
 		}
 		f, rel, ok := lookupName(scope, name)
 		if !ok {
+			if _, private := scope.PrivateField(name); private {
+				return p, &FieldError{
+					Model: m.Name(),
+					Message: "Field '" + name + "' does not generate an automatic reverse relation and " +
+						"therefore cannot be used for reverse querying. If it is a GenericForeignKey, " +
+						"consider adding a GenericRelation.",
+				}
+			}
 			if i == 0 {
 				return p, &FieldError{
 					Model:   m.Name(),

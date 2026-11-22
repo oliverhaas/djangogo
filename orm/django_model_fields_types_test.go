@@ -508,6 +508,19 @@ func TestCharAndTextFieldEmoji(t *testing.T) {
 	})
 }
 
+// Ported from Django: tests/model_fields/test_charfield.py::TestCharField.test_lookup_integer_in_charfield
+// Ported from Django: tests/model_fields/test_textfield.py::TextFieldTests.test_lookup_integer_in_textfield
+func TestCharAndTextFieldLookupInteger(t *testing.T) {
+	djangotest.EachDB(t, []any{&charTextPost{}}, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		for _, filter := range [][]any{{"title", 9}, {"body", int64(24)}, {"title__in", []int{9}}} {
+			n, err := orm.Query[charTextPost](db).Filter(filter...).Count(ctx)
+			djangotest.AssertEqual(t, err, nil)
+			djangotest.AssertEqual(t, n, int64(0))
+		}
+	})
+}
+
 // Ported from Django: tests/model_fields/test_booleanfield.py::BooleanFieldTests.test_return_type
 // Ported from Django: tests/model_fields/test_booleanfield.py::BooleanFieldTests.test_select_related
 func TestBooleanFieldReturnTypeAndSelectRelated(t *testing.T) {
