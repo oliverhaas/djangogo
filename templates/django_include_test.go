@@ -369,6 +369,26 @@ func TestExtendSelfError(t *testing.T) {
 	}
 }
 
+// TestExtendsNotFirstTag checks that {% extends %} after another tag is an
+// error that names the template.
+//
+// Ported from Django: tests/template_tests/test_extends.py::ExtendsBehaviorTests.test_extends_not_first_tag_in_extended_template
+// Ported from Django: tests/template_tests/test_extends.py::ExtendsBehaviorTests.test_extends_not_first_tag_in_extended_template_from_string
+func TestExtendsNotFirstTag(t *testing.T) {
+	const src = "{% block content %}B{% endblock %}{% extends 'base.html' %}"
+	engine := templates.New(templates.MapSource("locmem", map[string]string{"index.html": src}))
+	_, err := engine.Render("index.html", nil)
+	want := "{% extends 'base.html' %} must be the first tag in 'index.html'."
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("index.html: error = %v, want one with %q", err, want)
+	}
+	_, err = engine.RenderString(src, nil)
+	want = "{% extends 'base.html' %} must be the first tag in the template."
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("string: error = %v, want one with %q", err, want)
+	}
+}
+
 // TestExtendsIncludeMissing checks that the missing template is named when a
 // parent that exists includes one that does not.
 //

@@ -187,8 +187,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   it, and PostgreSQL rejects it.
 - **Templates:** the engine is built on pongo2. The `i18n`, `l10n`, `tz` and
   `cache` tag libraries are missing, and output is English only.
-  `{% extends %}` takes only a literal name, and `{% lorem %}` is pongo2's tag. A template never runs a
-  query: a relation renders empty unless the view loaded it with
+  `{% lorem %}` is pongo2's tag. A template never runs a query: a relation renders empty unless the view loaded it with
   `SelectRelated` or `PrefetchRelated`.
 - **Forms:** no file fields or option groups, no localization and no custom
   renderers. A model formset has no to_field relations. A template

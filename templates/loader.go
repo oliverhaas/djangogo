@@ -201,9 +201,10 @@ func (l *sourceLoader) find(name string) (data []byte, found bool, tried []Tried
 // of a failed search, the read error of a source, or an inheritance cycle. It
 // returns nil when the template loads fine and the failure lies elsewhere.
 func (l *sourceLoader) missing(name string) error {
-	base, _, isPartial := cutPartial(name)
+	base, overrides := parseVariant(name)
+	base, _, isPartial := cutPartial(base)
 	if base == "" {
-		return &TemplateDoesNotExist{Name: name}
+		return &TemplateDoesNotExist{Name: displayName(name)}
 	}
 	data, found, tried, err := l.find(base)
 	if err != nil {
@@ -215,7 +216,7 @@ func (l *sourceLoader) missing(name string) error {
 	case isPartial:
 		return nil
 	}
-	return l.checkExtends(name, data)
+	return l.checkExtends(base, data, overrides)
 }
 
 // cutPartial splits "page.html#card" into the template name and the partial
@@ -240,10 +241,11 @@ func parentOf(src []byte) string {
 // checkExtends follows the {% extends %} chain of a template and reports a
 // cycle. pongo2 compiles a parent while it compiles the child, so a template
 // that extends itself, directly or through others, would recurse until the
-// stack is exhausted.
-func (l *sourceLoader) checkExtends(name string, src []byte) error {
+// stack is exhausted. overrides give the parents of the templates whose
+// {% extends %} has a variable, see variantName.
+func (l *sourceLoader) checkExtends(name string, src []byte, overrides []extendsOverride) error {
 	chain := []string{name}
-	for parent := parentOf(src); parent != ""; {
+	for parent := parentIn(name, src, overrides); parent != ""; {
 		if slices.Contains(chain, parent) {
 			return fmt.Errorf("templates: template %q extends itself (%s -> %s)",
 				name, strings.Join(chain, " -> "), parent)
@@ -252,9 +254,18 @@ func (l *sourceLoader) checkExtends(name string, src []byte) error {
 		// A parent that is missing or unreadable ends the chain; pongo2 reports
 		// it when it compiles the child.
 		data, _, _, _ := l.find(parent)
-		parent = parentOf(data)
+		parent = parentIn(parent, data, overrides)
 	}
 	return nil
+}
+
+// parentIn returns the parent of the template name with the source src: the
+// one overrides give, or else the one its {% extends %} names.
+func parentIn(name string, src []byte, overrides []extendsOverride) string {
+	if parent, ok := overrideOf(overrides, name); ok {
+		return parent
+	}
+	return parentOf(src)
 }
 
 // Abs returns name unchanged: as in Django a name is relative to the sources,
@@ -266,9 +277,12 @@ func (l *sourceLoader) Abs(_, name string) string { return name }
 //
 // A name such as "page.html#card" stands for the partial card of
 // page.html, Django's template partials: Get returns a source that renders
-// only that partial, see partialSource.
+// only that partial, see partialSource. A name of variantName stands for a
+// template with the parents a render gave its {% extends %} tags with a
+// variable, see variantSource.
 func (l *sourceLoader) Get(name string) (io.Reader, error) {
-	base, partial, isPartial := cutPartial(name)
+	base, overrides := parseVariant(name)
+	base, partial, isPartial := cutPartial(base)
 	if base == "" {
 		return nil, &TemplateDoesNotExist{Name: name}
 	}
@@ -280,13 +294,16 @@ func (l *sourceLoader) Get(name string) (io.Reader, error) {
 		return nil, &TemplateDoesNotExist{Name: base}
 	}
 	if isPartial {
-		return bytes.NewReader(partialSource(data, partial)), nil
+		return bytes.NewReader(partialSource(data, base, partial)), nil
 	}
-	if err := l.checkExtends(name, data); err != nil {
+	if err := l.checkExtends(base, data, overrides); err != nil {
 		return nil, err
 	}
-	l.noteParent(name, data)
-	return bytes.NewReader(djangoSyntax(data)), nil
+	l.noteParent(base, data)
+	if overrides != nil {
+		return bytes.NewReader(variantSource(data, base, overrides)), nil
+	}
+	return bytes.NewReader(djangoSyntax(data, base)), nil
 }
 
 // noteParent records the template that the source of name extends.

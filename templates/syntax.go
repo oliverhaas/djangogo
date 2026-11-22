@@ -42,6 +42,8 @@ const outFilter = "_out"
 //   - the key of {% regroup %}, see regroupSyntax;
 //   - the partial names of {% partialdef %} and {% partial %}, see
 //     partialSyntax;
+//   - {% extends %}, see extendsSyntax, and the names of {% block %}, which
+//     Django checks;
 //   - a backslash in a string literal, see keepBackslashes;
 //   - string literals, which Django never escapes, see trustLiterals and
 //     safeLiteral;
@@ -50,17 +52,25 @@ const outFilter = "_out"
 //     noEscapeFilters;
 //   - the final filter of every {{ }} tag, see filterOut.
 //
-// A rewrite keeps the line of every tag, so the lines in error messages stay
-// right; a column may shift by a few characters.
-func djangoSyntax(src []byte) []byte { return rewrite(src, false) }
+// name is the template name, "" for a template given as a string. A rewrite
+// keeps the line of every tag but {% extends %}, so the lines in error
+// messages stay right; a column can shift by a few characters.
+func djangoSyntax(src []byte, name string) []byte { return rewrite(src, name, nil) }
 
-// rewrite is djangoSyntax. With dropExtends it also removes the
-// {% extends %} tag, for the source of a partial, see partialSource.
-func rewrite(src []byte, dropExtends bool) []byte {
+// rewrite is djangoSyntax with extendsTo, which decides the parent of the
+// {% extends %} tag. It gets the parent the tag names, with literal set for
+// a string literal, and returns the parent to extend instead with ok set.
+// An empty parent removes the tag.
+func rewrite(src []byte, name string, extendsTo func(parent string, literal bool) (to string, ok bool)) []byte {
 	if bytes.IndexByte(src, '{') < 0 {
 		return src
 	}
-	r := rewriter{autoescape: []bool{true}, out: make([]byte, 0, len(src)+len(src)/8), dropExtends: dropExtends}
+	r := rewriter{
+		autoescape: []bool{true},
+		out:        make([]byte, 0, len(src)+len(src)/8),
+		name:       name,
+		extendsTo:  extendsTo,
+	}
 	last := 0
 	for _, loc := range tagRe.FindAllIndex(src, -1) {
 		r.addText(src[last:loc[0]])
@@ -84,8 +94,23 @@ type rewriter struct {
 	verbatim string
 	// commentTag is, inside a {% comment %} block, the tag that opened it.
 	commentTag []byte
-	// dropExtends removes the {% extends %} tag.
-	dropExtends bool
+	// name and extendsTo are the arguments of rewrite.
+	name      string
+	extendsTo func(parent string, literal bool) (string, bool)
+	// sawTag is set after a tag other than {# #}. {% extends %} must come
+	// before such a tag.
+	sawTag bool
+	// extended is set after the {% extends %} tag.
+	extended bool
+	// extendsTag is the {% extends %} tag with a string literal. finish puts
+	// it at the end: pongo2 loads the parent when it parses the tag, and a
+	// syntax error in the rest must come first, as in Django.
+	extendsTag []byte
+	// extendsVar is set when a {% extends %} with a variable wraps the rest
+	// of the template, see extendsVarTag.
+	extendsVar bool
+	// blocks holds the names of the {% block %} tags.
+	blocks map[string]bool
 }
 
 // addText adds text of the template. Inside a comment only its line breaks
@@ -116,6 +141,10 @@ func (r *rewriter) finish() {
 	default:
 		r.emit(nil)
 	}
+	if r.extendsVar {
+		r.out = append(r.out, "{% end"+extendsVarTag+" %}"...)
+	}
+	r.out = append(r.out, r.extendsTag...)
 }
 
 // token handles one tag, as Django's lexer and parser see it.
@@ -132,6 +161,7 @@ func (r *rewriter) token(tag []byte) {
 	}
 	if kind == '%' && (content == "verbatim" || strings.HasPrefix(content, "verbatim ")) {
 		r.verbatim = "end" + content
+		r.sawTag = true
 		return
 	}
 	if r.commentTag != nil {
@@ -153,6 +183,7 @@ func (r *rewriter) token(tag []byte) {
 	case '#':
 	case '{':
 		r.emit(r.variable(tag))
+		r.sawTag = true
 	default:
 		r.emit(r.block(tag))
 	}
@@ -175,15 +206,25 @@ func (r *rewriter) variable(tag []byte) []byte {
 // block rewrites a {% %} tag.
 func (r *rewriter) block(tag []byte) []byte {
 	_, name, args, _ := tagParts(tag)
+	if name == "extends" {
+		return r.extendsSyntax(tag)
+	}
+	r.sawTag = true
 	switch name {
 	case "comment":
 		r.commentTag = tag
 		return nil
 	case "partialdef", "endpartialdef", "partial":
 		return partialSyntax(tag)
-	case "extends":
-		if r.dropExtends {
-			return nil
+	case "block":
+		if bits := splitBits(args); len(bits) == 1 {
+			if r.blocks[bits[0]] {
+				return syntaxError("'block' tag with name '" + bits[0] + "' appears more than once")
+			}
+			if r.blocks == nil {
+				r.blocks = map[string]bool{}
+			}
+			r.blocks[bits[0]] = true
 		}
 	case "autoescape":
 		switch strings.TrimSpace(args) {
@@ -225,6 +266,47 @@ func (r *rewriter) block(tag []byte) []byte {
 		repl = regroupSyntax(repl)
 	}
 	return repl
+}
+
+// extendsSyntax checks a {% extends %} tag as Django does: one argument,
+// once in a template and before any other tag. A tag with a string literal
+// goes to the end of the source, see rewriter.extendsTag, and one with a
+// variable wraps the rest of the template, see extendsVarTag.
+func (r *rewriter) extendsSyntax(tag []byte) []byte {
+	head, _, args, tail := tagParts(tag)
+	bits := splitBits(args)
+	switch {
+	case len(bits) != 1:
+		return syntaxError("'extends' takes one argument")
+	case r.sawTag:
+		origin := "the template"
+		if r.name != "" {
+			origin = pyRepr(r.name)
+		}
+		contents := strings.TrimSpace(string(tag[2 : len(tag)-2]))
+		return syntaxError("{% " + contents + " %} must be the first tag in " + origin + ".")
+	case r.extended:
+		return syntaxError("'extends' cannot appear more than once in the same template")
+	}
+	r.extended = true
+	parent, literal := bits[0], isLiteral(bits[0])
+	if literal {
+		parent = parent[1 : len(parent)-1]
+	}
+	if r.extendsTo != nil {
+		if to, ok := r.extendsTo(parent, literal); ok {
+			if to != "" {
+				r.extendsTag = []byte(head + " " + quoteName(to) + " " + tail)
+			}
+			return nil
+		}
+	}
+	if literal {
+		r.extendsTag = r.expression(tag)
+		return nil
+	}
+	r.extendsVar = true
+	return []byte("{% " + extendsVarTag + " " + quoteName(bits[0]) + " " + string(r.expression([]byte(bits[0]))) + " %}")
 }
 
 // partialSyntax checks the arguments of {% partialdef %}, {% endpartialdef %}

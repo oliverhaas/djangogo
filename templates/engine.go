@@ -55,6 +55,12 @@ type renderState struct {
 	// tagState holds what tags such as {% cycle %} remember during the
 	// render of one template, keyed by the tag, see tagState.
 	tagState map[any]any
+	// current is the name of the template being rendered, or of its
+	// variant, see variantName. It is "" for a template given as a string,
+	// whose source is source. A {% extends %} with a variable renders a
+	// variant of it.
+	current string
+	source  []byte
 }
 
 // stateFrom returns the renderState of the render ctx belongs to, or nil for a
@@ -155,7 +161,7 @@ type pongoError struct {
 }
 
 // Error returns pongo2's message, with the template position.
-func (e *pongoError) Error() string { return e.err.Error() }
+func (e *pongoError) Error() string { return displayName(e.err.Error()) }
 
 // Unwrap returns the pongo2 error and its cause.
 func (e *pongoError) Unwrap() []error {
@@ -215,7 +221,7 @@ func (e *Engine) load(name string) (*pongo2.Template, error) {
 		return nil, fmt.Errorf("templates: load %q: %w", name, &TemplateDoesNotExist{Name: name})
 	}
 	var tpl *pongo2.Template
-	err := guard(fmt.Sprintf("load %q", name), func() (err error) {
+	err := guard(fmt.Sprintf("load %q", displayName(name)), func() (err error) {
 		tpl, err = e.set.FromCache(name)
 		return err
 	})
@@ -223,7 +229,7 @@ func (e *Engine) load(name string) (*pongo2.Template, error) {
 		return nil, err
 	}
 	if err != nil {
-		return nil, fmt.Errorf("templates: load %q: %w", name, e.loadError(err))
+		return nil, fmt.Errorf("templates: load %q: %w", displayName(name), e.loadError(err))
 	}
 	return tpl, nil
 }
@@ -269,6 +275,10 @@ func (e *Engine) render(name string, ctx map[string]any, st *renderState) (strin
 	if err != nil {
 		return "", err
 	}
+	if st == nil {
+		st = &renderState{}
+	}
+	st.current = name
 	var out string
 	err = guard(fmt.Sprintf("render %q", name), func() (err error) {
 		out, err = tpl.Execute(e.context(ctx, st))
@@ -287,7 +297,7 @@ func (e *Engine) RenderTo(w io.Writer, name string, ctx map[string]any) error {
 		return err
 	}
 	err = guard(fmt.Sprintf("render %q", name), func() error {
-		return tpl.ExecuteWriter(e.context(ctx, nil), w)
+		return tpl.ExecuteWriter(e.context(ctx, &renderState{current: name}), w)
 	})
 	if err != nil && !errors.Is(err, errPanic) {
 		err = fmt.Errorf("templates: render %q: %w", name, wrapPongo(err))
@@ -306,7 +316,7 @@ func (e *Engine) RenderString(src string, ctx map[string]any) (string, error) {
 func (e *Engine) renderString(src string, ctx map[string]any, st *renderState) (string, error) {
 	var tpl *pongo2.Template
 	err := guard("parse string", func() (err error) {
-		tpl, err = e.set.FromBytes(djangoSyntax([]byte(src)))
+		tpl, err = e.set.FromBytes(djangoSyntax([]byte(src), ""))
 		return err
 	})
 	if err != nil {
@@ -315,6 +325,10 @@ func (e *Engine) renderString(src string, ctx map[string]any, st *renderState) (
 		}
 		return "", fmt.Errorf("templates: parse string: %w", e.loadError(err))
 	}
+	if st == nil {
+		st = &renderState{}
+	}
+	st.source = []byte(src)
 	var out string
 	err = guard("render string", func() (err error) {
 		out, err = tpl.Execute(e.context(ctx, st))

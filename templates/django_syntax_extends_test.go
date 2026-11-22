@@ -1,6 +1,10 @@
 package templates_test
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/oliverhaas/djangogo/templates"
@@ -58,9 +62,7 @@ var inheritanceTemplates = map[string]string{
 // TestInheritance ports Django's InheritanceTests. Each row renders one named
 // template of inheritanceTemplates.
 //
-// Rows that need {% extends %} with a variable are skipped: this engine only
-// extends a literal template name. Error rows assert that an error happens,
-// not its text, because the messages are pongo2's.
+// An error row gives the text the message holds.
 //
 // Ported from Django: tests/template_tests/syntax_tests/test_extends.py::InheritanceTests.test_inheritance01
 // Ported from Django: tests/template_tests/syntax_tests/test_extends.py::InheritanceTests.test_inheritance02
@@ -114,53 +116,53 @@ func TestInheritance(t *testing.T) {
 		ctx     map[string]any
 		want    string
 		skip    string
-		wantErr bool
+		wantErr string
 	}{
-		{"inheritance01", "inheritance01", nil, "1&3_", "", false},
-		{"inheritance02", "inheritance02", nil, "1234", "", false},
-		{"inheritance03", "inheritance03", nil, "1234", "", false},
-		{"inheritance04", "inheritance04", nil, "1&3_", "", false},
-		{"inheritance05", "inheritance05", nil, "1234", "", false},
-		{"inheritance06", "inheritance06", map[string]any{"foo": "inheritance02"}, "1234", "{% extends %} with a variable is not supported; see fidelity/divergences.md", false},
-		{"inheritance07", "inheritance07", nil, "1&35", "", false},
-		{"inheritance08", "inheritance08", nil, "1235", "", false},
-		{"inheritance09", "inheritance09", nil, "1&3_", "", false},
-		{"inheritance10", "inheritance10", nil, "1&3_", "", false},
-		{"inheritance11", "inheritance11", nil, "1234", "", false},
-		{"inheritance12", "inheritance12", nil, "1235", "", false},
-		{"inheritance13", "inheritance13", nil, "1a3b", "", false},
-		{"inheritance14", "inheritance14", nil, "1&3_", "", false},
-		{"inheritance15", "inheritance15", nil, "12inner3_", "", false},
-		{"inheritance16", "inheritance16", nil, "12out3_", "", false},
-		{"inheritance17", "inheritance17", nil, "1234", "", false},
-		{"inheritance18", "inheritance18", nil, "this that theother5678", "the testtags library ({% echo %}) is a Python tag library with no Go equivalent here", false},
-		{"inheritance19", "inheritance19", nil, "140056783_", "the testtags library ({% echo %}) is a Python tag library with no Go equivalent here", false},
-		{"inheritance20", "inheritance20", nil, "1&a3_", "", false},
-		{"inheritance21", "inheritance21", nil, "12a34", "", false},
-		{"inheritance22", "inheritance22", nil, "1&a3_", "", false},
-		{"inheritance23", "inheritance23", nil, "1&ab3_", "", false},
-		{"inheritance24", "inheritance24", nil, "1234", "{% extends %} with a variable is not supported; see fidelity/divergences.md (the parent is a Template object in the context)", false},
-		{"inheritance25", "inheritance25", nil, "1234", "{% extends %} with a variable is not supported; see fidelity/divergences.md (the parent is a Template object in the context)", false},
-		{"inheritance26", "inheritance26", nil, "no tags", "", false},
-		{"inheritance27", "inheritance27", nil, "no tags", "", false},
-		{"inheritance_28", "inheritance 28", nil, "!", "", false},
-		{"inheritance29", "inheritance29", nil, "!", "", false},
-		{"inheritance30", "inheritance30", map[string]any{"optional": true}, "123", "", false},
-		{"inheritance31", "inheritance31", map[string]any{"optional": true}, "1two3", "", false},
-		{"inheritance32", "inheritance32", nil, "13", "", false},
-		{"inheritance33", "inheritance33", map[string]any{"optional": 1}, "123", "", false},
-		{"inheritance34", "inheritance34", map[string]any{"optional": 1}, "1two3", "", false},
-		{"inheritance35", "inheritance35", map[string]any{"optional": 2}, "13", "", false},
-		{"inheritance36", "inheritance36", map[string]any{"numbers": "123"}, "_1_2_3_", "", false},
-		{"inheritance37", "inheritance37", map[string]any{"numbers": "123"}, "_X_X_X_", "", false},
-		{"inheritance38", "inheritance38", nil, "_", "", false},
-		{"inheritance39", "inheritance39", map[string]any{"optional": true}, "1new23", "", false},
-		{"inheritance40", "inheritance40", map[string]any{"optional": 1}, "1new23", "", false},
-		{"inheritance41", "inheritance41", map[string]any{"numbers": "123"}, "_new1_new2_new3_", "", false},
-		{"inheritance42", "inheritance42", nil, "1234", "{% extends %} with a variable is not supported; see fidelity/divergences.md (the parent is a filter expression)", false},
-		{"inheritance_empty", "inheritance_empty", nil, "", "", true},
-		{"extends_duplicate", "extends_duplicate", nil, "", "", true},
-		{"duplicate_block", "duplicate_block", nil, "", "", true},
+		{"inheritance01", "inheritance01", nil, "1&3_", "", ""},
+		{"inheritance02", "inheritance02", nil, "1234", "", ""},
+		{"inheritance03", "inheritance03", nil, "1234", "", ""},
+		{"inheritance04", "inheritance04", nil, "1&3_", "", ""},
+		{"inheritance05", "inheritance05", nil, "1234", "", ""},
+		{"inheritance06", "inheritance06", map[string]any{"foo": "inheritance02"}, "1234", "", ""},
+		{"inheritance07", "inheritance07", nil, "1&35", "", ""},
+		{"inheritance08", "inheritance08", nil, "1235", "", ""},
+		{"inheritance09", "inheritance09", nil, "1&3_", "", ""},
+		{"inheritance10", "inheritance10", nil, "1&3_", "", ""},
+		{"inheritance11", "inheritance11", nil, "1234", "", ""},
+		{"inheritance12", "inheritance12", nil, "1235", "", ""},
+		{"inheritance13", "inheritance13", nil, "1a3b", "", ""},
+		{"inheritance14", "inheritance14", nil, "1&3_", "", ""},
+		{"inheritance15", "inheritance15", nil, "12inner3_", "", ""},
+		{"inheritance16", "inheritance16", nil, "12out3_", "", ""},
+		{"inheritance17", "inheritance17", nil, "1234", "", ""},
+		{"inheritance18", "inheritance18", nil, "this that theother5678", "the testtags library ({% echo %}) is a Python tag library with no Go equivalent here", ""},
+		{"inheritance19", "inheritance19", nil, "140056783_", "the testtags library ({% echo %}) is a Python tag library with no Go equivalent here", ""},
+		{"inheritance20", "inheritance20", nil, "1&a3_", "", ""},
+		{"inheritance21", "inheritance21", nil, "12a34", "", ""},
+		{"inheritance22", "inheritance22", nil, "1&a3_", "", ""},
+		{"inheritance23", "inheritance23", nil, "1&ab3_", "", ""},
+		{"inheritance24", "inheritance24", nil, "1234", "No Go counterpart: the parent is a Django Template object in the context", ""},
+		{"inheritance25", "inheritance25", nil, "1234", "No Go counterpart: the parent is a Django Template object in the context", ""},
+		{"inheritance26", "inheritance26", nil, "no tags", "", ""},
+		{"inheritance27", "inheritance27", nil, "no tags", "", ""},
+		{"inheritance_28", "inheritance 28", nil, "!", "", ""},
+		{"inheritance29", "inheritance29", nil, "!", "", ""},
+		{"inheritance30", "inheritance30", map[string]any{"optional": true}, "123", "", ""},
+		{"inheritance31", "inheritance31", map[string]any{"optional": true}, "1two3", "", ""},
+		{"inheritance32", "inheritance32", nil, "13", "", ""},
+		{"inheritance33", "inheritance33", map[string]any{"optional": 1}, "123", "", ""},
+		{"inheritance34", "inheritance34", map[string]any{"optional": 1}, "1two3", "", ""},
+		{"inheritance35", "inheritance35", map[string]any{"optional": 2}, "13", "", ""},
+		{"inheritance36", "inheritance36", map[string]any{"numbers": "123"}, "_1_2_3_", "", ""},
+		{"inheritance37", "inheritance37", map[string]any{"numbers": "123"}, "_X_X_X_", "", ""},
+		{"inheritance38", "inheritance38", nil, "_", "", ""},
+		{"inheritance39", "inheritance39", map[string]any{"optional": true}, "1new23", "", ""},
+		{"inheritance40", "inheritance40", map[string]any{"optional": 1}, "1new23", "", ""},
+		{"inheritance41", "inheritance41", map[string]any{"numbers": "123"}, "_new1_new2_new3_", "", ""},
+		{"inheritance42", "inheritance42", nil, "1234", "", ""},
+		{"inheritance_empty", "inheritance_empty", nil, "", "", "'extends' takes one argument"},
+		{"extends_duplicate", "extends_duplicate", nil, "", "", "'extends' cannot appear more than once in the same template"},
+		{"duplicate_block", "duplicate_block", nil, "", "", "'block' tag with name 'content' appears more than once"},
 	}
 	eng := templates.New(templates.MapSource("locmem", inheritanceTemplates))
 	for _, tt := range tests {
@@ -169,9 +171,9 @@ func TestInheritance(t *testing.T) {
 				t.Skip(tt.skip)
 			}
 			got, err := eng.Render(tt.tmpl, tt.ctx)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("render %q: want an error, got %q", tt.tmpl, got)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("render %q: error = %v, want one with %q", tt.tmpl, err, tt.wantErr)
 				}
 				return
 			}
@@ -254,4 +256,91 @@ gentlemen.
 	if got != multilineString {
 		t.Errorf("got %q, want %q", got, multilineString)
 	}
+}
+
+// TestExtendsVariable checks {% extends %} with a variable beyond Django's
+// InheritanceTests: a parent that extends a variable, two variables in one
+// chain, an include, a template given as a string, the recorded templates
+// and the errors. An error never shows the internal name of a variant.
+//
+// No Django test exists for these cases.
+func TestExtendsVariable(t *testing.T) {
+	eng := templates.New(templates.MapSource("locmem", map[string]string{
+		"base.html":   `<{% block content %}base{% endblock %}>`,
+		"other.html":  `[{% block content %}other{% endblock %}]`,
+		"layout.html": `{% extends layout %}{% block content %}layout {{ block.super }}{% endblock %}`,
+		"page.html":   `{% extends "layout.html" %}{% block content %}page {{ block.super }}{% endblock %}`,
+		"chain.html":  `{% extends first %}{% block content %}chain {{ block.super }}{% endblock %}`,
+		"inc.html":    `{% include "layout.html" %}|{% include "layout.html" with layout="other.html" %}`,
+		"broken.html": `{% extends layout %}{% block content %}{% partial missing %}{% endblock %}`,
+		"self.html":   `{% extends name %}`,
+		"a.html":      `{% extends "b.html" %}`,
+		"b.html":      `{% extends name %}`,
+	}))
+	tests := []struct {
+		name    string
+		tmpl    string
+		ctx     map[string]any
+		want    string
+		wantErr string
+	}{
+		{"variable", "layout.html", map[string]any{"layout": "base.html"}, "<layout base>", ""},
+		{"other value", "layout.html", map[string]any{"layout": "other.html"}, "[layout other]", ""},
+		{"parent extends a variable", "page.html", map[string]any{"layout": "other.html"}, "[page layout other]", ""},
+		{"two variables", "chain.html", map[string]any{"first": "layout.html", "layout": "base.html"}, "<chain layout base>", ""},
+		{"include", "inc.html", map[string]any{"layout": "base.html"}, "<layout base>|[layout other]", ""},
+		{"missing variable", "layout.html", nil, "", "Invalid template name in 'extends' tag: ''. Got this from the 'layout' variable."},
+		{"missing parent", "layout.html", map[string]any{"layout": "nope.html"}, "", "TemplateDoesNotExist: nope.html"},
+		{"error in a block", "broken.html", map[string]any{"layout": "base.html"}, "", "Partial 'missing' is not defined in the current template."},
+		{"extends itself", "self.html", map[string]any{"name": "self.html"}, "", `template "self.html" extends itself (self.html -> self.html)`},
+		{"cycle", "a.html", map[string]any{"name": "a.html"}, "", "a.html -> b.html -> a.html"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := eng.Render(tt.tmpl, tt.ctx)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want one with %q", err, tt.wantErr)
+				}
+				if strings.ContainsAny(err.Error(), "\x00\x1f") {
+					t.Errorf("error %q shows the internal name of a variant", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("string", func(t *testing.T) {
+		got, err := eng.RenderString(`{% extends parent %}{% block content %}s {{ block.super }}{% endblock %}`,
+			map[string]any{"parent": "layout.html", "layout": "base.html"})
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if got != "<s layout base>" {
+			t.Errorf("got %q, want %q", got, "<s layout base>")
+		}
+	})
+
+	t.Run("recorded", func(t *testing.T) {
+		rec := &templates.Recorder{}
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r = r.WithContext(templates.WithRecorder(r.Context(), rec))
+		if _, err := eng.RenderRequest(r, "page.html", map[string]any{"layout": "other.html"}); err != nil {
+			t.Fatalf("RenderRequest: %v", err)
+		}
+		rendered := rec.Rendered()
+		names := make([]string, 0, len(rendered))
+		for _, rd := range rendered {
+			names = append(names, rd.Name)
+		}
+		if want := []string{"page.html", "layout.html", "other.html"}; !slices.Equal(names, want) {
+			t.Errorf("recorded %q, want %q", names, want)
+		}
+	})
 }

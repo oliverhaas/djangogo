@@ -90,6 +90,7 @@ func registerTags() {
 	mustRegister("partialdef", partialDefTagParser)
 	mustRegister("partial", partialTagParser)
 	mustRegister(partialTemplateTag, partialTemplateTagParser)
+	mustRegister(extendsVarTag, extendsVarTagParser)
 }
 
 // mustRegister registers a tag and panics if pongo2 rejects it. A rejection means

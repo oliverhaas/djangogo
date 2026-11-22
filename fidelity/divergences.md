@@ -92,7 +92,6 @@ templates alone with `python3 fidelity/oracle/render.py`.
   valid Django, is left as written and has pongo2's meaning, where `and` and
   `or` share one precedence.
 - `is` and `is not` compare by value (`==`, `!=`).
-- `{% extends variable %}` is not supported; the name must be a string literal.
 - pongo2's own tags and filters stay available (`set`, `macro`, `import`,
   `ifequal`, `length_is`, `float`, `integer`, `split`), and pongo2
   expressions such as `{{ call(arg) }}` and `{{ a or b }}` are valid.

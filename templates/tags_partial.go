@@ -144,7 +144,7 @@ func partialDefTagParser(doc *pongo2.Parser, start *pongo2.Token, args *pongo2.P
 	}
 	reg := registryOf(doc)
 	if _, ok := reg.partials[name.Val]; ok {
-		tplName, _, _ := strings.Cut(start.Filename, "#")
+		tplName, _, _ := strings.Cut(displayName(start.Filename), "#")
 		msg := fmt.Sprintf("Partial '%s' is already defined in the '%s' template.", name.Val, tplName)
 		return nil, args.Error(msg, start)
 	}
@@ -187,9 +187,9 @@ func partialTemplateTagParser(doc *pongo2.Parser, start *pongo2.Token, args *pon
 // "name#partial": the source of name, without its {% extends %} tag,
 // wrapped in the tag that renders the partial. The wrapper goes on the first
 // line, so the lines in error messages stay right.
-func partialSource(src []byte, partial string) []byte {
+func partialSource(src []byte, name, partial string) []byte {
 	out := []byte("{% " + partialTemplateTag + " " + quoteName(partial) + " %}")
-	out = append(out, rewrite(src, true)...)
+	out = append(out, rewrite(src, name, func(string, bool) (string, bool) { return "", true })...)
 	return append(out, "{% end"+partialTemplateTag+" %}"...)
 }
 

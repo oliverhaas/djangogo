@@ -542,6 +542,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - Templates: the `{% regroup %}`, `{% querystring %}` and `{% debug %}` tags
   and the `pprint` filter. `{% debug %}` prints the context only when
   `Engine.SetDebug(true)` is set.
+- Templates: `{% extends %}` takes a variable or a filter expression, as in
+  Django: `{% extends layout %}` extends the template that `layout` names.
+  This also works in a parent template, in an included template and in
+  `RenderString`.
 
 ### Changed
 
@@ -670,6 +674,11 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   splits a value into its characters, also a number. `forloop.parentloop` is
   an empty map outside a nested loop, as in Django. Update templates and
   tests that expect Go's format.
+- A template fails to compile with Django's message when a tag or a
+  variable comes before `{% extends %}`, when it has two `{% extends %}`
+  tags or when two `{% block %}` tags have the same name. Before, such a
+  template rendered. Move the tags below `{% extends %}`. A syntax error in
+  a child template is now reported before a missing parent.
 
 ### Fixed
 
