@@ -188,12 +188,13 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   ordered. SQLite does not create a unique constraint with
   `NullsNotDistinct`, which PostgreSQL 15 needs. A migration writes the
   condition and expressions of a constraint as Go code, which covers `Q`,
-  `F`, `Value`, arithmetic and the text functions but no aggregate.
+  `F`, `Value`, arithmetic, the text functions, `Coalesce`, `Concat`, `Cast`
+  and `Case` but no aggregate.
 - **Database:** one database per application.
 - **Querying:** the date and time transforms (`__year`, `__date`, `__hour`
-  and the others) read a datetime in UTC. Besides the aggregates, the only
-  database functions are `Lower`, `Upper`, `Length`, `Trim`, `LTrim` and
-  `RTrim`: there is no `Coalesce`, `Concat`, `Cast` or `Case`. A transform of
+  and the others) read a datetime in UTC. Besides the aggregates, the
+  database functions are `Lower`, `Upper`, `Length`, `Trim`, `LTrim`,
+  `RTrim`, `Coalesce`, `Concat`, `Cast` and `Case` with `When`. A transform of
   `RegisterTransform` applies to one field kind, where Django's registration
   on `CharField` also covers its subclasses. `OrderBy` takes keys, not
   expressions: annotate an expression to order by it. There is

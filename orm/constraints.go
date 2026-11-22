@@ -427,8 +427,22 @@ func constraintRefs(m *Model, name string, cond Cond, exprs ...Expr) ([]constrai
 		if e.kind == exprField {
 			return add(e.key)
 		}
-		for _, sub := range []*Expr{e.left, e.right, e.arg} {
+		for _, sub := range []*Expr{e.left, e.right, e.arg, e.def} {
 			if err := walkExpr(sub); err != nil {
+				return err
+			}
+		}
+		for i := range e.args {
+			if err := walkExpr(&e.args[i]); err != nil {
+				return err
+			}
+		}
+		for _, w := range e.whens {
+			then := fieldOrExpr(w.Then)
+			if err := walkCond(w.Cond); err != nil {
+				return err
+			}
+			if err := walkExpr(&then); err != nil {
 				return err
 			}
 		}

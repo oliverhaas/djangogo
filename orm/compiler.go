@@ -98,6 +98,9 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 	if e.filter != nil && e.kind != exprAggregate {
 		return nil, errors.New("orm: Filter applies to aggregates only")
 	}
+	if e.def != nil && e.kind != exprCase {
+		return nil, errors.New("orm: Default applies to Case only")
+	}
 	switch e.kind {
 	case exprField:
 		if n, ok := c.annots[e.key]; ok {
@@ -109,6 +112,12 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		}
 		return c.keyNode(p)
 	case exprValue:
+		switch e.value.(type) {
+		case Decimal, Date, Time, UUID:
+			// Keep the Go type, which gives the type of the value. The
+			// driver binds it by its Value method.
+			return paramNode{value: e.value, literal: true}, nil
+		}
 		v, err := plainValue(c.q.db.Registry(), nil, e.value)
 		if err != nil {
 			return nil, err
@@ -138,6 +147,16 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		return funcNode{fn: e.fn, arg: arg, typ: typ}, nil
 	case exprNode:
 		return e.node, nil
+	case exprCall:
+		return c.resolveCall(e)
+	case exprCast:
+		arg, err := c.resolveExpr(*e.arg)
+		if err != nil {
+			return nil, err
+		}
+		return convertNode{inner: arg, to: e.castTo, input: valueKind(arg.vtype())}, nil
+	case exprCase:
+		return c.resolveCase(e)
 	case exprStar:
 		return nil, errors.New(`orm: "*" is only valid as the argument of Count`)
 	default:
@@ -178,7 +197,7 @@ func (c *compiler) resolveAggregate(e Expr) (sqlNode, error) {
 		}
 	}
 	agg := aggNode{fn: e.fn, arg: arg, distinct: e.distinct}
-	where, match, err := c.aggregateFilter(e.filter)
+	where, match, err := c.condition(e.filter)
 	switch {
 	case err != nil:
 		return nil, err
@@ -190,14 +209,14 @@ func (c *compiler) resolveAggregate(e Expr) (sqlNode, error) {
 	return agg, nil
 }
 
-// aggregateFilter resolves the condition of an aggregate's Filter and reports
-// what it is known to match. A condition that every row meets leaves the
-// aggregate plain, and one that no row meets makes it the value of the
+// condition resolves the condition of an aggregate's Filter or of a When and
+// reports what it is known to match. A condition that every row meets leaves
+// an aggregate plain, and one that no row meets makes it the value of the
 // aggregate over no rows, as Django compiles AggregateFilter. The condition
 // reuses any join of the query, and the joins it needs become LEFT OUTER, so
 // that it removes no row of the query. A negated condition across a
 // multi-valued relation stays a join. Django's Q.resolve_expression does both.
-func (c *compiler) aggregateFilter(cond *Cond) (*whereNode, matchKind, error) {
+func (c *compiler) condition(cond *Cond) (*whereNode, matchKind, error) {
 	if cond == nil {
 		return nil, matchAll, nil
 	}
@@ -491,6 +510,23 @@ func columnsOf(n sqlNode) []sqlNode {
 			return columnsOf(v.arg)
 		}
 		return []sqlNode{v}
+	case callNode, concatNode, convertNode, caseNode:
+		// Django groups by a function or a Case as a whole, and by the
+		// columns of its parts when it holds an aggregate.
+		if !n.aggregate() {
+			return []sqlNode{n}
+		}
+		var out []sqlNode
+		for _, p := range nodeParts(n) {
+			out = append(out, columnsOf(p)...)
+		}
+		return out
+	case condNode:
+		var out []sqlNode
+		for _, p := range v.where.operands() {
+			out = append(out, columnsOf(p)...)
+		}
+		return out
 	default:
 		return nil
 	}

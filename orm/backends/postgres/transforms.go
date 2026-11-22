@@ -34,6 +34,20 @@ func (Dialect) TransformSQL(name string, input orm.Kind, tzname string) (string,
 	return "", nil, false
 }
 
+// CastSQL returns the SQL of Cast in the form of Django's PostgreSQL backend,
+// (value)::type. A datetime becomes a date or a time of day in tzname, and a
+// date becomes midnight in tzname, where Django relies on the time zone of
+// the connection.
+func (Dialect) CastSQL(input, output orm.Kind, typ, tzname string) (string, []any, bool) {
+	switch {
+	case input == orm.KindDateTime && (output == orm.KindDate || output == orm.KindTime):
+		return "(({}) AT TIME ZONE %s)::" + typ, []any{tzname}, true
+	case input == orm.KindDate && output == orm.KindDateTime:
+		return "(({})::timestamp AT TIME ZONE %s)", []any{tzname}, true
+	}
+	return "({})::" + typ, nil, true
+}
+
 // dateExtract returns the EXTRACT of part from expr, Django's
 // date_extract_sql.
 func dateExtract(part, expr string) string {

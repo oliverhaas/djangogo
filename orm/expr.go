@@ -1,6 +1,9 @@
 package orm
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // exprKind identifies the shape of an Expr.
 type exprKind uint8
@@ -23,12 +26,20 @@ const (
 	// exprNode is a value that is already bound to the query: the value a
 	// transform of RegisterTransform transforms.
 	exprNode
+	// exprCall is a call of a function of several arguments: Coalesce or
+	// Concat.
+	exprCall
+	// exprCast converts its argument to the type of a field.
+	exprCast
+	// exprCase is a conditional expression.
+	exprCase
 )
 
 // Expr is an SQL value expression: a field reference (F), a literal (Value),
 // an arithmetic or bitwise combination of expressions, an aggregate (Count,
-// Sum, Avg, Min, Max) or a text function (Lower, Upper, Length, Trim, LTrim,
-// RTrim). It is immutable; every method returns a new Expr.
+// Sum, Avg, Min, Max), a text function (Lower, Upper, Length, Trim, LTrim,
+// RTrim, Concat), Coalesce, Cast or a conditional expression (Case). It is
+// immutable; every method returns a new Expr.
 //
 // An Expr can be the value of a filter, so a column is compared with another
 // column or with a computed value:
@@ -62,6 +73,14 @@ type Expr struct {
 	typed  bool
 	// node is the bound value of an exprNode.
 	node sqlNode
+	// args are the arguments of an exprCall.
+	args []Expr
+	// castTo is the field whose type an exprCast converts to.
+	castTo *Field
+	// whens are the branches of an exprCase, and def its Default, nil
+	// without one.
+	whens []When
+	def   *Expr
 }
 
 // F references a model field by key, like Django's F(): F("views") or, across
@@ -220,10 +239,19 @@ func (e Expr) containsAggregate() bool {
 		return true
 	case exprBinary:
 		return e.left.containsAggregate() || e.right.containsAggregate()
-	case exprFunc:
+	case exprFunc, exprCast:
 		return e.arg.containsAggregate()
 	case exprNode:
 		return e.node.aggregate()
+	case exprCall:
+		return slices.ContainsFunc(e.args, Expr.containsAggregate)
+	case exprCase:
+		for _, w := range e.whens {
+			if fieldOrExpr(w.Then).containsAggregate() {
+				return true
+			}
+		}
+		return e.def != nil && e.def.containsAggregate()
 	default:
 		return false
 	}

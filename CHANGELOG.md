@@ -730,6 +730,16 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   key (`admin.E301` to `admin.E304`). The forms keep the permission guards and
   the check of protected rows of the other inlines, which Django's generic
   inlines leave out.
+- ORM: the database functions `orm.Coalesce`, `orm.Concat` and `orm.Cast`, and
+  conditional expressions with `orm.Case`, `orm.When` and `Default`, as
+  Django's `Coalesce`, `Concat`, `Cast`, `Case` and `When`. They work in
+  `Annotate`, `Filter`, `Update`, `OrderBy` through an annotation, the
+  aggregates (`Sum(Case(...))`) and the expressions and conditions of
+  constraints, which migrations write as Go code. `Cast` takes an
+  `orm.Field` whose kind, length and digits give the SQL type; a dialect
+  whose `CAST` does not convert as Django's does implements
+  `orm.CastDialect`. A condition of `When` that spans a relation joins it
+  with a LEFT OUTER JOIN.
 
 ### Changed
 
@@ -956,6 +966,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   child was built as NULL, and accepted a parent that was never saved. It now
   takes the primary key of the saved parent and rejects an unsaved one with
   Django's "bulk_create() prohibited to prevent data loss" error.
+- ORM: an annotation of `orm.Value` that held an `orm.Decimal`, `orm.Date`,
+  `orm.Time` or `orm.UUID` read back as a string. It now reads back as its Go
+  type. An `orm.Value` that held a `netip.Addr` failed on SQLite with
+  "unsupported type netip.Addr"; it is now sent as its text.
 
 ### Security
 

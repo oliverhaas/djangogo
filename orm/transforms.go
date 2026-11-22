@@ -123,6 +123,12 @@ type transformNode struct {
 func (n transformNode) render(w *sqlWriter) {
 	td, _ := w.d.(TransformDialect)
 	tmpl, params, _ := td.TransformSQL(n.name, n.input, TransformTimeZone)
+	renderTemplate(w, tmpl, params, n.inner)
+}
+
+// renderTemplate writes the SQL template of a dialect: inner in the place of
+// each "{}", and the next of params, bound, in the place of each "%s".
+func renderTemplate(w *sqlWriter, tmpl string, params []any, inner sqlNode) {
 	for tmpl != "" {
 		i := strings.IndexAny(tmpl, "%{")
 		if i < 0 {
@@ -136,7 +142,7 @@ func (n transformNode) render(w *sqlWriter) {
 			params = params[1:]
 			tmpl = tmpl[i+2:]
 		case strings.HasPrefix(tmpl[i:], "{}"):
-			n.inner.render(w)
+			inner.render(w)
 			tmpl = tmpl[i+2:]
 		default:
 			w.write(tmpl[i : i+1])

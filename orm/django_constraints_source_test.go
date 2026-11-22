@@ -117,6 +117,18 @@ func TestConstraintSourceRebuildsConditions(t *testing.T) {
 			`orm.Q("read", orm.Value(int64(100)).Sub(orm.F("unread")), "n__gt", orm.Length(orm.F("name")).Mul(orm.F("k")))`,
 		},
 		{orm.Q("a__isnull", nil), `orm.Q("a__isnull", nil)`},
+		{
+			orm.Q("total__gt", orm.Coalesce("a", orm.Value(0)), "label", orm.Concat("a", orm.Value("-"), "b")),
+			`orm.Q("total__gt", orm.Coalesce(orm.F("a"), orm.Value(int64(0))), "label", orm.Concat(orm.F("a"), orm.Value("-"), orm.F("b")))`,
+		},
+		{
+			orm.Q("n__gt", orm.Cast("text", orm.Field{Kind: orm.KindDecimal, MaxDigits: 5, DecimalPlaces: 2, Null: true})),
+			`orm.Q("n__gt", orm.Cast(orm.F("text"), orm.Field{Kind: orm.KindDecimal, MaxDigits: 5, DecimalPlaces: 2}))`,
+		},
+		{
+			orm.Q("n__gte", orm.Case(orm.When{Cond: orm.Q("kind", "a"), Then: 1}, orm.When{Cond: orm.Q("kind", "b"), Then: "m"}).Default(orm.Value(0))),
+			`orm.Q("n__gte", orm.Case(orm.When{Cond: orm.Q("kind", "a"), Then: orm.Value(int64(1))}, orm.When{Cond: orm.Q("kind", "b"), Then: orm.F("m")}).Default(orm.Value(int64(0))))`,
+		},
 	}
 	for _, tt := range tests {
 		assertSource(t, orm.CheckConstraint{Name: "c", Condition: tt.cond}, `orm.CheckConstraint{Name: "c", Condition: `+tt.src+`}`)

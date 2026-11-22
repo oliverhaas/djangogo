@@ -3,7 +3,9 @@ package orm
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
+	"time"
 )
 
 // valueType is the Go type a selected SQL value is converted to.
@@ -152,13 +154,28 @@ func (w *sqlWriter) literal(v any) {
 	if w.ddl {
 		placeholder = w.quoteValue(v)
 	} else {
-		w.args = append(w.args, v)
+		w.args = append(w.args, literalArg(w.d, v))
 		placeholder = w.d.Placeholder(len(w.args))
 	}
 	if ld, ok := w.d.(LiteralDialect); ok {
 		placeholder = ld.LiteralSQL(placeholder, v)
 	}
 	w.b.WriteString(placeholder)
+}
+
+// literalArg returns the argument bound for the literal v. A duration is
+// bound as the dialect stores one, a count of microseconds on SQLite, and
+// not as the nanoseconds of time.Duration. An unsigned integer and a
+// netip.Addr are bound as database/sql takes them, as an int64 and as text.
+func literalArg(d Dialect, v any) any {
+	var f *Field
+	if _, ok := v.(time.Duration); ok {
+		f = &Field{Kind: KindDuration}
+	}
+	if bound, err := bindField(d, f, v); err == nil {
+		return bound
+	}
+	return v
 }
 
 // quoteValue returns v as an SQL literal and records the error of a value
@@ -342,15 +359,31 @@ func (n binaryNode) render(w *sqlWriter) {
 
 // vtype is float when either side is float, and otherwise the type of the
 // first side that has a known type.
-func (n binaryNode) vtype() valueType {
-	l, r := n.left.vtype(), n.right.vtype()
-	if l == typeFloat || r == typeFloat {
-		return typeFloat
+func (n binaryNode) vtype() valueType { return commonType([]sqlNode{n.left, n.right}) }
+
+// commonType is the type that the values of nodes are read as together: float
+// when one of them is float, and otherwise the first type that is known.
+func commonType(nodes []sqlNode) valueType {
+	out := typeUnknown
+	for _, n := range nodes {
+		switch t := n.vtype(); {
+		case t == typeFloat:
+			return typeFloat
+		case out == typeUnknown:
+			out = t
+		}
 	}
-	if l != typeUnknown {
-		return l
+	return out
+}
+
+// anyAggregate reports whether one of nodes holds an aggregate.
+func anyAggregate(nodes []sqlNode) bool {
+	for _, n := range nodes {
+		if n.aggregate() {
+			return true
+		}
 	}
-	return r
+	return false
 }
 
 // aggregate reports whether either side holds an aggregate.
@@ -375,6 +408,136 @@ func (n funcNode) vtype() valueType { return n.typ }
 
 // aggregate reports whether the argument holds an aggregate.
 func (n funcNode) aggregate() bool { return n.arg.aggregate() }
+
+// callNode is a call of a function of several arguments, such as
+// COALESCE(a, b).
+type callNode struct {
+	fn   string
+	args []sqlNode
+}
+
+// render writes "FN(a, b, ...)".
+func (n callNode) render(w *sqlWriter) {
+	w.write(n.fn + "(")
+	for i, a := range n.args {
+		if i > 0 {
+			w.write(", ")
+		}
+		a.render(w)
+	}
+	w.write(")")
+}
+
+// vtype is the common type of the arguments.
+func (n callNode) vtype() valueType { return commonType(n.args) }
+
+// aggregate reports whether an argument holds an aggregate.
+func (n callNode) aggregate() bool { return anyAggregate(n.args) }
+
+// concatNode joins the text of its arguments, each NULL taken as the empty
+// text, as Django's Concat does with ConcatPair and COALESCE.
+type concatNode struct {
+	args []sqlNode
+}
+
+// render writes "(COALESCE(a, ”) || COALESCE(b, ”) ...)".
+func (n concatNode) render(w *sqlWriter) {
+	w.write("(")
+	for i, a := range n.args {
+		if i > 0 {
+			w.write(" || ")
+		}
+		w.write("COALESCE(")
+		a.render(w)
+		w.write(", '')")
+	}
+	w.write(")")
+}
+
+// vtype is string.
+func (concatNode) vtype() valueType { return typeString }
+
+// aggregate reports whether an argument holds an aggregate.
+func (n concatNode) aggregate() bool { return anyAggregate(n.args) }
+
+// convertNode converts inner, a value of kind input, to the type of the field
+// to: the node of Cast. A dialect that is a CastDialect writes the
+// conversions that its CAST lacks.
+type convertNode struct {
+	inner sqlNode
+	to    *Field
+	input Kind
+}
+
+// render writes the conversion of the dialect, or CAST(inner AS type).
+func (n convertNode) render(w *sqlWriter) {
+	to := *n.to
+	if to.MaxLength == 0 && fieldValueType(&to) == typeString && to.Kind != KindGenericIPAddress {
+		to.Kind = KindText
+	}
+	typ := castType(w.d, &to)
+	if cd, ok := w.d.(CastDialect); ok {
+		if tmpl, params, ok := cd.CastSQL(n.input, to.Kind, typ, TransformTimeZone); ok {
+			renderTemplate(w, tmpl, params, n.inner)
+			return
+		}
+	}
+	castNode{node: n.inner, typ: typ}.render(w)
+}
+
+// vtype is the type the values of the field are read as.
+func (n convertNode) vtype() valueType { return fieldValueType(n.to) }
+
+// aggregate reports whether the converted value holds an aggregate.
+func (n convertNode) aggregate() bool { return n.inner.aggregate() }
+
+// valueKind returns the field kind whose values are read as t: the kind of
+// the value a Cast converts.
+func valueKind(t valueType) Kind {
+	switch t {
+	case typeInt:
+		return KindBigInt
+	case typeFloat:
+		return KindFloat
+	case typeBool:
+		return KindBool
+	case typeTime:
+		return KindDateTime
+	case typeDecimal:
+		return KindDecimal
+	case typeDate:
+		return KindDate
+	case typeTimeOfDay:
+		return KindTime
+	case typeDuration:
+		return KindDuration
+	case typeUUID:
+		return KindUUID
+	case typeJSON:
+		return KindJSON
+	case typeBinary:
+		return KindBinary
+	default:
+		return KindText
+	}
+}
+
+// nodeParts returns the expressions that a function, a Cast or a Case is
+// made of.
+func nodeParts(n sqlNode) []sqlNode {
+	switch v := n.(type) {
+	case callNode:
+		return v.args
+	case concatNode:
+		return v.args
+	case convertNode:
+		return []sqlNode{v.inner}
+	case caseNode:
+		return v.parts()
+	default:
+		return nil
+	}
+}
 
 // likeExprNode is the LIKE pattern built from an expression: the value of
 // inner with "\", "%", and "_" escaped by a backslash, between the "%"
@@ -522,6 +685,10 @@ func readsJoin(n sqlNode) bool {
 		return readsJoin(n.inner)
 	case funcNode:
 		return readsJoin(n.arg)
+	case callNode, concatNode, convertNode, caseNode:
+		return slices.ContainsFunc(nodeParts(n), readsJoin)
+	case condNode:
+		return slices.ContainsFunc(n.where.operands(), readsJoin)
 	default:
 		return false
 	}

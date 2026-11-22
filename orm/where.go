@@ -135,6 +135,25 @@ func (n *whereNode) render(w *sqlWriter) {
 	}
 }
 
+// operands returns the expressions that the predicates of the tree compare.
+func (n *whereNode) operands() []sqlNode {
+	if n == nil {
+		return nil
+	}
+	var out []sqlNode
+	for _, ch := range n.children {
+		if ch.node != nil {
+			out = append(out, ch.node.operands()...)
+			continue
+		}
+		if ch.pred.lhs != nil {
+			out = append(out, ch.pred.lhs)
+		}
+		out = append(out, ch.pred.rhs...)
+	}
+	return out
+}
+
 // containsAggregate reports whether any predicate of the tree references an
 // aggregate, which forces it into the HAVING clause.
 func (n *whereNode) containsAggregate() bool {

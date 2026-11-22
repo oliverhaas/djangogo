@@ -7,15 +7,22 @@ import (
 	"sync"
 )
 
+// fieldOrExpr returns x as an expression, with a string naming a field: the
+// arguments of Django's functions are read so. Any other value that is not an
+// Expr is a literal.
+func fieldOrExpr(x any) Expr {
+	if key, ok := x.(string); ok {
+		return F(key)
+	}
+	return toExpr(x)
+}
+
 // function builds a call of the SQL function fn of one argument. arg is a
 // field key or an Expr: like Django's functions, a string names a field. Pass
 // Value("text") for a literal. output is the kind of the result when typed
 // is set; otherwise the result has the kind of the argument.
 func function(fn string, arg any, output Kind, typed bool) Expr {
-	a := toExpr(arg)
-	if key, ok := arg.(string); ok {
-		a = F(key)
-	}
+	a := fieldOrExpr(arg)
 	return Expr{kind: exprFunc, fn: fn, arg: &a, output: output, typed: typed}
 }
 
@@ -39,15 +46,110 @@ func LTrim(arg any) Expr { return function("LTRIM", arg, 0, false) }
 // RTrim returns arg without trailing spaces, Django's RTrim.
 func RTrim(arg any) Expr { return function("RTRIM", arg, 0, false) }
 
+// fnConcat marks the exprCall of Concat, which is written with || and not as
+// a call.
+const fnConcat = "CONCAT"
+
+// call builds a call of the SQL function fn of several arguments, each a
+// field key or an Expr.
+func call(fn string, args []any) Expr {
+	exprs := make([]Expr, len(args))
+	for i, a := range args {
+		exprs[i] = fieldOrExpr(a)
+	}
+	return Expr{kind: exprCall, fn: fn, args: exprs}
+}
+
+// Coalesce returns the first of its arguments that is not NULL, Django's
+// Coalesce. Each argument is a field key or an Expr; pass Value("text") for a
+// literal. It takes at least two arguments:
+//
+//	Annotate("display_name", orm.Coalesce("alias", "name"))
+//	Annotate("total", orm.Coalesce(orm.Sum("views"), orm.Value(0)))
+func Coalesce(args ...any) Expr { return call("COALESCE", args) }
+
+// Concat joins the text of its arguments, Django's Concat. Each argument is a
+// field key or an Expr; pass Value(" - ") for a literal. A NULL argument
+// counts as the empty text, and one that is not text is cast to text. It
+// takes at least two arguments, and the value is a string:
+//
+//	Annotate("label", orm.Concat("name", orm.Value(" ("), "goes_by", orm.Value(")")))
+func Concat(args ...any) Expr { return call(fnConcat, args) }
+
+// resolveCall binds Coalesce or Concat. Concat casts each argument that is not
+// text to text on every dialect, as Cast does. Django's ConcatPair casts on
+// PostgreSQL only and leaves the conversion to the || of SQLite, which gives
+// the same text.
+func (c *compiler) resolveCall(e Expr) (sqlNode, error) {
+	if len(e.args) < 2 {
+		name := "Coalesce"
+		if e.fn == fnConcat {
+			name = "Concat"
+		}
+		return nil, fmt.Errorf("orm: %s must take at least two expressions", name)
+	}
+	args := make([]sqlNode, len(e.args))
+	for i, a := range e.args {
+		n, err := c.resolveExpr(a)
+		if err != nil {
+			return nil, err
+		}
+		if e.fn == fnConcat && n.vtype() != typeString {
+			n = convertNode{inner: n, to: &Field{Kind: KindText}, input: valueKind(n.vtype())}
+		}
+		args[i] = n
+	}
+	if e.fn == fnConcat {
+		return concatNode{args: args}, nil
+	}
+	return callNode{fn: e.fn, args: args}, nil
+}
+
+// Cast converts arg to the type of the field to, Django's Cast. arg is a
+// field key or an Expr, or another Go value as a literal. Of to only Kind,
+// MaxLength, MaxDigits and DecimalPlaces count: they give the SQL type, the
+// one a column of the field has, and the Go type the value is read as.
+//
+//	Annotate("age_text", orm.Cast("age", orm.Field{Kind: orm.KindChar, MaxLength: 255}))
+//	Annotate("day", orm.Cast("start_datetime", orm.Field{Kind: orm.KindDate}))
+//
+// A KindChar without MaxLength casts to TEXT. A datetime is cast to a date or
+// a time of day in TransformTimeZone, and a date is midnight in that zone.
+// SQLite has no date and time types: there a cast to a datetime, a date or a
+// time of day converts the text, and a cast to a VARCHAR or a DECIMAL keeps
+// the length and the digits of the value, which PostgreSQL cuts and rounds.
+func Cast(arg any, to Field) Expr {
+	a := fieldOrExpr(arg)
+	f := Field{Kind: to.Kind, MaxLength: to.MaxLength, MaxDigits: to.MaxDigits, DecimalPlaces: to.DecimalPlaces}
+	return Expr{kind: exprCast, arg: &a, castTo: &f}
+}
+
+// CastDialect is an optional capability of a Dialect whose CAST does not
+// convert every value as Django's Cast does, such as SQLite's, which has no
+// date and time types. CastSQL returns the SQL that converts a value of kind
+// input to typ, the column type of kind output, as a template like the one of
+// TransformDialect, or ok false for CAST(value AS typ). tzname is the time
+// zone a datetime is read in (TransformTimeZone).
+type CastDialect interface {
+	CastSQL(input, output Kind, typ, tzname string) (template string, params []any, ok bool)
+}
+
 // outputKind returns the kind of the value of e when the expression it
-// transforms has kind input: the result kind of a function such as Length,
-// and input for the others.
+// transforms has kind input: the result kind of a function such as Length or
+// Cast, and input for the others.
 func (e Expr) outputKind(input Kind) Kind {
-	if e.kind == exprFunc {
+	switch e.kind {
+	case exprFunc:
 		if e.typed {
 			return e.output
 		}
 		return e.arg.outputKind(input)
+	case exprCast:
+		return e.castTo.Kind
+	case exprCall:
+		if e.fn == fnConcat {
+			return KindText
+		}
 	}
 	return input
 }

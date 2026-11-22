@@ -20,6 +20,7 @@ var binaryMethods = map[string]string{
 var functionNames = map[string]string{
 	"LOWER": "Lower", "UPPER": "Upper", "LENGTH": "Length",
 	"TRIM": "Trim", "LTRIM": "LTrim", "RTRIM": "RTrim",
+	"COALESCE": "Coalesce", fnConcat: "Concat",
 }
 
 // ConstraintSource returns Go source code that builds c, such as
@@ -229,6 +230,64 @@ func (g sourceWriter) expr(e Expr) (string, error) {
 			return "", err
 		}
 		return "orm." + name + "(" + arg + ")", nil
+	case exprCall:
+		args := make([]string, len(e.args))
+		for i, a := range e.args {
+			arg, err := g.expr(a)
+			if err != nil {
+				return "", err
+			}
+			args[i] = arg
+		}
+		return "orm." + functionNames[e.fn] + "(" + strings.Join(args, ", ") + ")", nil
+	case exprCast:
+		arg, err := g.expr(*e.arg)
+		if err != nil {
+			return "", err
+		}
+		return "orm.Cast(" + arg + ", " + castFieldSource(e.castTo) + ")", nil
+	case exprCase:
+		return g.caseExpr(e)
 	}
 	return "", fmt.Errorf("orm: an aggregate or bound expression (kind %d) has no Go source", e.kind)
+}
+
+// caseExpr renders a Case with its branches and its Default.
+func (g sourceWriter) caseExpr(e Expr) (string, error) {
+	whens := make([]string, len(e.whens))
+	for i, w := range e.whens {
+		cond, err := g.cond(w.Cond)
+		if err != nil {
+			return "", err
+		}
+		then, err := g.expr(fieldOrExpr(w.Then))
+		if err != nil {
+			return "", err
+		}
+		whens[i] = "orm.When{Cond: " + cond + ", Then: " + then + "}"
+	}
+	out := "orm.Case(" + strings.Join(whens, ", ") + ")"
+	if e.def != nil {
+		def, err := g.expr(*e.def)
+		if err != nil {
+			return "", err
+		}
+		out += ".Default(" + def + ")"
+	}
+	return out, nil
+}
+
+// castFieldSource renders the field of a Cast with the attributes that Cast
+// keeps.
+func castFieldSource(f *Field) string {
+	parts := []string{"Kind: orm.Kind" + f.Kind.String()}
+	for _, attr := range []struct {
+		name  string
+		value int
+	}{{"MaxLength", f.MaxLength}, {"MaxDigits", f.MaxDigits}, {"DecimalPlaces", f.DecimalPlaces}} {
+		if attr.value != 0 {
+			parts = append(parts, attr.name+": "+strconv.Itoa(attr.value))
+		}
+	}
+	return "orm.Field{" + strings.Join(parts, ", ") + "}"
 }

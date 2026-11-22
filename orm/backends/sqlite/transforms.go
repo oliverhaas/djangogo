@@ -36,6 +36,34 @@ func (Dialect) TransformSQL(name string, input orm.Kind, tzname string) (string,
 	return "", nil, false
 }
 
+// CastSQL returns the SQL of Cast to a datetime, a date or a time of day,
+// which SQLite stores as text: Django's strftime and date calls, and for a
+// stored datetime the functions of the date and time transforms, which read
+// the text the driver writes. Other casts are CAST(value AS type).
+func (Dialect) CastSQL(input, output orm.Kind, _, tzname string) (string, []any, bool) {
+	switch output {
+	case orm.KindDateTime:
+		if input == orm.KindDateTime {
+			return "{}", nil, true
+		}
+		return "strftime(%s, {})", []any{"%Y-%m-%d %H:%M:%f"}, true
+	case orm.KindDate:
+		if input == orm.KindDateTime {
+			return "django_datetime_cast_date({}, %s, %s)", []any{tzname, tzname}, true
+		}
+		return "date({})", nil, true
+	case orm.KindTime:
+		switch input {
+		case orm.KindDateTime:
+			return "django_datetime_cast_time({}, %s, %s)", []any{tzname, tzname}, true
+		case orm.KindTime:
+			return "{}", nil, true
+		}
+		return "strftime(%s, {})", []any{"%H:%M:%f"}, true
+	}
+	return "", nil, false
+}
+
 // datetimeLayouts are the forms a datetime is read in: Go's time.String,
 // which the driver writes, and the ISO 8601 forms Django writes, without and
 // with an offset. A value without an offset is in the connection's zone.

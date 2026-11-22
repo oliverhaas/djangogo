@@ -92,7 +92,7 @@ func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, err
 		}
 		// The subquery selects the condition of a filter, and the outer
 		// aggregate filters on that column.
-		where, match, err := c.aggregateFilter(a.expr.filter)
+		where, match, err := c.condition(a.expr.filter)
 		if err != nil {
 			return "", nil, nil, err
 		}
