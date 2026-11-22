@@ -305,6 +305,14 @@ func (q *InteractiveQuestioner) AskRenameModel(oldModel, newModel *ModelState) (
 		oldModel.App, oldModel.Name, newModel.Name), false)
 }
 
+// AskMerge asks whether makemigrations --merge joins the branches of app it
+// printed before.
+func (q *InteractiveQuestioner) AskMerge(string) (bool, error) {
+	return q.boolInput("\nMerging will only work if the operations printed above do not conflict\n"+
+		"with each other (working on different fields or models)\n"+
+		"Should these migration branches be merged? [y/N]", false)
+}
+
 // AskNotNullAddition asks for a one-off default or lets the developer quit.
 func (q *InteractiveQuestioner) AskNotNullAddition(model *ModelState, field FieldState) (any, error) {
 	if q.dryRun {

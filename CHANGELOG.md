@@ -656,6 +656,17 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   number of migrations it replaces and an applied but unrecorded one with
   `[-]`, and `-v 2` adds the time a migration was applied and, with
   `--plan`, its dependencies.
+- Migrations: `makemigrations --merge` resolves conflicting migrations. It
+  prints the operations of each branch, asks, and writes a merge migration
+  that depends on the last migration of each branch, as Django does.
+  `makemigrations --update` adds the model changes to the last migration of
+  the app, optimizes it and writes it under a new name in place of the old
+  file; the last migration must not be squashed, applied or a dependency of
+  another one. `makemigrations` also takes Django's `-v`, `--scriptable`
+  (messages and prompts go to the error output, the paths of new files to the
+  output) and `--no-header`, and `--dry-run -v 3` prints the files it would
+  write. The Go API adds `Loader.MergeBranches`, `NewMergeMigration`,
+  `InteractiveQuestioner.AskMerge` and `Registry.Remove`.
 
 ### Changed
 
@@ -789,6 +800,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   tags or when two `{% block %}` tags have the same name. Before, such a
   template rendered. Move the tags below `{% extends %}`. A syntax error in
   a child template is now reported before a missing parent.
+- `makemigrations` prints the warning about a migration history it cannot
+  read from the database to the error output, where Django's warning goes.
+  Scripts that read the warning from the standard output must read the
+  error output.
 
 ### Fixed
 

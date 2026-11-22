@@ -1,5 +1,7 @@
 package migrations
 
+import "slices"
+
 // Registry holds the known migrations grouped by app, in insertion order. It
 // takes the place of the migrations directories Django scans: a generated
 // migration file registers itself from init.
@@ -26,6 +28,18 @@ func (r *Registry) Add(m Migration) {
 		}
 	}
 	r.byApp[m.App] = append(r.byApp[m.App], m)
+}
+
+// Remove drops the migration key, as deleting its file removes it from
+// Django's loader.
+func (r *Registry) Remove(key Key) {
+	ms := slices.DeleteFunc(r.byApp[key.App], func(m Migration) bool { return m.Name == key.Name })
+	if len(ms) > 0 {
+		r.byApp[key.App] = ms
+		return
+	}
+	delete(r.byApp, key.App)
+	r.appOrder = slices.DeleteFunc(r.appOrder, func(app string) bool { return app == key.App })
 }
 
 // ForApp returns the migrations registered for app in insertion order.

@@ -1,15 +1,23 @@
 package djangogo_test
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/migrations"
 	"github.com/oliverhaas/djangogo/orm"
+	"github.com/oliverhaas/djangogo/orm/backends/sqlite"
 )
 
 // migrationsApp is Django's "migrations" test app with the two models its
@@ -358,3 +366,543 @@ func TestMakemigrationsInconsistentHistory(t *testing.T) {
 			"Migration migrations.0002_second is applied before its dependency migrations.0001_initial")
 	})
 }
+
+// assertNoFile checks that a file does not exist.
+func assertNoFile(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err == nil {
+		t.Errorf("%s exists", path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("%s: %v", path, err)
+	}
+}
+
+// noAncestorMigrations mirrors Django's migrations.test_migrations_no_ancestor,
+// whose 0002_conflicting_second depends on nothing.
+func noAncestorMigrations() []migrations.Migration {
+	migs := conflictMigrations()
+	migs[1] = migrations.Migration{App: "migrations", Name: "0002_conflicting_second", Operations: secondOperations()}
+	return migs
+}
+
+// conflictLongNameMigrations mirrors Django's
+// migrations.test_migrations_conflict_long_name.
+func conflictLongNameMigrations() []migrations.Migration {
+	deps := []migrations.Key{key("migrations", "0001_initial")}
+	return []migrations.Migration{
+		{
+			App: "migrations", Name: "0001_initial", Initial: true,
+			Operations: []migrations.Operation{migrations.CreateModel{Name: "Author", Fields: []migrations.FieldState{idField}}},
+		},
+		{
+			App: "migrations", Name: "0002_conflicting_second_migration_with_long_name", Dependencies: deps,
+			Operations: []migrations.Operation{migrations.CreateModel{Name: "SomethingElse", Fields: []migrations.FieldState{idField}}},
+		},
+		{
+			App: "migrations", Name: "0002_second", Dependencies: deps,
+			Operations: []migrations.Operation{migrations.CreateModel{Name: "Something", Fields: []migrations.FieldState{idField}}},
+		},
+	}
+}
+
+// conflictingAppMigrations mirrors the migrations of Django's test apps
+// unspecified_app_with_conflict and conflicting_app_with_dependencies, which
+// differ only in the extra dependencies of 0002_second.
+func conflictingAppMigrations(app string, secondDeps ...migrations.Key) []migrations.Migration {
+	initial := []migrations.Key{key(app, "0001_initial")}
+	return []migrations.Migration{
+		{
+			App: app, Name: "0001_initial",
+			Operations: []migrations.Operation{
+				migrations.CreateModel{Name: "Author", Fields: authorFields()},
+				tribble(),
+			},
+		},
+		{
+			App: app, Name: "0002_conflicting_second", Dependencies: initial,
+			Operations: []migrations.Operation{migrations.CreateModel{Name: "Something", Fields: []migrations.FieldState{idField}}},
+		},
+		{
+			App: app, Name: "0002_second", Dependencies: slices.Concat(initial, secondDeps),
+			Operations: []migrations.Operation{
+				migrations.DeleteModel{Name: "Tribble"},
+				migrations.RemoveField{Model: "Author", Field: "SillyField"},
+				migrations.AddField{Model: "Author", Field: migrations.FieldState{
+					Name: "Rating", Column: "rating", Kind: orm.KindInt, Default: int64(0),
+				}},
+				migrations.CreateModel{Name: "Book", Fields: []migrations.FieldState{idField}},
+			},
+		},
+	}
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_merge_no_conflict
+func TestMakemigrationsMergeNoConflict(t *testing.T) {
+	c := newCommand(t, nil, testMigrations(), migrationsApp())
+	assertIn(t, c.call("makemigrations", "--merge"), "No conflicts detected to merge.")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_no_common_ancestor
+func TestMakemigrationsNoCommonAncestor(t *testing.T) {
+	c := newCommand(t, nil, noAncestorMigrations(), migrationsApp())
+	_, err := c.fail("makemigrations", "migrations", "--merge")
+	assertIn(t, err.Error(), "Could not find common ancestor of")
+	assertIn(t, err.Error(), "0002_second")
+	assertIn(t, err.Error(), "0002_conflicting_second")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_interactive_reject
+func TestMakemigrationsInteractiveReject(t *testing.T) {
+	c := newCommand(t, nil, conflictMigrations(), migrationsApp())
+	c.input("N\n")
+	c.call("makemigrations", "migrations", "--name", "merge", "--merge", "-v", "0")
+	assertNoFile(t, c.path("migrations", "0003_merge.go"))
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_interactive_accept
+func TestMakemigrationsInteractiveAccept(t *testing.T) {
+	c := newCommand(t, nil, conflictMigrations(), migrationsApp())
+	c.input("y\n")
+	out := c.call("makemigrations", "migrations", "--name", "merge", "--merge")
+	assertFile(t, c.path("migrations", "0003_merge.go"))
+	assertIn(t, out, "Created new merge migration")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_default_merge_name
+func TestMakemigrationsDefaultMergeName(t *testing.T) {
+	c := newCommand(t, nil, conflictMigrations(), migrationsApp())
+	out := c.call("makemigrations", "migrations", "--merge", "--noinput")
+	mergeFile := c.path("migrations", "0003_merge_0002_conflicting_second_0002_second.go")
+	assertFile(t, mergeFile)
+	content := c.read("migrations", "0003_merge_0002_conflicting_second_0002_second.go")
+	assertIn(t, content, `{App: "migrations", Name: "0002_conflicting_second"}`)
+	assertIn(t, out, "Created new merge migration "+mergeFile)
+}
+
+// Django patches the clock to get a fixed name. The clock of the migrations
+// package cannot be replaced from here, so the test checks the shape of the
+// name.
+//
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_auto_merge_name
+func TestMakemigrationsAutoMergeName(t *testing.T) {
+	c := newCommand(t, nil, conflictLongNameMigrations(), migrationsApp())
+	c.input("y\n")
+	out := c.call("makemigrations", "migrations", "--merge")
+	files := c.files()
+	if !slices.ContainsFunc(files, regexp.MustCompile(`^0003_merge_\d{8}_\d{4}\.go$`).MatchString) {
+		t.Errorf("no merge migration named after the time in %v", files)
+	}
+	assertIn(t, out, "Created new merge migration")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_handle_merge
+func TestMakemigrationsHandleMerge(t *testing.T) {
+	c := newCommand(t, nil, conflictMigrations(), migrationsApp())
+	out := c.call("makemigrations", "migrations", "--name", "merge", "--merge", "--noinput")
+	assertFile(t, c.path("migrations", "0003_merge.go"))
+	assertIn(t, out, "Merging migrations")
+	assertIn(t, out, "Branch 0002_second")
+	assertIn(t, out, "Branch 0002_conflicting_second")
+	assertIn(t, out, "Created new merge migration")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigration_merge_dry_run
+func TestMakemigrationMergeDryRun(t *testing.T) {
+	c := newCommand(t, nil, conflictMigrations(), migrationsApp())
+	out := c.call("makemigrations", "migrations", "--name", "merge", "--dry-run", "--merge", "--noinput")
+	assertNoFile(t, c.path("migrations", "0003_merge.go"))
+	assertIn(t, out, "Merging migrations")
+	assertIn(t, out, "Branch 0002_second")
+	assertIn(t, out, "Branch 0002_conflicting_second")
+	assertNotIn(t, out, "Created new merge migration")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigration_merge_dry_run_verbosity_3
+func TestMakemigrationMergeDryRunVerbosity3(t *testing.T) {
+	c := newCommand(t, nil, conflictMigrations(), migrationsApp())
+	out := c.call("makemigrations", "migrations", "--name", "merge", "--dry-run", "--merge", "--noinput", "-v", "3")
+	assertNoFile(t, c.path("migrations", "0003_merge.go"))
+	assertIn(t, out, "Merging migrations")
+	assertIn(t, out, "Branch 0002_second")
+	assertIn(t, out, "Branch 0002_conflicting_second")
+	assertNotIn(t, out, "Created new merge migration")
+
+	// The complete merge migration file that would be written.
+	assertIn(t, out, "Full merge migrations file '0003_merge.go':")
+	assertIn(t, out, "migrations.Migration{")
+	assertIn(t, out, "Dependencies: []migrations.Key{")
+	assertIn(t, out, `{App: "migrations", Name: "0002_second"}`)
+	assertIn(t, out, `{App: "migrations", Name: "0002_conflicting_second"}`)
+	assertIn(t, out, "Operations: []migrations.Operation{}")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_dry_run_verbosity_3
+func TestMakemigrationsDryRunVerbosity3(t *testing.T) {
+	type SillyModel struct {
+		ID         int64
+		SillyField bool   `orm:"default=false"`
+		SillyChar  string `orm:"default="`
+	}
+	c := newCommand(t, nil, noDefaultMigrations(), djangotest.App("migrations", &SillyModel{}))
+	out := c.call("makemigrations", "migrations", "--dry-run", "-v", "3")
+
+	// Normal --dry-run output.
+	assertIn(t, out, "+ Add field silly_char to sillymodel")
+
+	// The complete migrations file that would be written.
+	assertIn(t, out, "Full migrations file '0002_sillymodel_silly_char.go':")
+	assertIn(t, out, "migrations.Migration{")
+	assertIn(t, out, `{App: "migrations", Name: "0001_initial"}`)
+	assertIn(t, out, "migrations.AddField{")
+	assertIn(t, out, `Model: "SillyModel",`)
+	assertIn(t, out, `Name: "SillyChar",`)
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_scriptable
+func TestMakemigrationsScriptable(t *testing.T) {
+	c := newCommand(t, nil, nil, migrationsApp())
+	errOut := &bytes.Buffer{}
+	c.app.Err = errOut
+	out := c.call("makemigrations", "migrations", "--scriptable")
+	djangotest.AssertEqual(t, out, c.path("migrations", "0001_initial.go")+"\n")
+	assertIn(t, errOut.String(), "    + Create model ModelWithCustomBase\n")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_scriptable_merge
+func TestMakemigrationsScriptableMerge(t *testing.T) {
+	c := newCommand(t, nil, conflictMigrations(), migrationsApp())
+	errOut := &bytes.Buffer{}
+	c.app.Err = errOut
+	c.input("Y\n")
+	out := c.call("makemigrations", "migrations", "--merge", "--name", "merge", "--scriptable")
+	mergeFile := c.path("migrations", "0003_merge.go")
+	djangotest.AssertEqual(t, out, mergeFile+"\n")
+	assertIn(t, errOut.String(), "Created new merge migration "+mergeFile)
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_interactive_by_default
+func TestMakemigrationsInteractiveByDefault(t *testing.T) {
+	c := newCommand(t, nil, conflictMigrations(), migrationsApp())
+	c.input("N\n")
+	out := c.call("makemigrations", "migrations", "--name", "merge", "--merge")
+	// This fails if the command does not ask by default.
+	assertNoFile(t, c.path("migrations", "0003_merge.go"))
+	assertNotIn(t, out, "Created new merge migration")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_unspecified_app_with_conflict_no_merge
+func TestMakemigrationsUnspecifiedAppWithConflictNoMerge(t *testing.T) {
+	c := newCommand(t, nil,
+		join(noChangesMigrations(), conflictingAppMigrations("unspecified_app_with_conflict")),
+		migrationsApp(), djangotest.App("unspecified_app_with_conflict"))
+	c.call("makemigrations", "migrations", "-v", "0")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_unspecified_app_with_conflict_merge
+func TestMakemigrationsUnspecifiedAppWithConflictMerge(t *testing.T) {
+	c := newCommand(t, nil,
+		join(migratedAppsMigrations()[:1], conflictingAppMigrations("unspecified_app_with_conflict")),
+		djangotest.App("migrated_app"), djangotest.App("unspecified_app_with_conflict"))
+	c.input("y\n")
+	out := c.call("makemigrations", "migrated_app", "--name", "merge", "--merge")
+	assertNoFile(t, c.path("migrated_app", "0003_merge.go"))
+	assertIn(t, out, "No conflicts detected to merge.")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_merge_dont_output_dependency_operations
+func TestMakemigrationsMergeDontOutputDependencyOperations(t *testing.T) {
+	const app = "conflicting_app_with_dependencies"
+	c := newCommand(t, nil,
+		join(migratedAppsMigrations()[:1], conflictingAppMigrations(app, key("migrated_app", "0001_initial"))),
+		djangotest.App("migrated_app"), djangotest.App(app))
+	c.input("N\n")
+	djangotest.AssertEqual(t, strings.ToLower(c.call("makemigrations", app, "--merge")),
+		"merging conflicting_app_with_dependencies\n"+
+			"  branch 0002_conflicting_second\n"+
+			"    + create model something\n"+
+			"  branch 0002_second\n"+
+			"    - delete model tribble\n"+
+			"    - remove field silly_field from author\n"+
+			"    + add field rating to author\n"+
+			"    + create model book\n"+
+			"\n"+
+			"merging will only work if the operations printed above do not conflict\n"+
+			"with each other (working on different fields or models)\n"+
+			"should these migration branches be merged? [y/n] ")
+}
+
+// No Go counterpart: MakeMigrationsTests.test_merge_makemigrations_failure_to_format_code
+// runs the code formatters on the merge migration; the writer formats with
+// go/format itself.
+
+// writeFiles writes the files of migs below the migrations directory, so a
+// command that deletes or keeps them finds them, as Django's tests copy the
+// migration modules into a temporary directory.
+func (c *command) writeFiles(migs []migrations.Migration) {
+	c.t.Helper()
+	for _, m := range migs {
+		if _, err := migrations.WriteMigration(filepath.Join(c.app.MigrationsDir, m.App), migrations.PackageName(m.App), m); err != nil {
+			c.t.Fatalf("write %s: %v", m.Key(), err)
+		}
+	}
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_update
+func TestMakemigrationsUpdate(t *testing.T) {
+	c := newCommand(t, nil, testMigrations(), migrationsApp())
+	c.writeFiles(testMigrations())
+	migrationFile := c.path("migrations", "0002_second.go")
+	initialContent := c.read("migrations", "0002_second.go")
+
+	out := c.call("makemigrations", "migrations", "--update")
+	for _, name := range c.files() {
+		if strings.HasPrefix(name, "0003") {
+			t.Errorf("unexpected new migration %s", name)
+		}
+	}
+	assertNoFile(t, migrationFile)
+	newContent := c.read("migrations", "0002_delete_tribble_author_rating_modelwithcustombase_and_more.go")
+	if newContent == initialContent {
+		t.Error("the updated migration has the content of the old one")
+	}
+	assertIn(t, out, "Deleted "+migrationFile)
+}
+
+// autoNowAddMigrations mirrors Django's migrations.test_auto_now_add.
+func autoNowAddMigrations() []migrations.Migration {
+	return []migrations.Migration{{
+		App: "migrations", Name: "0001_initial", Initial: true,
+		Operations: []migrations.Operation{
+			migrations.CreateModel{Name: "Entry", Fields: []migrations.FieldState{
+				idField,
+				{Name: "Title", Column: "title", Kind: orm.KindChar, MaxLength: 255},
+			}},
+		},
+	}}
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_update_existing_name
+func TestMakemigrationsUpdateExistingName(t *testing.T) {
+	c := newCommand(t, nil, autoNowAddMigrations(), migrationsApp())
+	c.writeFiles(autoNowAddMigrations())
+	migrationFile := c.path("migrations", "0001_initial.go")
+	initialContent := c.read("migrations", "0001_initial.go")
+
+	out := c.call("makemigrations", "migrations", "--update")
+	assertNoFile(t, migrationFile)
+	if c.read("migrations", "0001_initial_updated.go") == initialContent {
+		t.Error("the updated migration has the content of the old one")
+	}
+	assertIn(t, out, "Deleted "+migrationFile)
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_update_custom_name
+func TestMakemigrationsUpdateCustomName(t *testing.T) {
+	const customName = "delete_something"
+	c := newCommand(t, nil, testMigrations(), migrationsApp())
+	c.writeFiles(testMigrations())
+	oldMigrationFile := c.path("migrations", "0002_second.go")
+	initialContent := c.read("migrations", "0002_second.go")
+
+	out := c.call("makemigrations", "migrations", "--update", "--name", customName)
+	for _, name := range c.files() {
+		if strings.HasPrefix(name, "0003") {
+			t.Errorf("unexpected new migration %s", name)
+		}
+	}
+	assertNoFile(t, oldMigrationFile)
+	if c.read("migrations", "0002_"+customName+".go") == initialContent {
+		t.Error("the updated migration has the content of the old one")
+	}
+	assertIn(t, out, "Deleted "+oldMigrationFile)
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_update_applied_migration
+func TestMakemigrationsUpdateAppliedMigration(t *testing.T) {
+	djangotest.EachDB(t, nil, func(t *testing.T, db *orm.DB) {
+		c := newCommand(t, db, testMigrations(), migrationsApp())
+		recordApplied(t, db, key("migrations", "0001_initial"), key("migrations", "0002_second"))
+		_, err := c.fail("makemigrations", "migrations", "--update")
+		assertCommandError(t, err, "Cannot update applied migration 'migrations.0002_second'.", 1)
+	})
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_update_no_migration
+func TestMakemigrationsUpdateNoMigration(t *testing.T) {
+	c := newCommand(t, nil, nil, migrationsApp())
+	_, err := c.fail("makemigrations", "migrations", "--update")
+	assertCommandError(t, err, "App migrations has no migration, cannot update last migration.", 1)
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_update_squash_migration
+func TestMakemigrationsUpdateSquashMigration(t *testing.T) {
+	c := newCommand(t, nil, squashedMigrations(), migrationsApp())
+	_, err := c.fail("makemigrations", "migrations", "--update")
+	assertCommandError(t, err, "Cannot update squash migration 'migrations.0001_squashed_0002'.", 1)
+}
+
+// The fifth migration uses a function of a migration file, as Django's
+// grow_tail and feed are.
+//
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_update_manual_porting
+func TestMakemigrationsUpdateManualPorting(t *testing.T) {
+	migs := planMigrations()
+	migs[4].Operations = []migrations.Operation{
+		migrations.RunGo{Forward: migrations.Noop},
+		migrations.RunGo{Forward: ManualPortingForwards},
+		migrations.RunGo{Forward: ManualPortingForwards, Reverse: migrations.Noop},
+	}
+	c := newCommand(t, nil, migs, migrationsApp())
+	c.writeFiles(migs)
+
+	out := c.call("makemigrations", "migrations", "--update")
+	// The previous migration exists.
+	previousMigrationFile := c.path("migrations", "0005_fifth.go")
+	assertFile(t, previousMigrationFile)
+	// The updated migration exists.
+	var updated string
+	for _, name := range c.files() {
+		if strings.HasPrefix(name, "0005_auto") {
+			updated = c.path("migrations", name)
+		}
+	}
+	assertFile(t, updated)
+	assertIn(t, out, "Updated migration "+updated+" requires manual porting.\n"+
+		"Previous migration "+previousMigrationFile+" was kept and must be deleted after porting functions manually.")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_update_dependency_migration
+func TestMakemigrationsUpdateDependencyMigration(t *testing.T) {
+	c := newCommand(t, nil, alterFKMigrations(), djangotest.App("author_app"), djangotest.App("book_app"))
+	_, err := c.fail("makemigrations", "book_app", "--update")
+	assertCommandError(t, err,
+		"Cannot update migration 'book_app.0001_initial' that migrations 'author_app.0002_alter_id' depend on.", 1)
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_empty_connections
+func TestMakemigrationsEmptyConnections(t *testing.T) {
+	// With no apps.
+	c := newCommand(t, nil, nil)
+	assertIn(t, c.call("makemigrations"), "No changes detected")
+	// With an app. A Go package needs no __init__ file; the port checks the
+	// migration file instead.
+	c = newCommand(t, nil, nil, migrationsApp())
+	c.call("makemigrations", "migrations", "-v", "0")
+	assertFile(t, c.path("migrations", "0001_initial.go"))
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_migrations_modules_path_not_exist
+func TestMakemigrationsMigrationsModulesPathNotExist(t *testing.T) {
+	type SillyModel struct {
+		ID         int64
+		SillyField bool `orm:"default=false"`
+	}
+	c := newCommand(t, nil, nil, djangotest.App("migrations", &SillyModel{}))
+	c.app.MigrationsDir = filepath.Join(c.app.MigrationsDir, "test_migrations_path_doesnt_exist", "foo", "bar")
+	out := c.call("makemigrations", "migrations")
+
+	// The migration file is created in the expected path.
+	assertFile(t, c.path("migrations", "0001_initial.go"))
+	// The output says the migration is created.
+	assertIn(t, out, " + Create model SillyModel")
+}
+
+// unreachableDB connects to nothing, as Django's test makes the history check
+// raise OperationalError.
+type unreachableDB struct{}
+
+func (unreachableDB) Connect(context.Context) (driver.Conn, error) {
+	return nil, errors.New("could not connect to server")
+}
+
+func (unreachableDB) Driver() driver.Driver { return nil }
+
+// Django warns with a RuntimeWarning; the port reads the warning from the
+// error output.
+//
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_inconsistent_history_db_failure
+func TestMakemigrationsInconsistentHistoryDBFailure(t *testing.T) {
+	db := orm.NewDB(sql.OpenDB(unreachableDB{}), sqlite.New(), orm.NewRegistry())
+	c := newCommand(t, db, testMigrations(), migrationsApp())
+	errOut := &bytes.Buffer{}
+	c.app.Err = errOut
+	c.call("makemigrations", "-v", "0")
+	assertIn(t, errOut.String(), "Got an error checking a consistent migration history performed "+
+		"for database connection 'default': ")
+	assertIn(t, errOut.String(), "could not connect to server")
+}
+
+// Django asks for a one-off default for a new auto_now_add field and offers
+// timezone.now. Go asks nothing, as TestAddDateFieldsWithAutoNowAddAskingForDefault
+// of the migrations package shows: existing rows get the time at which the
+// migration runs. The port checks that the migration is made without a
+// question.
+//
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_auto_now_add_interactive
+func TestMakemigrationsAutoNowAddInteractive(t *testing.T) {
+	type Entry struct {
+		ID           int64
+		Title        string    `orm:"max_length=255"`
+		CreationDate time.Time `orm:"auto_now_add"`
+	}
+	c := newCommand(t, nil, autoNowAddMigrations(), djangotest.App("migrations", &Entry{}))
+	out := c.call("makemigrations", "migrations")
+	assertNotIn(t, out, "It is impossible to add the field 'creation_date'")
+	assertIn(t, out, "Add field creation_date to entry")
+}
+
+// Django quits on the answer 2. Go asks nothing, so the migration is made;
+// see TestMakemigrationsAutoNowAddInteractive.
+//
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_auto_now_add_interactive_quit
+func TestMakemigrationsAutoNowAddInteractiveQuit(t *testing.T) {
+	type Author struct {
+		ID             int64
+		PublishingDate orm.Date `orm:"auto_now_add"`
+	}
+	c := newCommand(t, nil, testMigrations(), djangotest.App("migrations", &Author{}))
+	c.input("2\n")
+	assertIn(t, c.call("makemigrations", "migrations"), "+ Add field publishing_date to author")
+}
+
+// Django exits with status 3 because nobody can supply the default. Go needs
+// none; see TestMakemigrationsAutoNowAddInteractive.
+//
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_non_interactive_auto_now_add_addition
+func TestMakemigrationsNonInteractiveAutoNowAddAddition(t *testing.T) {
+	type Entry struct {
+		ID           int64
+		CreationDate time.Time `orm:"auto_now_add"`
+	}
+	c := newCommand(t, nil, autoNowAddMigrations(), djangotest.App("migrations", &Entry{}))
+	out := c.call("makemigrations", "migrations", "--noinput")
+	assertNotIn(t, out, "not migrated")
+	assertIn(t, out, "+ Add field creation_date to entry")
+}
+
+// Ported from Django: tests/migrations/test_commands.py::MakeMigrationsTests.test_makemigrations_continues_number_sequence_after_squash
+func TestMakemigrationsContinuesNumberSequenceAfterSquash(t *testing.T) {
+	c := newCommand(t, nil, squashedMigrations(), migrationsApp())
+	assertIn(t, c.call("makemigrations", "migrations", "--noinput", "--empty"), "0003_auto")
+}
+
+// No Go counterpart: these MakeMigrationsTests cover Python concepts.
+//   - test_makemigrations_consistency_checks_respect_routers: there are no
+//     database routers.
+//   - test_failing_migration: a model default comes from a struct tag, which
+//     the writer can always render, and the file is written only after it is
+//     rendered.
+//   - test_makemigrations_disabled_migrations_for_app and
+//     test_makemigrations_migrations_modules_nonexistent_toplevel_package:
+//     there is no MIGRATION_MODULES setting; the migrations of an app live in
+//     a directory below MigrationsDir.
+//   - test_makemigrations_no_init and test_makemigrations_no_init_ambiguous:
+//     a Go package needs no __init__ file.
+//   - test_makemigrations_failure_to_format_code: the writer formats with
+//     go/format itself.
+//   - test_makemigrations_migration_path_output_valueerror: filepath.Rel fails
+//     only between Windows volumes, which a test cannot set up; displayPath
+//     prints the absolute path then.
+//   - test_makemigrations_interactive_unique_callable_default_addition and
+//     test_makemigrations_non_interactive_unique_callable_default_addition: a
+//     field default is a constant, never a callable.

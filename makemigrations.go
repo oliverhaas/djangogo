@@ -5,10 +5,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/oliverhaas/djangogo/migrations"
@@ -19,6 +20,11 @@ import (
 // (Django's makemigrations).
 type makemigrationsCommand struct {
 	app *Application
+	// opts are the options of the running command.
+	opts makemigrationsOptions
+	// log receives the messages and prompts: the standard output, or the
+	// error output with --scriptable.
+	log io.Writer
 }
 
 func (*makemigrationsCommand) Name() string { return "makemigrations" }
@@ -26,12 +32,17 @@ func (*makemigrationsCommand) Help() string { return "Create new migrations from
 
 // makemigrationsOptions are the parsed command-line options.
 type makemigrationsOptions struct {
-	labels  []string
-	dryRun  bool
-	check   bool
-	empty   bool
-	noInput bool
-	name    string
+	labels     []string
+	dryRun     bool
+	merge      bool
+	check      bool
+	empty      bool
+	noInput    bool
+	name       string
+	noHeader   bool
+	scriptable bool
+	update     bool
+	verbosity  verbosityValue
 }
 
 // parse reads the options. ok is false when only the usage was asked for.
@@ -39,17 +50,25 @@ func (c *makemigrationsCommand) parse(args []string) (opts makemigrationsOptions
 	fs := flag.NewFlagSet("makemigrations", flag.ContinueOnError)
 	fs.SetOutput(c.app.Out)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(c.app.Out,
-			"usage: makemigrations [app_label ...] [--dry-run] [--check] [--name NAME] [--empty] [--noinput]")
+		_, _ = fmt.Fprintln(c.app.Out, "usage: makemigrations [app_label ...] [--dry-run] [--merge] [--empty] "+
+			"[--noinput] [--name NAME] [--no-header] [--check] [--scriptable] [--update] [-v {0,1,2,3}]")
 		fs.PrintDefaults()
 	}
+	opts.verbosity = 1
+	opts.verbosity.declare(fs)
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "show what migrations would be made, without writing them")
-	fs.BoolVar(&opts.check, "check", false, "exit with a non-zero status when model changes are missing migrations; implies --dry-run")
+	fs.BoolVar(&opts.merge, "merge", false, "fix migration conflicts")
 	fs.BoolVar(&opts.empty, "empty", false, "create an empty migration")
 	fs.BoolVar(&opts.noInput, "noinput", false, "never prompt for input")
 	fs.BoolVar(&opts.noInput, "no-input", false, "never prompt for input")
 	fs.StringVar(&opts.name, "name", "", "use this name for the migration file(s)")
 	fs.StringVar(&opts.name, "n", "", "short for --name")
+	fs.BoolVar(&opts.noHeader, "no-header", false, "do not add a header comment to new migration files")
+	fs.BoolVar(&opts.check, "check", false,
+		"exit with a non-zero status when model changes are missing migrations; implies --dry-run")
+	fs.BoolVar(&opts.scriptable, "scriptable", false,
+		"write messages and prompts to the error output, and only the paths of new migration files to the output")
+	fs.BoolVar(&opts.update, "update", false, "merge model changes into the latest migration and optimize the operations")
 	opts.labels, err = parseInterleaved(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
 		return opts, false, nil
@@ -68,6 +87,10 @@ func (c *makemigrationsCommand) Run(args []string) error {
 	opts, ok, err := c.parse(args)
 	if err != nil || !ok {
 		return err
+	}
+	c.opts, c.log = opts, app.Out
+	if opts.scriptable {
+		c.log = app.errOut()
 	}
 	if app.Models == nil {
 		return errors.New("djangogo: no model registry configured")
@@ -99,8 +122,16 @@ func (c *makemigrationsCommand) Run(args []string) error {
 			}
 		}
 	}
-	if err := conflictError(conflicts, c.app.prog()); err != nil {
-		return err
+	switch {
+	case !opts.merge:
+		if err := conflictError(conflicts, c.app.prog()); err != nil {
+			return err
+		}
+	case len(conflicts) == 0:
+		c.logf("No conflicts detected to merge.\n")
+		return nil
+	default:
+		return c.handleMerge(loader, conflicts)
 	}
 
 	if opts.empty {
@@ -111,15 +142,18 @@ func (c *makemigrationsCommand) Run(args []string) error {
 		for _, label := range opts.labels {
 			changes[label] = []*migrations.Migration{{App: label, Name: "custom"}}
 		}
-		return c.write(migrations.ArrangeForGraph(changes, loader.Graph, opts.name), opts.dryRun)
+		return c.write(migrations.ArrangeForGraph(changes, loader.Graph, opts.name), nil)
 	}
 
 	var questioner migrations.Questioner
-	nonInteractive := &migrations.NonInteractiveQuestioner{Log: func(msg string) { _, _ = fmt.Fprintln(app.Out, msg) }}
+	nonInteractive := &migrations.NonInteractiveQuestioner{}
+	if opts.verbosity >= 1 {
+		nonInteractive.Log = func(msg string) { c.logf("%s\n", msg) }
+	}
 	if opts.noInput {
 		questioner = nonInteractive
 	} else {
-		questioner = migrations.NewInteractiveQuestioner(app.in(), app.Out, opts.dryRun)
+		questioner = migrations.NewInteractiveQuestioner(app.in(), c.log, opts.dryRun)
 	}
 	detector, err := app.newAutodetector(loader, questioner)
 	if err != nil {
@@ -130,17 +164,25 @@ func (c *makemigrationsCommand) Run(args []string) error {
 		return err
 	}
 	if len(changes) == 0 {
+		if opts.verbosity < 1 {
+			return nil
+		}
 		switch len(opts.labels) {
 		case 0:
-			_, _ = fmt.Fprintln(app.Out, "No changes detected")
+			c.logf("No changes detected\n")
 		case 1:
-			_, _ = fmt.Fprintf(app.Out, "No changes detected in app '%s'\n", opts.labels[0])
+			c.logf("No changes detected in app '%s'\n", opts.labels[0])
 		default:
-			_, _ = fmt.Fprintf(app.Out, "No changes detected in apps '%s'\n", strings.Join(opts.labels, "', '"))
+			c.logf("No changes detected in apps '%s'\n", strings.Join(opts.labels, "', '"))
 		}
 		return nil
 	}
-	if err := c.write(changes, opts.dryRun); err != nil {
+	if opts.update {
+		err = c.updateLast(ctx, changes)
+	} else {
+		err = c.write(changes, nil)
+	}
+	if err != nil {
 		return err
 	}
 	c.warnDeclinedRenames(nonInteractive.Declined, changes)
@@ -148,6 +190,11 @@ func (c *makemigrationsCommand) Run(args []string) error {
 		return commandError(1, "Model changes are missing from the migrations.")
 	}
 	return nil
+}
+
+// logf prints a message to the log output.
+func (c *makemigrationsCommand) logf(format string, args ...any) {
+	_, _ = fmt.Fprintf(c.log, format, args...)
 }
 
 // checkHistory fails when the database has a migration applied before one of
@@ -159,7 +206,7 @@ func (c *makemigrationsCommand) checkHistory(ctx context.Context, loader *migrat
 	}
 	applied, err := migrations.NewRecorder(c.app.DB).AppliedMigrations(ctx)
 	if err != nil {
-		_, _ = fmt.Fprintf(c.app.Out, "Got an error checking a consistent migration history performed for "+
+		_, _ = fmt.Fprintf(c.app.errOut(), "Got an error checking a consistent migration history performed for "+
 			"database connection 'default': %v\n", err)
 		return nil
 	}
@@ -167,40 +214,228 @@ func (c *makemigrationsCommand) checkHistory(ctx context.Context, loader *migrat
 	return loader.CheckConsistentHistory()
 }
 
-// write prints the migrations in Django's format and, unless dryRun is set,
-// writes their files and adds them to the registry of the application. An
-// app without migrations in the registry gets a new Go package, which the
-// user must import; the hint follows Django's output.
-func (c *makemigrationsCommand) write(changes map[string][]*migrations.Migration, dryRun bool) error {
-	app := c.app
-	labels := make([]string, 0, len(changes))
-	for label := range changes {
-		labels = append(labels, label)
+// handleMerge joins the branches of each app in conflicts with a migration
+// that depends on all of them, as Django's makemigrations --merge does. It
+// prints the operations of each branch and asks first, unless --noinput is
+// set.
+func (c *makemigrationsCommand) handleMerge(loader *migrations.Loader, conflicts map[string][]string) error {
+	app, opts := c.app, c.opts
+	ask := func(string) (bool, error) { return true, nil }
+	if !opts.noInput {
+		ask = migrations.NewInteractiveQuestioner(app.in(), c.log, false).AskMerge
 	}
-	sort.Strings(labels)
-	var newPackages []string
-	for _, label := range labels {
-		_, _ = fmt.Fprintf(app.Out, "Migrations for '%s':\n", label)
+	for _, label := range slices.Sorted(maps.Keys(conflicts)) {
+		leaves := conflicts[label]
+		branches, err := loader.MergeBranches(label, leaves)
+		if err != nil {
+			return err
+		}
+		if opts.verbosity > 0 {
+			c.logf("Merging %s\n", label)
+			for _, branch := range branches {
+				c.logf("  Branch %s\n", branch.Leaf.Name)
+				for _, op := range branch.Operations {
+					c.logf("    %s\n", migrations.FormattedDescription(op))
+				}
+			}
+		}
+		merge, err := ask(label)
+		if err != nil {
+			return err
+		}
+		if !merge {
+			continue
+		}
+		m := migrations.NewMergeMigration(label, leaves, opts.name)
 		dir := filepath.Join(app.MigrationsDir, label)
-		if !dryRun && len(app.Migrations.ForApp(label)) == 0 {
+		src, _, err := c.render(dir, m)
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(dir, migrations.FileName(m.Name))
+		if opts.dryRun {
+			if opts.verbosity == 3 {
+				c.logf("Full merge migrations file '%s':\n%s", migrations.FileName(m.Name), src)
+			}
+			continue
+		}
+		if err := writeFile(path, src); err != nil {
+			return err
+		}
+		app.Migrations.Add(m)
+		if opts.verbosity > 0 {
+			c.logf("\nCreated new merge migration %s\n", displayPath(path))
+			if opts.scriptable {
+				_, _ = fmt.Fprintln(app.Out, displayPath(path))
+			}
+		}
+	}
+	return nil
+}
+
+// updateLast merges changes into the last migration of each app, as Django's
+// makemigrations --update does, and writes the result under a new name in
+// place of the last migration. The last migration must not be a squashed,
+// applied or depended-on migration.
+func (c *makemigrationsCommand) updateLast(ctx context.Context, changes map[string][]*migrations.Migration) error {
+	app := c.app
+	loader, err := migrations.NewLoader(ctx, app.Migrations, app.DB, app.Apps.Names())
+	if err != nil {
+		return err
+	}
+	updated := map[string][]*migrations.Migration{}
+	replaced := map[string]migrations.Key{}
+	for _, label := range slices.Sorted(maps.Keys(changes)) {
+		leaves := loader.Graph.LeafNodes(label)
+		if len(leaves) == 0 {
+			return commandError(1, "App %s has no migration, cannot update last migration.", label)
+		}
+		leaf, _ := loader.Migration(leaves[0])
+		if len(leaf.Replaces) > 0 {
+			return commandError(1, "Cannot update squash migration '%s'.", leaf.Key())
+		}
+		if _, ok := loader.Applied[leaf.Key()]; ok {
+			return commandError(1, "Cannot update applied migration '%s'.", leaf.Key())
+		}
+		var depending []string
+		for _, m := range app.Migrations.All() {
+			if slices.Contains(m.Dependencies, leaf.Key()) {
+				depending = append(depending, fmt.Sprintf("'%s'", m.Key()))
+			}
+		}
+		if len(depending) > 0 {
+			return commandError(1, "Cannot update migration '%s' that migrations %s depend on.",
+				leaf.Key(), strings.Join(depending, ", "))
+		}
+		m := *leaf
+		m.Operations = slices.Clone(leaf.Operations)
+		m.Dependencies = slices.Clone(leaf.Dependencies)
+		for _, change := range changes[label] {
+			m.Operations = append(m.Operations, change.Operations...)
+			for _, dep := range change.Dependencies {
+				if dep.App != label && !slices.Contains(m.Dependencies, dep) {
+					m.Dependencies = append(m.Dependencies, dep)
+				}
+			}
+		}
+		m.Operations = migrations.Optimize(m.Operations, label)
+		fragment := c.opts.name
+		if fragment == "" {
+			fragment = m.SuggestName()
+		}
+		name := leaf.Name[:min(4, len(leaf.Name))] + "_" + fragment
+		if name == leaf.Name {
+			name += "_updated"
+		}
+		m.Name = name
+		updated[label] = []*migrations.Migration{&m}
+		replaced[label] = leaf.Key()
+	}
+	return c.write(updated, replaced)
+}
+
+// write prints the migrations in Django's format and, unless --dry-run is
+// set, writes their files and adds them to the registry of the application.
+// replaced holds the migration that --update replaces for an app: its file is
+// deleted, unless it defines a function the new migration uses. An app
+// without migrations in the registry gets a new Go package, which the user
+// must import; the hint follows Django's output.
+func (c *makemigrationsCommand) write(changes map[string][]*migrations.Migration, replaced map[string]migrations.Key) error {
+	app, opts := c.app, c.opts
+	var newPackages []string
+	for _, label := range slices.Sorted(maps.Keys(changes)) {
+		if opts.verbosity >= 1 {
+			c.logf("Migrations for '%s':\n", label)
+		}
+		dir := filepath.Join(app.MigrationsDir, label)
+		if !opts.dryRun && len(app.Migrations.ForApp(label)) == 0 {
 			newPackages = append(newPackages, dir)
 		}
 		for _, m := range changes[label] {
 			path := filepath.Join(dir, migrations.FileName(m.Name))
-			_, _ = fmt.Fprintf(app.Out, "  %s\n", displayPath(path))
-			for _, op := range m.Operations {
-				_, _ = fmt.Fprintf(app.Out, "    %s\n", migrations.FormattedDescription(op))
+			if opts.verbosity >= 1 {
+				c.logf("  %s\n", displayPath(path))
+				for _, op := range m.Operations {
+					c.logf("    %s\n", migrations.FormattedDescription(op))
+				}
+				if opts.scriptable {
+					_, _ = fmt.Fprintln(app.Out, displayPath(path))
+				}
 			}
-			if dryRun {
+			if opts.dryRun && opts.verbosity < 3 {
 				continue
 			}
-			if _, err := migrations.WriteMigration(dir, migrations.PackageName(label), *m); err != nil {
+			src, porting, err := c.render(dir, *m)
+			if err != nil {
+				return err
+			}
+			if opts.dryRun {
+				c.logf("Full migrations file '%s':\n%s", migrations.FileName(m.Name), src)
+				continue
+			}
+			if err := writeFile(path, src); err != nil {
 				return err
 			}
 			app.Migrations.Add(*m)
+			if old, ok := replaced[label]; ok {
+				if err := c.dropReplaced(old, path, porting); err != nil {
+					return err
+				}
+			}
 		}
 	}
-	c.importHint(newPackages)
+	if opts.verbosity >= 1 {
+		c.importHint(newPackages)
+	}
+	return nil
+}
+
+// dropReplaced deletes the file of the migration old that --update replaced
+// with the migration at path. porting lists the files that define a function
+// the new migration uses; the old file is kept then, as in Django, so the
+// functions can be copied first.
+func (c *makemigrationsCommand) dropReplaced(old migrations.Key, path string, porting []string) error {
+	oldPath := filepath.Join(c.app.MigrationsDir, old.App, migrations.FileName(old.Name))
+	if len(porting) > 0 {
+		c.logf("Updated migration %s requires manual porting.\n"+
+			"Previous migration %s was kept and must be deleted after porting functions manually.\n",
+			displayPath(path), displayPath(oldPath))
+		return nil
+	}
+	if err := os.Remove(oldPath); err != nil {
+		return fmt.Errorf("djangogo: delete the replaced migration: %w", err)
+	}
+	c.app.Migrations.Remove(old)
+	c.logf("Deleted %s\n", displayPath(oldPath))
+	return nil
+}
+
+// render returns the source of the file of m in dir.
+func (c *makemigrationsCommand) render(dir string, m migrations.Migration) (src string, porting []string, err error) {
+	header := "Generated by djangogo makemigrations."
+	if c.opts.noHeader {
+		header = ""
+	}
+	return renderMigration(dir, m, header)
+}
+
+// renderMigration returns the source of the file of m in dir. header is the
+// text of the comment at the top, empty for none. porting lists the files
+// that define a function a RunGo operation of m uses.
+func renderMigration(dir string, m migrations.Migration, header string) (src string, porting []string, err error) {
+	opts := migrations.RenderOptions{Header: header}
+	opts.ImportPath, _ = goImportPath(dir)
+	return migrations.RenderMigrationWith(migrations.PackageName(m.App), m, opts)
+}
+
+// writeFile writes src to path and creates its directory.
+func writeFile(path, src string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("djangogo: create %q: %w", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		return fmt.Errorf("djangogo: write %q: %w", path, err)
+	}
 	return nil
 }
 
@@ -220,14 +455,14 @@ func (c *makemigrationsCommand) importHint(dirs []string) {
 	case 0:
 		return
 	case 1:
-		_, _ = fmt.Fprintln(c.app.Out, "Import the new migrations package in your main package and rebuild, "+
-			"so that migrate finds it:")
+		c.logf("Import the new migrations package in your main package and rebuild, " +
+			"so that migrate finds it:\n")
 	default:
-		_, _ = fmt.Fprintln(c.app.Out, "Import the new migrations packages in your main package and rebuild, "+
-			"so that migrate finds them:")
+		c.logf("Import the new migrations packages in your main package and rebuild, " +
+			"so that migrate finds them:\n")
 	}
 	for _, path := range paths {
-		_, _ = fmt.Fprintf(c.app.Out, "  _ %q\n", path)
+		c.logf("  _ %q\n", path)
 	}
 }
 
@@ -285,7 +520,7 @@ func (c *makemigrationsCommand) warnDeclinedRenames(declined []migrations.Potent
 		if r.IsModel() {
 			what, lost = "model", "table"
 		}
-		_, _ = fmt.Fprintf(c.app.Out,
+		c.logf(
 			"Warning: %s looks like a renamed %s; the migration drops the old %s and adds a new empty one, "+
 				"discarding its data. Edit the migration to rename the %s instead if you meant to keep it.\n",
 			r, what, lost, lost)

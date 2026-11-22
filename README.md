@@ -190,8 +190,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   separate `migrate` process sees them only after each `migrations/<app>` package
   is blank-imported in the main package and the binary is rebuilt;
   `makemigrations` prints the import line. `makemigrations` cannot write `RunGo`
-  operations: add them by hand, as with Django's `RunPython`. There is no
-  `makemigrations --merge`: conflicts are reported only. A change
+  operations: add them by hand, as with Django's `RunPython`. A new
+  `auto_now_add` field fills the existing rows with the time at which the
+  migration runs, where Django asks for a default. A change
   to the type of a primary key does not change the foreign keys that reference
   it, and PostgreSQL rejects it.
 - **Templates:** the engine is built on pongo2. The `i18n`, `l10n`, `tz` and
