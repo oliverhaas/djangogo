@@ -254,12 +254,15 @@ type selectItem struct {
 }
 
 // orderItem is one resolved ORDER BY term. alias is set when the term is a
-// selected annotation, which is then ordered by its output name.
+// selected expression, which is then ordered by its position in the SELECT
+// list.
 type orderItem struct {
-	node   sqlNode
-	alias  string
-	desc   bool
-	random bool
+	node       sqlNode
+	alias      string
+	desc       bool
+	random     bool
+	nullsFirst bool
+	nullsLast  bool
 }
 
 // selectStmt is a resolved SELECT statement, ready to render.
@@ -300,11 +303,11 @@ func (c *compiler) build(items []selectItem, ordered bool) (*selectStmt, error) 
 	return s, nil
 }
 
-// resolveOrder resolves the ORDER BY terms. A term is an annotation name or a
-// field key, which may span relations. A relation addressed by its attribute
-// name (not "<attr>_id") inherits the target model's Meta.Ordering, as in
-// Django. An expression is ordered by once: its first term wins, because a
-// later one could never matter.
+// resolveOrder resolves the ORDER BY terms. A term is an annotation name, a
+// field key, which may span relations, or an expression. A relation addressed
+// by its attribute name (not "<attr>_id") inherits the target model's default
+// ordering, as in Django. An expression is ordered by once: its first term
+// wins, because a later one could never matter.
 func (c *compiler) resolveOrder(items []selectItem) ([]orderItem, error) {
 	selected := make(map[string]string, 2*len(items))
 	for _, it := range items {
@@ -337,12 +340,15 @@ func selectedExprKey(d Dialect, n sqlNode) string { return "expr " + nodeKey(d, 
 // Meta.Ordering when the key ends on a relation attribute rather than its "_id"
 // column. selected maps the alias of each selected item that has one, and the
 // selectedExprKey of its expression, to the alias: a term on a selected
-// expression is ordered by the alias, as Django orders by its position. stack
+// expression is ordered by its position, as in Django. stack
 // tracks models on the active expansion chain to break cycles while allowing
 // sibling branches to reference the same model.
 func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected map[string]string, seen map[string]bool, stack map[*Model]bool) ([]orderItem, error) {
 	if t.random {
 		return append(out, orderItem{random: true}), nil
+	}
+	if t.expr != nil {
+		return c.appendOrderExpr(out, t, selected, seen)
 	}
 	item := orderItem{desc: t.desc}
 	// An annotation is identified by its name: two of them may differ
@@ -360,16 +366,8 @@ func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected map[st
 		}
 		if target := relatedOrderingTarget(t.key, p); target != nil && !stack[target] {
 			stack[target] = true
-			for _, sub := range parseOrderTerms(target.ordering) {
-				if sub.random {
-					out = append(out, orderItem{random: true})
-					continue
-				}
-				expanded := orderTerm{
-					key:  t.key + lookupSep + sub.key,
-					desc: t.desc != sub.desc,
-				}
-				out, err = c.appendOrderTerm(out, expanded, selected, seen, stack)
+			for _, sub := range target.ordering {
+				out, err = c.appendOrderTerm(out, relatedOrderTerm(t, sub), selected, seen, stack)
 				if err != nil {
 					delete(stack, target)
 					return nil, err
@@ -384,6 +382,54 @@ func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected map[st
 		}
 		key = nodeKey(c.d, item.node)
 		item.alias = selected[selectedExprKey(c.d, item.node)]
+	}
+	if seen[key] {
+		return out, nil
+	}
+	seen[key] = true
+	return append(out, item), nil
+}
+
+// relatedOrderTerm returns the term sub of the default ordering of the model
+// that t orders by, as read from the model of t. A key is prefixed with the
+// key of t, and its direction is flipped when t is descending. An expression
+// reads its fields through the relation. An expression with a direction, an
+// OrderExpr, keeps it, and any other takes the direction of t, as in Django.
+func relatedOrderTerm(t, sub orderTerm) orderTerm {
+	switch {
+	case sub.random:
+		return sub
+	case sub.expr != nil:
+		e := sub.expr.prefixed(t.key + lookupSep)
+		if sub.directed {
+			sub.expr = &e
+			return sub
+		}
+		return orderTerm{expr: &e, desc: t.desc}
+	default:
+		return orderTerm{key: t.key + lookupSep + sub.key, desc: t.desc != sub.desc}
+	}
+}
+
+// appendOrderExpr resolves an orderTerm of an expression. F of an annotation
+// name orders by the annotation, and an expression that is selected under an
+// alias is ordered by its position. F of a relation orders by its column, not by
+// the default ordering of the related model, as in Django.
+func (c *compiler) appendOrderExpr(out []orderItem, t orderTerm, selected map[string]string, seen map[string]bool) ([]orderItem, error) {
+	item := orderItem{desc: t.desc, nullsFirst: t.nullsFirst, nullsLast: t.nullsLast}
+	var key string
+	if n, ok := c.annots[t.expr.key]; ok && t.expr.kind == exprField {
+		item.node = n
+		item.alias = selected[t.expr.key]
+		key = "annotation " + t.expr.key
+	} else {
+		n, err := c.resolveExpr(*t.expr)
+		if err != nil {
+			return nil, err
+		}
+		item.node = n
+		key = nodeKey(c.d, n)
+		item.alias = selected[selectedExprKey(c.d, n)]
 	}
 	if seen[key] {
 		return out, nil
@@ -588,6 +634,17 @@ func (s *selectStmt) render(w *sqlWriter) {
 	}
 }
 
+// position returns the 1-based position of the item selected under alias, or
+// 0 when no item has it.
+func (s *selectStmt) position(alias string) int {
+	for i, it := range s.items {
+		if it.alias == alias {
+			return i + 1
+		}
+	}
+	return 0
+}
+
 // renderOrder writes the ORDER BY clause, if any.
 func (s *selectStmt) renderOrder(w *sqlWriter) {
 	for i, o := range s.order {
@@ -600,6 +657,10 @@ func (s *selectStmt) renderOrder(w *sqlWriter) {
 		case o.random:
 			w.write("RANDOM()")
 			continue
+		case o.alias != "" && s.position(o.alias) > 0:
+			// Django orders by the position (PositionRef): a column
+			// of SelectRelated can share the alias.
+			w.write(strconv.Itoa(s.position(o.alias)))
 		case o.alias != "":
 			w.ident(o.alias)
 		default:
@@ -609,6 +670,12 @@ func (s *selectStmt) renderOrder(w *sqlWriter) {
 			w.write(" DESC")
 		} else {
 			w.write(" ASC")
+		}
+		switch {
+		case o.nullsLast:
+			w.write(" NULLS LAST")
+		case o.nullsFirst:
+			w.write(" NULLS FIRST")
 		}
 	}
 }

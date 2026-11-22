@@ -18,6 +18,11 @@ type Meta struct {
 	Table string
 	// Ordering sets the default QuerySet ordering (Django's Meta.ordering).
 	Ordering []string
+	// OrderingExprs sets a default ordering with expressions, in the form
+	// QuerySet.OrderBy takes it: keys and expressions such as
+	// orm.Lower("name") or orm.F("author").Asc().NullsFirst(). Set it
+	// instead of Ordering.
+	OrderingExprs []any
 	// UniqueTogether declares sets of fields that must be unique together
 	// (Django's Meta.unique_together).
 	UniqueTogether [][]string

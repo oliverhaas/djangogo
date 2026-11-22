@@ -492,7 +492,7 @@ func TestLookupValuesListRelations(t *testing.T) {
 	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {
 		f := lkSetUp(t, db)
 		args := []string{"name", "article__headline", "article__tag__name"}
-		rows, err := lkAuthors(db).ValuesList(args...).OrderBy(args...).All(context.Background())
+		rows, err := lkAuthors(db).ValuesList(args...).OrderBy("name", "article__headline", "article__tag__name").All(context.Background())
 		if err != nil {
 			t.Fatalf("ValuesList: %v", err)
 		}

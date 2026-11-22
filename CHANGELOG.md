@@ -313,9 +313,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   of Django's arguments and method overrides. An inline formset finds the
   foreign key to the parent, or takes its name, and keeps it in a hidden
   field.
-- ORM: `QuerySet.Ordering` returns the keys a queryset is ordered by, and
-  `QuerySet.TotallyOrdered` reports whether they decide the position of every
-  row, Django's `ordered` and `totally_ordered`.
+- ORM: `QuerySet.Ordering` returns the keys and expressions a queryset is
+  ordered by, and `QuerySet.TotallyOrdered` reports whether they decide the
+  position of every row, Django's `ordered` and `totally_ordered`: the primary
+  key, a unique field that is not null, or every field of a `unique_together`
+  set or of a unique constraint without a condition. An annotation that is
+  `F` of a field counts as that field.
 - auth: `Hasher.SafeSummary` returns the parts of an encoded password that
   can be shown, with the salt and the hash masked (Django's `safe_summary`).
   The username field of `User` validates with Django's validator and reports a
@@ -805,6 +808,20 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   expression that is not boolean fails with an error.
 - ORM: `Update` on a `Values` or `ValuesList` queryset, as Django's
   `values().update()`.
+- ORM: `OrderBy` takes expressions besides keys, as Django's `order_by`
+  does: `OrderBy(orm.Lower("name"), orm.F("rank").Desc().NullsLast())`. An
+  `Expr` orders ascending, and `Expr.Asc` and `Expr.Desc` return an
+  `orm.OrderExpr`, whose `NullsFirst` and `NullsLast` place the rows whose
+  value is NULL. `Meta.OrderingExprs` gives a model a default ordering with
+  expressions. An aggregate in `OrderBy` that `Annotate` does not name fails
+  with an error, as do `Reverse` and `Last` on a sliced queryset.
+- Admin: `ModelAdmin.OrderingExprs` orders the changelist and the options of
+  relation fields by expressions, and `DisplayColumn.OrderExpr` sorts a column
+  by an expression, Django's `ordering` and `admin_order_field` with
+  expressions. The changelist adds `-pk` to its ordering only when the
+  ordering does not decide the position of every row, as Django's
+  `_get_deterministic_ordering` does, and the ordering check reports an `F`
+  expression that names a missing field (`admin.E033`).
 
 ### Changed
 
@@ -969,6 +986,9 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `OneToOneRel` for a reverse one-to-one relation. Before, it named
   `ManyToManyField` and `OneToOneField`, or `ForeignKey` for a reverse
   foreign key.
+- **BREAKING**: `QuerySet.OrderBy` takes `...any`, so that it accepts
+  expressions. Code that passes a `[]string` with `...` must convert it to
+  `[]any` first.
 
 ### Fixed
 

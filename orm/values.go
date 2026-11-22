@@ -141,10 +141,10 @@ func (vs *ValuesQuerySet) Exclude(args ...any) *ValuesQuerySet {
 	return &ValuesQuerySet{q: vs.q.filter(args, true)}
 }
 
-// OrderBy returns a clone with the keys appended to the ordering; see
-// QuerySet.OrderBy.
-func (vs *ValuesQuerySet) OrderBy(fields ...string) *ValuesQuerySet {
-	return &ValuesQuerySet{q: vs.q.orderBy(fields)}
+// OrderBy returns a clone with the keys and expressions appended to the
+// ordering; see QuerySet.OrderBy.
+func (vs *ValuesQuerySet) OrderBy(terms ...any) *ValuesQuerySet {
+	return &ValuesQuerySet{q: vs.q.orderByArgs(terms)}
 }
 
 // Annotate returns a clone with the named expressions added to every row. An
@@ -224,10 +224,10 @@ func (vl *ValuesListQuerySet) Exclude(args ...any) *ValuesListQuerySet {
 	return &ValuesListQuerySet{q: vl.q.filter(args, true)}
 }
 
-// OrderBy returns a clone with the keys appended to the ordering; see
-// QuerySet.OrderBy.
-func (vl *ValuesListQuerySet) OrderBy(fields ...string) *ValuesListQuerySet {
-	return &ValuesListQuerySet{q: vl.q.orderBy(fields)}
+// OrderBy returns a clone with the keys and expressions appended to the
+// ordering; see QuerySet.OrderBy.
+func (vl *ValuesListQuerySet) OrderBy(terms ...any) *ValuesListQuerySet {
+	return &ValuesListQuerySet{q: vl.q.orderByArgs(terms)}
 }
 
 // Annotate returns a clone with the named expressions added to every row; see

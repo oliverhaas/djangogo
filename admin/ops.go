@@ -14,7 +14,7 @@ import (
 // through modelOps closures.
 type querySpec struct {
 	filters       []orm.Cond
-	ordering      []string
+	ordering      []any
 	selectRelated []string
 	// prefetchRelated are forward relations loaded in one query each.
 	prefetchRelated []string
@@ -59,6 +59,9 @@ func applySpec[T any](qs *orm.QuerySet[T], spec querySpec) *orm.QuerySet[T] {
 type modelOps struct {
 	// newPtr returns a fresh *T as an any.
 	newPtr func() any
+	// totallyOrdered reports whether ordering decides the position of every
+	// row, orm.QuerySet.TotallyOrdered. An empty ordering does not.
+	totallyOrdered func(ordering []any) bool
 	// all returns every row, ordered by the given OrderBy terms, as a []any
 	// whose elements are *T pointing into a stable backing slice.
 	all func(ctx context.Context, ordering []string) ([]any, error)
@@ -104,6 +107,10 @@ type modelOps struct {
 func buildOps[T any](db *orm.DB, m *orm.Model) modelOps {
 	return modelOps{
 		newPtr: func() any { return new(T) },
+
+		totallyOrdered: func(ordering []any) bool {
+			return len(ordering) > 0 && orm.Query[T](db).OrderBy(ordering...).TotallyOrdered()
+		},
 
 		all: func(ctx context.Context, ordering []string) ([]any, error) {
 			qs := orm.Query[T](db)

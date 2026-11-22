@@ -157,7 +157,11 @@ func (v ListView[T]) objectList(r *http.Request) (ObjectList[T], error) {
 			modelTypeName[T]())
 	}
 	if len(v.Ordering) > 0 {
-		qs = qs.OrderBy(v.Ordering...)
+		terms := make([]any, len(v.Ordering))
+		for i, key := range v.Ordering {
+			terms[i] = key
+		}
+		qs = qs.OrderBy(terms...)
 	}
 	return QuerySetList(qs), nil
 }

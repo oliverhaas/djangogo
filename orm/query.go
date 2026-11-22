@@ -35,12 +35,21 @@ type query struct {
 	err     error
 }
 
-// orderTerm is one ORDER BY term: a field key or annotation name, descending
-// when desc is set, or a random order when random is set.
+// orderTerm is one ORDER BY term: a field key or annotation name, or the
+// expression expr, descending when desc is set, or a random order when random
+// is set.
 type orderTerm struct {
 	key    string
 	desc   bool
 	random bool
+	// expr is the expression of an Expr or OrderExpr term, nil for a key.
+	expr       *Expr
+	nullsFirst bool
+	nullsLast  bool
+	// directed reports a term of an OrderExpr, which keeps its direction
+	// when a model orders by a relation to the model whose default ordering
+	// holds it.
+	directed bool
 }
 
 // annotation is a named expression added by Annotate.
@@ -142,29 +151,54 @@ func (q *query) effectiveOrders() []orderTerm {
 		return nil
 	}
 	if q.model != nil && len(q.model.ordering) > 0 {
-		return parseOrderTerms(q.model.ordering)
+		return q.model.ordering
 	}
 	return nil
 }
 
-// orderBy returns a clone with the given terms appended to the explicit
-// ordering, replacing any default Meta.Ordering. No terms clears the ordering.
+// orderBy returns a clone with the given keys appended to the explicit
+// ordering, replacing any default Meta.Ordering. No keys clears the ordering.
 func (q *query) orderBy(fields []string) *query {
+	args := make([]any, len(fields))
+	for i, f := range fields {
+		args[i] = f
+	}
+	return q.orderByArgs(args)
+}
+
+// orderByArgs is orderBy for the arguments of OrderBy: keys, Exprs and
+// OrderExprs.
+func (q *query) orderByArgs(args []any) *query {
 	cp := q.clone()
 	cp.explicitOrder = true
-	if len(fields) == 0 {
+	if len(args) == 0 {
 		cp.orders = nil
 		return cp
 	}
-	cp.orders = append(cp.orders, parseOrderTerms(fields)...)
+	terms, err := parseOrderArgs(args)
+	if err != nil {
+		cp.setErr(err)
+		return cp
+	}
+	cp.orders = append(cp.orders, terms...)
 	return cp
 }
 
-// reversed returns a clone with every effective ordering term flipped. An
-// unordered query is ordered by descending primary key, as Django's reverse of
-// the default "pk" ordering used by first() and last().
+// errReverseSliced refuses to reverse a sliced query, as Django raises a
+// TypeError.
+var errReverseSliced = errors.New("orm: cannot reverse a query once a slice has been taken")
+
+// reversed returns a clone with every effective ordering term flipped, and
+// the NULLS FIRST and NULLS LAST of an expression swapped, as Django's
+// reverse_ordering. An unordered query is ordered by descending primary key,
+// as Django's reverse of the default "pk" ordering used by first() and
+// last().
 func (q *query) reversed() *query {
 	cp := q.clone()
+	if q.sliced() {
+		cp.setErr(errReverseSliced)
+		return cp
+	}
 	terms := cp.effectiveOrders()
 	cp.explicitOrder = true
 	if len(terms) == 0 {
@@ -174,7 +208,9 @@ func (q *query) reversed() *query {
 	cp.orders = make([]orderTerm, len(terms))
 	copy(cp.orders, terms)
 	for i := range cp.orders {
-		cp.orders[i].desc = !cp.orders[i].desc
+		o := &cp.orders[i]
+		o.desc = !o.desc
+		o.nullsFirst, o.nullsLast = o.nullsLast, o.nullsFirst
 	}
 	return cp
 }

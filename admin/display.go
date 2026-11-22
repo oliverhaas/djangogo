@@ -27,6 +27,9 @@ type resolvedColumn struct {
 	label string
 	// orderField is the ORM OrderBy key for sorting this column, or "" if unsortable.
 	orderField string
+	// orderExpr is the expression that sorts this column in place of
+	// orderField (DisplayColumn.OrderExpr), or nil.
+	orderExpr any
 	// field is the direct model field when this column is a local field.
 	field *orm.Field
 	// pathSteps holds the sequence of concrete fields along a "__"-spanning FK/O2O path.
@@ -231,6 +234,7 @@ func resolveDisplayColumn(e *entry, name string) (resolvedColumn, bool) {
 			cssName:    name,
 			label:      label,
 			orderField: orderField,
+			orderExpr:  c.OrderExpr,
 			custom:     &c,
 		}
 		if c.Value == nil {

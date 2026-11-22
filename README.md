@@ -200,8 +200,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   functions, and `Filter` takes no boolean expression as a condition:
   annotate the expression and filter the annotation by `true` instead. A
   transform of `RegisterTransform` applies to one field kind, where Django's
-  registration on `CharField` also covers its subclasses. `OrderBy` takes
-  keys, not expressions: annotate an expression to order by it. There is no
+  registration on `CharField` also covers its subclasses. There is no
   `extra()` and no fetch modes. `SelectRelated` needs field names: Django
   6.1 deprecates `select_related()` without arguments. A model keeps prefetched
   reverse and many-to-many sets only when it embeds `orm.RelCache`, and the
@@ -230,7 +229,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
 - **Admin:** a registered model needs an integer primary key. An
   inline cannot edit the auto-created through model of a many-to-many field.
   The `FormClass` of `FormfieldOverrides` does not apply to a relation, which
-  keeps its choice field. The scripts and
+  keeps its choice field. No hook replaces the rows that a relation field
+  offers, Django's `queryset` argument of `formfield_for_foreignkey`: use
+  `limit_choices_to`. The scripts and
   pages are in English only. The date
   hierarchy reads a datetime in UTC. A search field with `@` uses
   `icontains`, not full-text search. A template option such as

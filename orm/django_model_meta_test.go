@@ -97,7 +97,7 @@ func TestModelMetaAllOptions(t *testing.T) {
 	djangotest.AssertEqual(t, m.Table(), "custom_blog_posts")
 	djangotest.AssertEqual(t, m.VerboseName(), "blog entry")
 	djangotest.AssertEqual(t, m.VerboseNamePlural(), "blog entries")
-	djangotest.AssertEqual(t, m.Ordering(), []string{"-title", "id"})
+	djangotest.AssertEqual(t, m.Ordering(), []any{"-title", "id"})
 	djangotest.AssertEqual(t, m.UniqueTogether(), [][]string{{"Category", "Slug"}})
 
 	indexes := m.Indexes()
@@ -109,7 +109,7 @@ func TestModelMetaAllOptions(t *testing.T) {
 	// Mutating returned slices must not affect the frozen model descriptor.
 	ord := m.Ordering()
 	ord[0] = "mutated"
-	djangotest.AssertEqual(t, m.Ordering()[0], "-title")
+	djangotest.AssertEqual[any](t, m.Ordering()[0], "-title")
 
 	ut := m.UniqueTogether()
 	ut[0][0] = "mutated"

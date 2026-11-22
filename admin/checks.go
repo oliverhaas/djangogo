@@ -30,9 +30,10 @@ func (o adminObject) Label() string { return o.kind + " of " + o.model.Label() }
 // admin.E011, admin.E012, admin.E013), ExcludeFields (admin.E015),
 // FilterVertical and FilterHorizontal (admin.E013, admin.E019, admin.E020),
 // RadioFields (admin.E022, admin.E023, admin.E024), PrepopulatedFields
-// (admin.E027, admin.E028, admin.E030), Ordering (admin.E032, admin.E033),
-// ReadonlyFields (admin.E035), the inlines (see checkInlines), ListDisplay
-// (admin.E108, admin.E109), ListDisplayLinks (admin.E111), ListFilter
+// (admin.E027, admin.E028, admin.E030), Ordering and OrderingExprs
+// (admin.E032, admin.E033), ReadonlyFields (admin.E035), the inlines (see
+// checkInlines), ListDisplay (admin.E108, admin.E109), ListDisplayLinks
+// (admin.E111), ListFilter
 // (admin.E113, admin.E116), ListEditable (admin.E121, admin.E122,
 // admin.E123, admin.E124, admin.E125), DateHierarchy (admin.E127,
 // admin.E128), then Actions (admin.E130).
@@ -319,13 +320,25 @@ func checkReadonlyItem(e *entry, obj adminObject, name, label string) []checks.M
 		label, name, obj.kind, e.model.Label()), checks.Obj(obj), checks.ID("admin.E035"))}
 }
 
-// checkOrdering checks Ordering, Django's _check_ordering: the random marker
-// "?" stands alone, and each name is "pk" or a field of the model, with or
-// without a leading "-". Django skips the names that span relations.
+// checkOrdering checks Ordering, or OrderingExprs when Ordering is empty,
+// Django's _check_ordering: the random marker "?" stands alone, and each name
+// is "pk" or a field of the model, with or without a leading "-". An F
+// expression, ordered or not, names a field too, and other expressions are
+// not checked. Django skips the names that span relations.
 func checkOrdering(e *entry, obj adminObject) []checks.Message {
-	ordering := e.admin.Ordering
+	ordering := make([]any, 0, len(e.admin.Ordering))
+	for _, name := range e.admin.Ordering {
+		ordering = append(ordering, name)
+	}
+	if len(ordering) == 0 {
+		ordering = e.admin.OrderingExprs
+	}
 	var out []checks.Message
-	for i, name := range ordering {
+	for i, term := range ordering {
+		name, _, ok := orderingFieldName(term)
+		if !ok {
+			continue
+		}
 		if name == "?" {
 			if len(ordering) != 1 {
 				out = append(out, checks.Error(
@@ -339,7 +352,7 @@ func checkOrdering(e *entry, obj adminObject) []checks.Message {
 		if strings.Contains(field, "__") || field == "pk" {
 			continue
 		}
-		if _, ok := relationOrField(e.model, field); !ok {
+		if _, found := relationOrField(e.model, field); !found {
 			out = append(out, checks.Error(fmt.Sprintf(
 				"The value of 'ordering[%d]' refers to '%s', which is not a field of '%s'.", i, field, e.model.Label()),
 				checks.Obj(obj), checks.ID("admin.E033")))

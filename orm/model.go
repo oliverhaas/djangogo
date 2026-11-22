@@ -29,7 +29,7 @@ type Model struct {
 	privateFields         []*PrivateField
 	genericRels           []*GenericRelation
 	byGenericQuery        map[string]*GenericRelation
-	ordering              []string
+	ordering              []orderTerm
 	uniqueTogether        [][]string
 	indexes               []Index
 	constraints           []Constraint

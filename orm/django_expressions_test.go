@@ -938,3 +938,7 @@ func TestNegatedExpressionValues(t *testing.T) {
 		djangotest.AssertEqual(t, rows, [][]any{{"Example Inc.", false}, {"Foobar Ltd.", true}})
 	})
 }
+
+// No Go counterpart: tests/expressions/tests.py::OrderByTests.test_nulls_false
+// passes nulls_first=False and nulls_last=False, which Django rejects.
+// OrderExpr.NullsFirst and OrderExpr.NullsLast take no flag.

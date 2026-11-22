@@ -1027,18 +1027,40 @@ func TestListFilterCheck(t *testing.T) {
 // Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_valid_random_marker_case
 // Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_valid_complex_case
 // Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_valid_case
+// Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_invalid_expression
+// Ported from Django: tests/modeladmin/test_checks.py::OrderingCheckTests.test_valid_expression
 func TestOrderingCheck(t *testing.T) {
 	djangotest.EachDB(t, modeladminCheckModels(), func(t *testing.T, db *orm.DB) {
-		// No Go counterpart: test_invalid_expression and
-		// test_valid_expression order by F() and OrderBy expressions, and the
-		// admin.E031 half of test_not_iterable checks the type of ordering:
-		// Ordering is a []string.
+		// No Go counterpart: the admin.E031 half of test_not_iterable checks
+		// the type of ordering: Ordering is a []string.
 		const model = "modeladmin.ValidationTestModel"
 		register := func(ordering ...string) *admin.AdminSite {
 			return checkSite(t, db, func(site *admin.AdminSite) {
 				admin.Register[ValidationTestModel](site, admin.ModelAdmin{Ordering: ordering})
 			})
 		}
+		registerExprs := func(ordering ...any) *admin.AdminSite {
+			return checkSite(t, db, func(site *admin.AdminSite) {
+				admin.Register[ValidationTestModel](site, admin.ModelAdmin{OrderingExprs: ordering})
+			})
+		}
+
+		t.Run("test_invalid_expression", func(t *testing.T) {
+			assertIsInvalid(t, registerExprs(orm.F("nonexistent")), model,
+				"The value of 'ordering[0]' refers to 'nonexistent', which is not a field of 'modeladmin.ValidationTestModel'.",
+				"admin.E033")
+		})
+
+		t.Run("test_valid_expression", func(t *testing.T) {
+			assertIsValid(t, registerExprs(orm.Upper("name"), orm.Upper("band__name").Desc()))
+		})
+
+		// No Django test exists: an ordered F expression names a field too.
+		t.Run("ordered_f_missing_field", func(t *testing.T) {
+			assertIsInvalid(t, registerExprs("name", orm.F("nonexistent").Desc()), model,
+				"The value of 'ordering[1]' refers to 'nonexistent', which is not a field of 'modeladmin.ValidationTestModel'.",
+				"admin.E033")
+		})
 
 		t.Run("test_not_iterable", func(t *testing.T) {
 			assertIsInvalid(t, register("non_existent_field"), model,

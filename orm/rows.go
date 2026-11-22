@@ -68,17 +68,17 @@ func labelRows(ctx context.Context, db *DB, m *Model, objs []reflect.Value) ([][
 }
 
 // LabeledRowsOrdered returns (primary key, label) pairs for rows of m ordered
-// by ordering (or m.Ordering() when ordering is empty, falling back to primary
-// key). When pks is non-nil, only rows whose primary key is in pks are
+// by ordering, which holds terms as QuerySet.OrderBy takes them (or
+// m.Ordering() when ordering is empty, falling back to primary key). When pks is non-nil, only rows whose primary key is in pks are
 // returned.
-func LabeledRowsOrdered(ctx context.Context, db *DB, m *Model, ordering []string, pks []any) ([][2]string, error) {
+func LabeledRowsOrdered(ctx context.Context, db *DB, m *Model, ordering []any, pks []any) ([][2]string, error) {
 	return LabeledRowsWhere(ctx, db, m, Cond{}, ordering, pks)
 }
 
 // LabeledRowsWhere is LabeledRowsOrdered for the rows of m that match where,
 // such as the LimitChoicesTo of a relation to m. A row that matches through
 // several related rows is returned once.
-func LabeledRowsWhere(ctx context.Context, db *DB, m *Model, where Cond, ordering []string, pks []any) ([][2]string, error) {
+func LabeledRowsWhere(ctx context.Context, db *DB, m *Model, where Cond, ordering []any, pks []any) ([][2]string, error) {
 	pk := m.PrimaryKey()
 	if pk == nil {
 		return nil, fmt.Errorf("orm: model %s has no primary key", m.Name())
@@ -95,7 +95,7 @@ func LabeledRowsWhere(ctx context.Context, db *DB, m *Model, where Cond, orderin
 	}
 	switch {
 	case len(ordering) > 0:
-		q = q.orderBy(ordering)
+		q = q.orderByArgs(ordering)
 	case len(m.Ordering()) == 0:
 		q = q.orderBy([]string{"pk"})
 	}

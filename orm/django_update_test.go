@@ -375,7 +375,12 @@ func TestUpdateUpdateTransformedField(t *testing.T) {
 
 // Ported from Django: tests/update/tests.py::AdvancedTests.test_update_ordered_by_inline_m2m_annotation
 func TestUpdateUpdateOrderedByInlineM2MAnnotation(t *testing.T) {
-	t.Skip("needs OrderBy with an expression, which takes keys only")
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		foo := create(t, db, &updFoo{Target: "test"})
+		create(t, db, &updBar{Foo: fkTo[updFoo](foo.ID)})
+		updUpdate(t, 1, orm.Query[updBar](db).OrderBy(orm.Abs("m2m_foo")), "x", 2)
+		assertFlat(t, orm.Query[updBar](db).ValuesList("x"), []any{int64(2)})
+	})
 }
 
 // Ported from Django: tests/update/tests.py::AdvancedTests.test_update_ordered_by_m2m_annotation

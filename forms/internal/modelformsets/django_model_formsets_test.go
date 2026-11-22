@@ -1611,7 +1611,7 @@ func TestGetQuerysetFallsBackToPKWhenNoOrderingDefined(t *testing.T) {
 		djangotest.AssertEqual(t, orm.Query[Product](db).TotallyOrdered(), false)
 
 		formset := forms.NewModelFormSet[Product](db)
-		djangotest.AssertEqual(t, formset.GetQuerySet().Ordering(), []string{"pk"})
+		djangotest.AssertEqual(t, formset.GetQuerySet().Ordering(), []any{"pk"})
 	})
 }
 
@@ -1622,7 +1622,7 @@ func TestGetQuerysetAppendsPKToExplicitQuerysetOrdering(t *testing.T) {
 		// ordered.
 		formset := forms.NewModelFormSet[Author](db)
 		formset.QuerySet = orm.Query[Author](db).OrderBy("name")
-		djangotest.AssertEqual(t, formset.GetQuerySet().Ordering(), []string{"name", "pk"})
+		djangotest.AssertEqual(t, formset.GetQuerySet().Ordering(), []any{"name", "pk"})
 	})
 }
 
@@ -1632,7 +1632,7 @@ func TestGetQuerysetAppendsPKToMetaOrdering(t *testing.T) {
 		// Author has Meta.ordering = ("name",) which is not deterministic
 		// by itself.
 		formset := forms.NewModelFormSet[Author](db)
-		djangotest.AssertEqual(t, formset.GetQuerySet().Ordering(), []string{"name", "pk"})
+		djangotest.AssertEqual(t, formset.GetQuerySet().Ordering(), []any{"name", "pk"})
 	})
 }
 
@@ -1645,7 +1645,7 @@ func TestGetQuerysetUnchangedWhenAlreadyTotallyOrdered(t *testing.T) {
 		formset.QuerySet = orm.Query[Author](db).OrderBy("pk")
 		qs := formset.GetQuerySet()
 		// Must be exactly ("pk",), not ("pk", "pk").
-		djangotest.AssertEqual(t, qs.Ordering(), []string{"pk"})
+		djangotest.AssertEqual(t, qs.Ordering(), []any{"pk"})
 		djangotest.AssertEqual(t, qs.TotallyOrdered(), true)
 	})
 }

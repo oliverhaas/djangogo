@@ -240,9 +240,10 @@ func (m *ManyManager[T]) Exclude(args ...any) *QuerySet[T] {
 	return m.QuerySet().Exclude(args...)
 }
 
-// OrderBy returns a QuerySet of related T rows ordered by fields.
-func (m *ManyManager[T]) OrderBy(fields ...string) *QuerySet[T] {
-	return m.QuerySet().OrderBy(fields...)
+// OrderBy returns a QuerySet of related T rows ordered by terms; see
+// QuerySet.OrderBy.
+func (m *ManyManager[T]) OrderBy(terms ...any) *QuerySet[T] {
+	return m.QuerySet().OrderBy(terms...)
 }
 
 // Get returns the single related T row matching args.

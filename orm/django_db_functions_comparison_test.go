@@ -110,16 +110,14 @@ func TestCoalesceMixedValues(t *testing.T) {
 }
 
 // Ported from Django: tests/db_functions/comparison/test_coalesce.py::CoalesceTests.test_ordering
-//
-// OrderBy takes keys, not expressions, so the value is annotated and the rows
-// ordered by the annotation.
 func TestCoalesceOrdering(t *testing.T) {
 	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
 		create(t, db, &fnAuthor{Name: "John Smith", Alias: new("smithj")})
 		create(t, db, &fnAuthor{Name: "Rhonda"})
-		authors := orm.Query[fnAuthor](db).Annotate("display_name", orm.Coalesce("alias", "name"))
-		assertFlat(t, authors.OrderBy("display_name").ValuesList("name"), []any{"Rhonda", "John Smith"})
-		assertFlat(t, authors.OrderBy("-display_name").ValuesList("name"), []any{"John Smith", "Rhonda"})
+		authors := orm.Query[fnAuthor](db)
+		assertFlat(t, authors.OrderBy(orm.Coalesce("alias", "name")).ValuesList("name"), []any{"Rhonda", "John Smith"})
+		assertFlat(t, authors.OrderBy(orm.Coalesce("alias", "name").Asc()).ValuesList("name"), []any{"Rhonda", "John Smith"})
+		assertFlat(t, authors.OrderBy(orm.Coalesce("alias", "name").Desc()).ValuesList("name"), []any{"John Smith", "Rhonda"})
 	})
 }
 

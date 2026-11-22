@@ -126,6 +126,7 @@ func methodArticleAdmin() admin.ModelAdmin {
 		ListDisplay: []string{
 			"content", "date", "callable_year", "model_year", "modeladmin_year", "model_year_reversed",
 			"model_property_year", "model_month", "model_property_is_from_past",
+			"order_by_expression", "order_by_f_expression", "order_by_orderby_expression",
 		},
 		DisplayColumns: map[string]admin.DisplayColumn{
 			"callable_year":               {OrderField: "date", Value: year},
@@ -134,6 +135,11 @@ func methodArticleAdmin() admin.ModelAdmin {
 			"model_year_reversed":         {OrderField: "-date"},
 			"model_property_year":         {OrderField: "date"},
 			"model_property_is_from_past": {Description: "Is from past?", Boolean: true},
+			// These orderings aren't particularly useful but show that
+			// expressions can be used for OrderExpr.
+			"order_by_expression":         {OrderExpr: orm.F("date").Add(3 * 24 * time.Hour), Value: year},
+			"order_by_f_expression":       {OrderExpr: orm.F("date"), Value: year},
+			"order_by_orderby_expression": {OrderExpr: orm.F("date").Asc().NullsLast(), Value: year},
 		},
 	}
 }
@@ -180,8 +186,9 @@ func assertHeaderColumns(t *testing.T, body []byte, want int) {
 }
 
 // The "o" parameter of Django's test_change_list_sorting_property is 10;
-// the port leaves out the section, the lambda and the expression columns
-// 7 to 9 of ArticleAdmin.list_display.
+// the port leaves out the section and the lambda columns of
+// ArticleAdmin.list_display and puts the expression columns at the end, so
+// they are 10 to 12 where Django's are 9, 12 and 13.
 //
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_change_list_column_field_classes
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_change_list_sorting_callable
@@ -190,12 +197,12 @@ func assertHeaderColumns(t *testing.T, body []byte, want int) {
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_change_list_sorting_model
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_change_list_sorting_model_admin
 // Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_change_list_sorting_model_admin_reverse
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_change_list_sorting_callable_query_expression
+// Ported from Django: tests/admin_views/tests.py::AdminViewBasicTest.test_change_list_sorting_callable_query_expression_reverse
 func TestChangeListSortingModelMethod(t *testing.T) {
 	djangotest.EachDB(t, sortingModels(), func(t *testing.T, db *orm.DB) {
 		// No Go counterpart: the lambda half of
 		// test_change_list_column_field_classes; a Go column has a name.
-		// FIXME-PORT: test_change_list_sorting_callable_query_expression and
-		// its reverse order by expressions, which OrderField does not take.
 		env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
 			admin.Register[MethodArticle](site, methodArticleAdmin())
 		})
@@ -254,6 +261,22 @@ func TestChangeListSortingModelMethod(t *testing.T) {
 			body = get("-6")
 			assertContentBefore(t, body, td(2000), td(2008), "Results of sorting on ModelAdmin method are out of order.")
 			assertContentBefore(t, body, td(2008), td(2009), "Results of sorting on ModelAdmin method are out of order.")
+		})
+
+		t.Run("test_change_list_sorting_callable_query_expression", func(t *testing.T) {
+			for _, o := range []string{"10", "11", "12"} {
+				body := get(o)
+				assertContentBefore(t, body, "Oldest content", "Middle content", "Results of sorting on callable are out of order.")
+				assertContentBefore(t, body, "Middle content", "Newest content", "Results of sorting on callable are out of order.")
+			}
+		})
+
+		t.Run("test_change_list_sorting_callable_query_expression_reverse", func(t *testing.T) {
+			for _, o := range []string{"-10", "-11", "-12"} {
+				body := get(o)
+				assertContentBefore(t, body, "Middle content", "Oldest content", "Results of sorting on callable are out of order.")
+				assertContentBefore(t, body, "Newest content", "Middle content", "Results of sorting on callable are out of order.")
+			}
 		})
 
 		// No Django test exists: a method without display options is a

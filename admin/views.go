@@ -239,26 +239,15 @@ func (s *AdminSite) relationChoices(r *http.Request, e *entry, form *forms.Form,
 }
 
 // relatedOrdering returns the ordering of the admin of the related model
-// target: its GetOrdering or Ordering, with the names translated to the
-// model's attribute paths. It is nil when target has no admin or the admin no
-// ordering.
-func (s *AdminSite) relatedOrdering(r *http.Request, target *orm.Model) []string {
+// target: its GetOrdering, Ordering or OrderingExprs, with the names
+// translated to the model's attribute paths. It is nil when target has no
+// admin or the admin no ordering.
+func (s *AdminSite) relatedOrdering(r *http.Request, target *orm.Model) []any {
 	relEntry := s.entryByModel(target)
 	if relEntry == nil {
 		return nil
 	}
-	ordering := relEntry.admin.Ordering
-	if relEntry.admin.GetOrdering != nil {
-		ordering = relEntry.admin.GetOrdering(r)
-	}
-	if len(ordering) == 0 {
-		return nil
-	}
-	norm := make([]string, len(ordering))
-	for i, o := range ordering {
-		norm[i] = normalizeFieldPath(target, o)
-	}
-	return norm
+	return adminOrdering(r, &relEntry.admin, target, false)
 }
 
 // manyInitial sets the initial value of every many-to-many field of form to

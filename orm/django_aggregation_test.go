@@ -132,6 +132,14 @@ func TestAggregationEmptyAggregate(t *testing.T) {
 	})
 }
 
+// Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregate_in_order_by
+func TestAggregationAggregateInOrderBy(t *testing.T) {
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		_, err := orm.Query[agAuthor](db).Values("age").OrderBy(orm.Avg("book__rating")).All(context.Background())
+		assertErrorContains(t, err, "using an aggregate in OrderBy without also including it in Annotate is not allowed")
+	})
+}
+
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_single_aggregate
 func TestAggregationSingleAggregate(t *testing.T) {
 	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {

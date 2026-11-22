@@ -2,6 +2,7 @@ package orm
 
 import (
 	"fmt"
+	"slices"
 )
 
 // QuerySet is a lazy, immutable, clone-per-method query builder for model T.
@@ -115,80 +116,122 @@ func (qs *QuerySet[T]) Exclude(args ...any) *QuerySet[T] {
 	return &QuerySet[T]{q: qs.q.filter(args, true)}
 }
 
-// OrderBy returns a clone ordered by the given keys, after any ordering it
-// already has. A leading "-" requests descending order, a key may span
-// relations ("author__name") or name an annotation, and "?" orders randomly.
-// Calling OrderBy without arguments clears the ordering.
+// OrderBy returns a clone ordered by the given terms, after any ordering it
+// already has. A term is a key or an expression. A leading "-" orders a key
+// descending, a key may span relations ("author__name") or name an
+// annotation, and "?" orders randomly. An Expr orders ascending, and an
+// OrderExpr, which Expr.Asc and Expr.Desc return, in its direction:
+//
+//	OrderBy("-pub_date", orm.Lower("headline"), orm.F("author").Desc().NullsLast())
+//
+// Calling OrderBy without arguments clears the ordering. Any other argument
+// type is an error when the queryset runs.
 //
 // Django's order_by replaces the previous ordering; OrderBy appends to it, so
 // that orderings can be built up step by step.
-func (qs *QuerySet[T]) OrderBy(fields ...string) *QuerySet[T] {
-	return &QuerySet[T]{q: qs.q.orderBy(fields)}
+func (qs *QuerySet[T]) OrderBy(terms ...any) *QuerySet[T] {
+	return &QuerySet[T]{q: qs.q.orderByArgs(terms)}
 }
 
-// Ordering returns the keys the rows are ordered by, in the form OrderBy takes
-// them: the keys of OrderBy, or the Meta.Ordering of the model when OrderBy
-// was not called. It is empty for an unordered queryset, Django's
-// qs.ordered being false.
-func (qs *QuerySet[T]) Ordering() []string {
-	terms := qs.q.effectiveOrders()
-	out := make([]string, len(terms))
-	for i, t := range terms {
-		switch {
-		case t.random:
-			out[i] = "?"
-		case t.desc:
-			out[i] = "-" + t.key
-		default:
-			out[i] = t.key
-		}
-	}
-	return out
+// Ordering returns the terms the rows are ordered by, in the form OrderBy
+// takes them: a key, "-" and a key, "?" or an OrderExpr. They are the terms of
+// OrderBy, or the default ordering of the model when OrderBy was not called.
+// It is empty for an unordered queryset, Django's qs.ordered being false.
+func (qs *QuerySet[T]) Ordering() []any {
+	return orderArgs(qs.q.effectiveOrders())
 }
 
 // TotallyOrdered reports whether the ordering decides the position of every
 // row, Django's totally_ordered: it names the primary key, a unique field that
-// is not null, or every field of a unique_together set without a nullable
-// field. An ordering by a related model or by an annotation does not count.
+// is not null, or every field of a unique_together set or of a unique
+// constraint on fields without a condition, when none of them is nullable. An
+// annotation that is F of a field of the model counts as that field. An
+// ordering by a relation name, which orders by the related model, by a field
+// of a related model or by an expression other than F does not count.
 func (qs *QuerySet[T]) TotallyOrdered() bool {
-	m := qs.q.model
+	return qs.q.totallyOrdered()
+}
+
+// totallyOrdered implements QuerySet.TotallyOrdered.
+func (q *query) totallyOrdered() bool {
+	m := q.model
 	if m == nil {
 		return false
 	}
-	named := map[*Field]bool{}
-	for _, t := range qs.q.effectiveOrders() {
+	candidates := map[*Field]bool{}
+	for _, t := range q.effectiveOrders() {
 		if t.random {
 			continue
 		}
-		if t.key == "pk" {
-			return true
+		key := t.key
+		if t.expr != nil {
+			if t.expr.kind != exprField {
+				continue
+			}
+			key = t.expr.key
 		}
-		f, ok := m.FieldByAttr(t.key)
-		if !ok {
-			f, ok = m.FieldByColumn(t.key)
-		}
-		// An ordering by a relation itself orders by the related model.
-		if !ok || (f.Rel != nil && t.key == f.Attr) {
+		if a, ok := q.annotation(key); ok {
+			if a.kind != exprField {
+				continue
+			}
+			if f, ok := m.orderingField(a.key); ok {
+				candidates[f] = true
+			}
 			continue
 		}
+		if key == "pk" {
+			return true
+		}
+		f, ok := m.orderingField(key)
+		// An ordering by a relation name orders by the related model.
+		if !ok || (f.Rel != nil && key == f.Attr) {
+			continue
+		}
+		candidates[f] = true
+	}
+	for f := range candidates {
 		if (f.PrimaryKey || f.Unique) && !f.Null {
 			return true
 		}
-		named[f] = true
 	}
-	for _, set := range m.uniqueTogether {
-		all := len(set) > 0
-		for _, name := range set {
-			if f, ok := m.byName[name]; !ok || !named[f] || f.Null {
-				all = false
-				break
-			}
+	sets := slices.Clone(m.uniqueTogether)
+	for _, c := range m.constraints {
+		if u, ok := c.(UniqueConstraint); ok && len(u.Fields) > 0 && u.Condition.empty() {
+			sets = append(sets, u.Fields)
 		}
-		if all {
+	}
+	for _, set := range sets {
+		if len(set) > 0 && slices.IndexFunc(set, func(name string) bool {
+			f, ok := m.byName[name]
+			return !ok || !candidates[f] || f.Null
+		}) < 0 {
 			return true
 		}
 	}
 	return false
+}
+
+// annotation returns the expression of the annotation name.
+func (q *query) annotation(name string) (Expr, bool) {
+	for _, a := range q.annotations {
+		if a.name == name {
+			return a.expr, true
+		}
+	}
+	return Expr{}, false
+}
+
+// orderingField returns the field of m that key names: "pk", an attribute
+// name or a column name. A key that spans a relation names no field.
+func (m *Model) orderingField(key string) (*Field, bool) {
+	if key == "pk" {
+		f := m.PrimaryKey()
+		return f, f != nil
+	}
+	if f, ok := m.FieldByAttr(key); ok {
+		return f, true
+	}
+	return m.FieldByColumn(key)
 }
 
 // Reverse returns a clone with the ordering reversed. A queryset without an

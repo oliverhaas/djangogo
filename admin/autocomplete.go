@@ -95,7 +95,7 @@ func (s *AdminSite) autocompleteView(w http.ResponseWriter, r *http.Request) {
 	}
 	spec.ordering = s.relatedOrdering(r, target.model)
 	if len(spec.ordering) == 0 && len(target.model.Ordering()) == 0 {
-		spec.ordering = []string{"pk"}
+		spec.ordering = []any{"pk"}
 	}
 
 	pag := views.NewPaginator[any](&changelistObjectList{ops: target.ops, spec: spec}, autocompletePerPage)

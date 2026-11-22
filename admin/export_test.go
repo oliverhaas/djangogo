@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -51,6 +52,25 @@ func (t TestOps) Update(ctx context.Context, pk int64, obj any) error {
 // Del removes the row with the given primary key.
 func (t TestOps) Del(ctx context.Context, pk int64) error {
 	return t.ops.del(ctx, pk)
+}
+
+// Queryset returns the rows that the ModelAdmin of the model app.slug of site
+// gives r, Django's ModelAdmin.get_queryset: filtered by GetQuerysetFilter and
+// ordered by GetOrdering, Ordering or OrderingExprs.
+func Queryset(ctx context.Context, site *AdminSite, app, slug string, r *http.Request) ([]any, error) {
+	e := site.byKey[entryKey{app: app, slug: slug}]
+	spec := querySpec{ordering: adminOrdering(r, &e.admin, e.model, false)}
+	if e.admin.GetQuerysetFilter != nil {
+		spec.filters = append(spec.filters, e.admin.GetQuerysetFilter(r))
+	}
+	return e.ops.query(ctx, spec)
+}
+
+// DeterministicOrdering returns ordering as the changelist of the model
+// app.slug of site completes it, Django's
+// ChangeList._get_deterministic_ordering.
+func DeterministicOrdering(site *AdminSite, app, slug string, ordering []any) []any {
+	return deterministicOrdering(site.byKey[entryKey{app: app, slug: slug}].ops, ordering)
 }
 
 // AddPreservedFilters returns u with the preserved filters added for the model

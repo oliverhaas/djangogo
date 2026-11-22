@@ -1122,9 +1122,19 @@ func TestCaseOrderByConditionalImplicit(t *testing.T) {
 	})
 }
 
-// No Go counterpart: tests/expressions_case/tests.py::CaseExpressionTests.test_order_by_conditional_explicit
-// orders by F("test").asc(). OrderBy takes keys, and the key "test" is
-// test_order_by_conditional_implicit.
+// Ported from Django: tests/expressions_case/tests.py::CaseExpressionTests.test_order_by_conditional_explicit
+func TestCaseOrderByConditionalExplicit(t *testing.T) {
+	djangotest.EachDB(t, caseModels(), func(t *testing.T, db *orm.DB) {
+		caseSetUp(t, db)
+		qs := orm.Query[caseTestModel](db).Filter("integer__lte", 2).Annotate("test", orm.Case(
+			orm.When{Cond: orm.Q("integer", 1), Then: 2},
+			orm.When{Cond: orm.Q("integer", 2), Then: 1},
+		).Default(3))
+		assertValuesList(t, qs.OrderBy(orm.F("test").Asc(), "pk").ValuesList("integer", "test"), caseRows([][]any{
+			{2, 1}, {2, 1}, {1, 2},
+		}))
+	})
+}
 
 // Ported from Django: tests/expressions_case/tests.py::CaseExpressionTests.test_join_promotion
 func TestCaseJoinPromotion(t *testing.T) {

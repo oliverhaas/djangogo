@@ -13,13 +13,14 @@ func (m *Model) LabelLower() string {
 	return strings.ToLower(m.Label())
 }
 
-// Ordering returns a copy of the model's default QuerySet ordering
-// (Meta.Ordering), or nil when none is set.
-func (m *Model) Ordering() []string {
+// Ordering returns the model's default QuerySet ordering (Meta.Ordering or
+// Meta.OrderingExprs) in the form QuerySet.OrderBy takes it, or nil when none
+// is set.
+func (m *Model) Ordering() []any {
 	if len(m.ordering) == 0 {
 		return nil
 	}
-	return slices.Clone(m.ordering)
+	return orderArgs(m.ordering)
 }
 
 // UniqueTogether returns a deep copy of the model's unique-together field sets
@@ -114,14 +115,25 @@ func applyModelMeta(m *Model, model any) error {
 		m.verboseNamePlural = m.verboseName + "s"
 	}
 
-	if len(meta.Ordering) > 0 {
-		m.ordering = make([]string, len(meta.Ordering))
-		for i, term := range meta.Ordering {
-			if term == "" {
-				return fmt.Errorf("orm: model %s: Meta.Ordering contains an empty entry", m.name)
-			}
-			m.ordering[i] = term
+	if len(meta.Ordering) > 0 && len(meta.OrderingExprs) > 0 {
+		return fmt.Errorf("orm: model %s: set Meta.Ordering or Meta.OrderingExprs, not both", m.name)
+	}
+	ordering := make([]any, 0, len(meta.Ordering)+len(meta.OrderingExprs))
+	for _, term := range meta.Ordering {
+		ordering = append(ordering, term)
+	}
+	ordering = append(ordering, meta.OrderingExprs...)
+	for _, term := range ordering {
+		if term == "" {
+			return fmt.Errorf("orm: model %s: Meta.Ordering contains an empty entry", m.name)
 		}
+	}
+	if len(ordering) > 0 {
+		terms, err := parseOrderArgs(ordering)
+		if err != nil {
+			return fmt.Errorf("orm: model %s: Meta.OrderingExprs: %w", m.name, err)
+		}
+		m.ordering = terms
 	}
 
 	if len(meta.UniqueTogether) > 0 {

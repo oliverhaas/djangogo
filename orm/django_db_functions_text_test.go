@@ -103,17 +103,12 @@ func TestLengthBasic(t *testing.T) {
 }
 
 // Ported from Django: tests/db_functions/text/test_length.py::LengthTests.test_ordering
-//
-// OrderBy takes keys, not expressions, so the lengths are annotated and the
-// rows ordered by the annotations.
 func TestLengthOrdering(t *testing.T) {
 	djangotest.EachDB(t, fnAuthors(), func(t *testing.T, db *orm.DB) {
 		create(t, db, &fnAuthor{Name: "John Smith", Alias: new("smithj")})
 		create(t, db, &fnAuthor{Name: "John Smith", Alias: new("smithj1")})
 		create(t, db, &fnAuthor{Name: "Rhonda", Alias: new("ronny")})
-		authors := orm.Query[fnAuthor](db).
-			Annotate("name_length", orm.Length("name"), "alias_length", orm.Length("alias")).
-			OrderBy("name_length", "alias_length")
+		authors := orm.Query[fnAuthor](db).OrderBy(orm.Length("name"), orm.Length("alias"))
 		assertValuesList(t, authors.ValuesList("name", "alias"), [][]any{
 			{"Rhonda", "ronny"},
 			{"John Smith", "smithj"},

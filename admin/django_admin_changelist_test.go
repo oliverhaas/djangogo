@@ -254,6 +254,58 @@ func TestDefaultStrColumnIsNotSortable(t *testing.T) {
 	})
 }
 
+// bandHeaders renders the band changelist of one band under ordering and
+// returns the page, whose column headers show the sort arrows.
+func bandHeaders(t *testing.T, db *orm.DB, ordering []any) *djangotest.Response {
+	t.Helper()
+	super := createTestUser(t, db, "super", "secret", true, true)
+	if err := orm.Query[CLBand](db).Create(context.Background(), &CLBand{Name: "Pink Floyd", NrOfMembers: 4}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[CLBand](site, admin.ModelAdmin{
+			ListDisplay:   []string{"name", "genres", "nr_of_members"},
+			OrderingExprs: ordering,
+		})
+	})
+	env.client.ForceLogin(super)
+	resp := env.client.Get(mustReverse(t, env.router, "admin:admin_changelist_clband_changelist"))
+	djangotest.AssertStatus(t, resp, http.StatusOK)
+	return resp
+}
+
+// Django reads ChangeList.get_ordering_field_columns; the port reads the sort
+// arrows of the column headers, which it feeds. Django's check admin.E109
+// rejects the many-to-many genres in list_display, and the Go admin leaves
+// that column out, so the port checks the other two.
+//
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_specified_ordering_by_f_expression
+func TestSpecifiedOrderingByFExpression(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		resp := bandHeaders(t, db, []any{
+			orm.F("nr_of_members").Desc().NullsLast(),
+			orm.Upper(orm.F("name")).Asc(),
+			orm.F("genres").Asc(),
+		})
+		djangotest.AssertContains(t, resp, `class="sortable column-nr_of_members sorted descending"`)
+		djangotest.AssertContains(t, resp, `class="sortable column-name"`)
+	})
+}
+
+// Django reads ChangeList.get_ordering_field_columns; the port reads the sort
+// arrows of the column headers, which it feeds. Django's check admin.E109
+// rejects the many-to-many genres in list_display, and the Go admin leaves
+// that column out, so the port checks the other two.
+//
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_specified_ordering_by_f_expression_without_asc_desc
+func TestSpecifiedOrderingByFExpressionWithoutAscDesc(t *testing.T) {
+	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
+		resp := bandHeaders(t, db, []any{orm.F("nr_of_members"), orm.Upper("name"), orm.F("genres")})
+		djangotest.AssertContains(t, resp, `class="sortable column-nr_of_members sorted ascending"`)
+		djangotest.AssertContains(t, resp, `class="sortable column-name"`)
+	})
+}
+
 // Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_many_search_terms
 func TestManySearchTerms(t *testing.T) {
 	djangotest.EachDB(t, changelistModels(), func(t *testing.T, db *orm.DB) {
@@ -1021,6 +1073,175 @@ func TestClearAllFiltersLink(t *testing.T) {
 		bandURL := mustReverse(t, env.router, "admin:admin_changelist_clband_changelist")
 		resp = env.client.Get(bandURL, djangotest.Query(url.Values{"nr_of_members_partition": {"5"}}))
 		djangotest.AssertContains(t, resp, `<a href="?">&#10006; Clear all filters</a>`)
+	})
+}
+
+// CLTotalRelated is the Related model of Django's
+// ChangeListTests.test_total_ordering_optimization.
+type CLTotalRelated struct {
+	ID          int64
+	UniqueField bool `orm:"unique"`
+}
+
+// Meta orders by the unique field.
+func (CLTotalRelated) Meta() orm.Meta { return orm.Meta{Ordering: []string{"unique_field"}} }
+
+// CLTotalModel is the Model of Django's
+// ChangeListTests.test_total_ordering_optimization.
+type CLTotalModel struct {
+	ID                  int64
+	UniqueField         bool                    `orm:"unique"`
+	UniqueNullableField *bool                   `orm:"unique;null"`
+	Related             orm.FK[CLTotalRelated]  `orm:"on_delete=cascade;related_name=+"`
+	OtherRelated        orm.FK[CLTotalRelated]  `orm:"on_delete=cascade;related_name=+"`
+	RelatedUnique       orm.O2O[CLTotalRelated] `orm:"on_delete=cascade;related_name=+"`
+	Field               bool
+	OtherField          bool
+	NullField           *bool `orm:"null"`
+}
+
+// Meta declares the unique_together sets.
+func (CLTotalModel) Meta() orm.Meta {
+	return orm.Meta{UniqueTogether: [][]string{
+		{"field", "other_field"},
+		{"field", "null_field"},
+		{"related", "other_related_id"},
+	}}
+}
+
+// CLConstraintModel is the Model of Django's
+// ChangeListTests.test_total_ordering_optimization_meta_constraints. The
+// names snake-case to Django's field_1 and related_1.
+//
+//nolint:revive,staticcheck // the names must snake-case to Django's
+type CLConstraintModel struct {
+	ID         int64
+	Field_1    bool
+	Field_2    bool
+	Field_3    bool
+	Field_4    bool
+	Field_5    bool
+	Field_6    bool
+	Nullable_1 *bool                  `orm:"null"`
+	Nullable_2 *bool                  `orm:"null"`
+	Related_1  orm.FK[CLTotalRelated] `orm:"column=related_1_id;on_delete=cascade;related_name=+"`
+	Related_2  orm.FK[CLTotalRelated] `orm:"column=related_2_id;on_delete=cascade;related_name=+"`
+	Related_3  orm.FK[CLTotalRelated] `orm:"column=related_3_id;on_delete=cascade;related_name=+"`
+	Related_4  orm.FK[CLTotalRelated] `orm:"column=related_4_id;on_delete=cascade;related_name=+"`
+}
+
+// Meta declares the constraints.
+func (CLConstraintModel) Meta() orm.Meta {
+	constraints := make([]orm.Constraint, 0, 11)
+	for _, fields := range [][]string{
+		{"field_1"},
+		{"nullable_1"},
+		{"related_1"},
+		{"related_2_id"},
+		{"field_2", "field_3"},
+		{"field_2", "nullable_2"},
+		{"field_2", "related_3"},
+		{"field_3", "related_4_id"},
+	} {
+		constraints = append(constraints, orm.UniqueConstraint{Fields: fields, Name: strings.Join(fields, "")})
+	}
+	constraints = append(constraints,
+		orm.CheckConstraint{Condition: orm.Q("id__gt", 0), Name: "foo"},
+		orm.UniqueConstraint{Fields: []string{"field_5"}, Condition: orm.Q("id__gt", 10), Name: "total_ordering_1"},
+		orm.UniqueConstraint{Fields: []string{"field_6"}, Condition: orm.Q(), Name: "total_ordering"},
+	)
+	return orm.Meta{Constraints: constraints}
+}
+
+// assertDeterministicOrdering checks the ordering that the changelist of
+// model completes each ordering to.
+func assertDeterministicOrdering(t *testing.T, site *admin.AdminSite, model string, tests [][2][]any) {
+	t.Helper()
+	for _, tc := range tests {
+		djangotest.AssertEqual(t, admin.DeterministicOrdering(site, "admin_changelist", model, tc[0]), tc[1])
+	}
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_total_ordering_optimization
+func TestChangeListTotalOrderingOptimization(t *testing.T) {
+	models := []any{djangotest.App("admin_changelist", &CLTotalRelated{}, &CLTotalModel{})}
+	djangotest.EachDB(t, models, func(t *testing.T, db *orm.DB) {
+		site, err := admin.NewAdminSite(db)
+		if err != nil {
+			t.Fatalf("NewAdminSite: %v", err)
+		}
+		admin.Register[CLTotalModel](site, admin.ModelAdmin{})
+		totalOrdering := []any{orm.F("field"), orm.F("other_field").Desc().NullsLast()}
+		nonTotalOrdering := []any{orm.F("field"), orm.F("null_field").Desc().NullsLast()}
+		assertDeterministicOrdering(t, site, "cltotalmodel", [][2][]any{
+			{nil, {"-pk"}},
+			// Unique non-nullable field.
+			{{"unique_field"}, {"unique_field"}},
+			{{"-unique_field"}, {"-unique_field"}},
+			// Unique nullable field.
+			{{"unique_nullable_field"}, {"unique_nullable_field", "-pk"}},
+			// Field.
+			{{"field"}, {"field", "-pk"}},
+			// Related field introspection is not implemented.
+			{{"related__unique_field"}, {"related__unique_field", "-pk"}},
+			// Related attname unique.
+			{{"related_unique_id"}, {"related_unique_id"}},
+			// Related ordering introspection is not implemented.
+			{{"related_unique"}, {"related_unique", "-pk"}},
+			// Composite unique.
+			{{"field", "-other_field"}, {"field", "-other_field"}},
+			// Composite unique nullable.
+			{{"-field", "null_field"}, {"-field", "null_field", "-pk"}},
+			// Composite unique and nullable.
+			{{"-field", "null_field", "other_field"}, {"-field", "null_field", "other_field"}},
+			// Composite unique attnames.
+			{{"related_id", "-other_related_id"}, {"related_id", "-other_related_id"}},
+			// Composite unique names.
+			{{"related", "-other_related_id"}, {"related", "-other_related_id", "-pk"}},
+			// F() objects composite unique.
+			{totalOrdering, totalOrdering},
+			// F() objects composite unique nullable.
+			{nonTotalOrdering, append(slices.Clone(nonTotalOrdering), "-pk")},
+		})
+	})
+}
+
+// Ported from Django: tests/admin_changelist/tests.py::ChangeListTests.test_total_ordering_optimization_meta_constraints
+func TestChangeListTotalOrderingOptimizationMetaConstraints(t *testing.T) {
+	models := []any{djangotest.App("admin_changelist", &CLTotalRelated{}, &CLConstraintModel{})}
+	djangotest.EachDB(t, models, func(t *testing.T, db *orm.DB) {
+		site, err := admin.NewAdminSite(db)
+		if err != nil {
+			t.Fatalf("NewAdminSite: %v", err)
+		}
+		admin.Register[CLConstraintModel](site, admin.ModelAdmin{})
+		assertDeterministicOrdering(t, site, "clconstraintmodel", [][2][]any{
+			// Unique non-nullable field.
+			{{"field_1"}, {"field_1"}},
+			// Unique nullable field.
+			{{"nullable_1"}, {"nullable_1", "-pk"}},
+			// Related attname unique.
+			{{"related_1_id"}, {"related_1_id"}},
+			{{"related_2_id"}, {"related_2_id"}},
+			// Related ordering introspection is not implemented.
+			{{"related_1"}, {"related_1", "-pk"}},
+			// Composite unique.
+			{{"-field_2", "field_3"}, {"-field_2", "field_3"}},
+			// Composite unique nullable.
+			{{"field_2", "-nullable_2"}, {"field_2", "-nullable_2", "-pk"}},
+			// Composite unique and nullable.
+			{{"field_2", "-nullable_2", "field_3"}, {"field_2", "-nullable_2", "field_3"}},
+			// Composite field and related field name.
+			{{"field_2", "-related_3"}, {"field_2", "-related_3", "-pk"}},
+			{{"field_3", "related_4"}, {"field_3", "related_4", "-pk"}},
+			// Composite field and related field attname.
+			{{"field_2", "related_3_id"}, {"field_2", "related_3_id"}},
+			{{"field_3", "-related_4_id"}, {"field_3", "-related_4_id"}},
+			// Partial unique constraint is ignored.
+			{{"field_5"}, {"field_5", "-pk"}},
+			// Unique constraint with an empty condition.
+			{{"field_6"}, {"field_6"}},
+		})
 	})
 }
 

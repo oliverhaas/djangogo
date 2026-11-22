@@ -333,8 +333,8 @@ func (e *inlineCheckError) Error() string { return "admin: " + e.msg }
 // by ordering, none of them when none is true.
 func inlineQuerySet[T any](db *orm.DB, ordering []string, none bool) *orm.QuerySet[T] {
 	qs := orm.Query[T](db)
-	if len(ordering) > 0 {
-		qs = qs.OrderBy(ordering...)
+	for _, key := range ordering {
+		qs = qs.OrderBy(key)
 	}
 	if none {
 		qs = qs.Filter("pk__in", []any{})

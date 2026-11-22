@@ -530,33 +530,93 @@ func (cl *changeList) getQueryString(newParams map[string]any, remove []string) 
 	return "?" + p.Encode()
 }
 
-// defaultOrdering returns ModelAdmin.GetOrdering/Ordering, else Model.Ordering().
-func (cl *changeList) defaultOrdering(r *http.Request) []string {
-	var raw []string
-	if cl.entry.admin.GetOrdering != nil && r != nil {
-		raw = cl.entry.admin.GetOrdering(r)
+// defaultOrdering returns ModelAdmin.GetOrdering, Ordering or OrderingExprs,
+// else Model.Ordering().
+func (cl *changeList) defaultOrdering(r *http.Request) []any {
+	return adminOrdering(r, &cl.entry.admin, cl.entry.model, true)
+}
+
+// adminOrdering returns the ordering that admin gives the rows of m for r,
+// Django's ModelAdmin.get_ordering: GetOrdering when it is set, else Ordering
+// or OrderingExprs. For the changelist an empty GetOrdering falls back to
+// Ordering or OrderingExprs, and those to the default ordering of m, as in
+// Django's ChangeList.get_ordering. A key is normalized to its field path.
+func adminOrdering(r *http.Request, admin *ModelAdmin, m *orm.Model, changelist bool) []any {
+	var raw []any
+	custom := admin.GetOrdering != nil && r != nil
+	if custom {
+		for _, k := range admin.GetOrdering(r) {
+			raw = append(raw, k)
+		}
 	}
-	if len(raw) == 0 {
-		raw = cl.entry.admin.Ordering
+	if !custom || (changelist && len(raw) == 0) {
+		for _, k := range admin.Ordering {
+			raw = append(raw, k)
+		}
+		if len(raw) == 0 {
+			raw = admin.OrderingExprs
+		}
 	}
-	if len(raw) == 0 {
-		raw = cl.entry.model.Ordering()
+	if len(raw) == 0 && changelist {
+		raw = m.Ordering()
 	}
 	if len(raw) == 0 {
 		return nil
 	}
-	out := make([]string, len(raw))
+	out := make([]any, len(raw))
 	for i, term := range raw {
-		out[i] = normalizeFieldPath(cl.entry.model, term)
+		if key, ok := term.(string); ok {
+			term = normalizeFieldPath(m, key)
+		}
+		out[i] = term
 	}
 	return out
 }
 
+// columnOrderExpr returns the ordering term of a column that sorts by expr,
+// as Django's ChangeList.get_ordering reads an expression in
+// admin_order_field: an OrderExpr is reversed for a descending sort, and any
+// other expression is ordered ascending or descending.
+func columnOrderExpr(expr any, desc bool) any {
+	switch v := expr.(type) {
+	case orm.OrderExpr:
+		if desc {
+			return v.Reverse()
+		}
+		return v
+	case orm.Expr:
+		if desc {
+			return v.Desc()
+		}
+		return v.Asc()
+	}
+	return expr
+}
+
+// orderingFieldName returns the field key of an ordering term and whether it
+// is descending, Django's reading of a term in
+// ChangeList.get_ordering_field_columns: a key, an F expression or an
+// OrderExpr of one. It returns false for any other expression.
+func orderingFieldName(term any) (string, bool, bool) {
+	switch v := term.(type) {
+	case string:
+		bare, desc := strings.CutPrefix(v, "-")
+		return bare, desc, true
+	case orm.Expr:
+		name, ok := v.FieldName()
+		return name, false, ok
+	case orm.OrderExpr:
+		name, ok := v.Expr().FieldName()
+		return name, v.Descending(), ok
+	}
+	return "", false, false
+}
+
 // resolveOrdering computes the final ORM OrderBy slice for the changelist:
-// ?o= overrides default ordering, and "-pk" is appended unless the primary key
-// is already among the ordering terms.
-func (cl *changeList) resolveOrdering(r *http.Request) []string {
-	var ordering []string
+// ?o= overrides default ordering, and "-pk" is appended unless the ordering
+// is total (see deterministicOrdering).
+func (cl *changeList) resolveOrdering(r *http.Request) []any {
+	var ordering []any
 	if oParam, ok := cl.params[orderVar]; ok && oParam != "" {
 		for _, token := range strings.Split(oParam, ".") {
 			pfx := ""
@@ -567,6 +627,10 @@ func (cl *changeList) resolveOrdering(r *http.Request) []string {
 			}
 			idx, err := strconv.Atoi(idxStr)
 			if err != nil || idx < 0 || idx >= len(cl.listDisplay) {
+				continue
+			}
+			if expr := cl.listDisplay[idx].orderExpr; expr != nil {
+				ordering = append(ordering, columnOrderExpr(expr, pfx == "-"))
 				continue
 			}
 			orderField := cl.listDisplay[idx].orderField
@@ -582,23 +646,17 @@ func (cl *changeList) resolveOrdering(r *http.Request) []string {
 	} else {
 		ordering = cl.defaultOrdering(r)
 	}
+	return deterministicOrdering(cl.entry.ops, ordering)
+}
 
-	pkAttr := ""
-	if pk := cl.entry.model.PrimaryKey(); pk != nil {
-		pkAttr = pk.Attr
+// deterministicOrdering returns ordering, with "-pk" appended unless it
+// decides the position of every row, Django's
+// ChangeList._get_deterministic_ordering.
+func deterministicOrdering(ops modelOps, ordering []any) []any {
+	if ops.totallyOrdered(ordering) {
+		return ordering
 	}
-	hasPK := false
-	for _, term := range ordering {
-		bare := strings.TrimPrefix(term, "-")
-		if bare == "pk" || (pkAttr != "" && bare == pkAttr) {
-			hasPK = true
-			break
-		}
-	}
-	if !hasPK {
-		ordering = append(ordering, "-pk")
-	}
-	return ordering
+	return append(slices.Clip(ordering), "-pk")
 }
 
 // orderingFieldColumns returns the active ordered columns in priority order,
@@ -608,12 +666,15 @@ func (cl *changeList) orderingFieldColumns(r *http.Request) []orderedCol {
 	seen := make(map[int]bool)
 
 	if oParam, hasO := cl.params[orderVar]; !hasO {
-		for _, field := range cl.defaultOrdering(r) {
+		for _, term := range cl.defaultOrdering(r) {
+			bare, desc, ok := orderingFieldName(term)
+			if !ok {
+				continue
+			}
+			bare = normalizeFieldPath(cl.entry.model, bare)
 			dir := "asc"
-			bare := field
-			if strings.HasPrefix(field, "-") {
+			if desc {
 				dir = "desc"
-				bare = field[1:]
 			}
 			for i, col := range cl.listDisplay {
 				if col.orderField == bare && !seen[i] {
@@ -645,7 +706,7 @@ func (cl *changeList) orderingFieldColumns(r *http.Request) []orderedCol {
 // isColumnSortable reports whether col is sortable under ModelAdmin.SortableBy
 // and column metadata.
 func (cl *changeList) isColumnSortable(col resolvedColumn) bool {
-	if col.isActionCheckbox || col.orderField == "" {
+	if col.isActionCheckbox || (col.orderField == "" && col.orderExpr == nil) {
 		return false
 	}
 	if !cl.sortableRestrict {

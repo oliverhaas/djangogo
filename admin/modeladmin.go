@@ -28,6 +28,12 @@ type DisplayColumn struct {
 	// OrderField is the ORM field path used when sorting by this column
 	// (Django's admin_order_field). Empty means the column is not sortable.
 	OrderField string
+	// OrderExpr sorts the column by an expression instead of OrderField,
+	// Django's admin_order_field set to an expression: an orm.Expr, which
+	// sorts ascending, or an orm.OrderExpr such as
+	// orm.F("date").Asc().NullsLast(). Sorting the column descending
+	// reverses it.
+	OrderExpr any
 	// Boolean renders the returned value as a Django boolean indicator
 	// (Django's @display(boolean=True)).
 	Boolean bool
@@ -406,6 +412,10 @@ type ModelAdmin struct {
 	// Ordering is the default OrderBy applied to the changelist
 	// (e.g. "-id"); an empty slice falls back to Meta.Ordering, then -pk.
 	Ordering []string
+	// OrderingExprs is a default ordering with expressions, in the form
+	// orm.QuerySet.OrderBy takes it, such as
+	// orm.F("rank").Desc().NullsLast(). It applies when Ordering is empty.
+	OrderingExprs []any
 	// SearchFields names the fields searched by the changelist search box,
 	// supporting Django's prefixes ("^" istartswith, "=" iexact, "@" search),
 	// explicit lookups ("__exact", "__iexact"), and "__"-spanning relations.

@@ -328,9 +328,10 @@ func (m *RelatedManager[Child]) Exclude(args ...any) *QuerySet[Child] {
 	return m.QuerySet().Exclude(args...)
 }
 
-// OrderBy returns a QuerySet of related Child rows ordered by fields.
-func (m *RelatedManager[Child]) OrderBy(fields ...string) *QuerySet[Child] {
-	return m.QuerySet().OrderBy(fields...)
+// OrderBy returns a QuerySet of related Child rows ordered by terms; see
+// QuerySet.OrderBy.
+func (m *RelatedManager[Child]) OrderBy(terms ...any) *QuerySet[Child] {
+	return m.QuerySet().OrderBy(terms...)
 }
 
 // Get returns the single related Child row matching args.

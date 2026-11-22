@@ -150,7 +150,7 @@ func makeAuthors(t *testing.T, db *orm.DB, n int) {
 }
 
 // allOf returns every row of T ordered by the given columns.
-func allOf[T any](t *testing.T, db *orm.DB, ordering ...string) []T {
+func allOf[T any](t *testing.T, db *orm.DB, ordering ...any) []T {
 	t.Helper()
 	rows, err := orm.Query[T](db).OrderBy(ordering...).All(context.Background())
 	if err != nil {
