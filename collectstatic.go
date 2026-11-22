@@ -17,15 +17,16 @@ import (
 )
 
 // collectstaticCommand is Django's collectstatic: it copies the static files
-// of Settings.StaticFilesDirs and of the apps into Settings.StaticRoot.
-// There is no post-processing and no --link: --no-post-process is accepted
-// and does nothing.
+// of Settings.StaticFilesDirs and of the apps into Settings.StaticRoot, or
+// with --link links the files of Settings.StaticFilesDirs and copies the
+// embedded files of the apps. There is no post-processing: --no-post-process
+// is accepted and does nothing.
 type collectstaticCommand struct {
 	app *Application
 
-	noInput, noPostProcess, dryRun, clear, noDefaultIgnore bool
-	ignore                                                 stringList
-	verbosity                                              verbosityValue
+	noInput, noPostProcess, dryRun, clear, link, noDefaultIgnore bool
+	ignore                                                       stringList
+	verbosity                                                    verbosityValue
 }
 
 // Name returns the command name.
@@ -55,6 +56,9 @@ func (c *collectstaticCommand) Flags(fs *flag.FlagSet) {
 	const clearHelp = "Clear the existing files using the storage before trying to copy or link the original file."
 	fs.BoolVar(&c.clear, "clear", false, clearHelp)
 	fs.BoolVar(&c.clear, "c", false, clearHelp)
+	const linkHelp = "Create a symbolic link to each file instead of copying."
+	fs.BoolVar(&c.link, "link", false, linkHelp)
+	fs.BoolVar(&c.link, "l", false, linkHelp)
 	fs.BoolVar(&c.noDefaultIgnore, "no-default-ignore", false,
 		"Don't ignore the common private glob-style patterns (defaults to 'CVS', '.*' and '*~').")
 	c.verbosity.declare(fs)
@@ -81,6 +85,7 @@ func (c *collectstaticCommand) Run(_ []string) error {
 		Root:            root,
 		Clear:           c.clear,
 		DryRun:          c.dryRun,
+		Link:            c.link,
 		IgnorePatterns:  c.ignore,
 		NoDefaultIgnore: c.noDefaultIgnore,
 		Verbosity:       int(c.verbosity),

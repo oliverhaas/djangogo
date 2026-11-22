@@ -32,10 +32,11 @@
 // switch: the caller decides whether to mount it. It also answers 405 to
 // methods other than GET and HEAD, where Django's view ignores the method.
 //
-// Collect copies into a directory. Storage backends, post-processing (hashed
-// file names, the manifest) and --link are not part of this package, and
-// neither are the confirmation prompt and the argument parsing of the
-// collectstatic command, which belong to the caller.
+// Collect copies or links into a directory. With Link, a file of an embedded
+// source is copied, because it has no path to link to. Storage backends and
+// post-processing (hashed file names, the manifest) are not part of this
+// package, and neither are the confirmation prompt and the argument parsing
+// of the collectstatic command, which belong to the caller.
 //
 // Django reports a misconfigured STATICFILES_DIRS through its system checks.
 // Here a directory that does not exist is an empty source, a prefix may end

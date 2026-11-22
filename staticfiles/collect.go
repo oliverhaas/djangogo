@@ -19,6 +19,10 @@ type CollectOptions struct {
 	Clear bool
 	// DryRun reports without changing anything (--dry-run).
 	DryRun bool
+	// Link creates a symbolic link to each file instead of copying it
+	// (--link). A file of a source without a directory on disk, such as an
+	// embed.FS, has nothing to link to and is copied.
+	Link bool
 	// IgnorePatterns are extra ignore patterns (--ignore); DefaultIgnorePatterns
 	// apply as well unless NoDefaultIgnore is set. Finder.List describes their
 	// syntax.
@@ -39,6 +43,9 @@ type CollectResult struct {
 	// Copied lists the paths copied, in order. A dry run lists the paths it
 	// would copy.
 	Copied []string
+	// Linked lists the paths linked with CollectOptions.Link, in order. A dry
+	// run lists the paths it would link.
+	Linked []string
 	// Unmodified lists the paths skipped because the destination is not older
 	// than the source.
 	Unmodified []string
@@ -49,6 +56,8 @@ type CollectResult struct {
 	// file of the first source is collected. A path is listed once per
 	// ignored file.
 	Skipped []string
+	// link records CollectOptions.Link for the wording of Summary.
+	link bool
 }
 
 // configError is an error whose text is a message of Django, kept verbatim
@@ -73,8 +82,8 @@ var (
 	)
 )
 
-// Collect copies every static file into opts.Root (Django's collectstatic
-// without post-processing). Of the files that several sources hold under one
+// Collect copies or links every static file into opts.Root (Django's
+// collectstatic without post-processing). Of the files that several sources hold under one
 // path, the file of the first source is copied and the others are counted as
 // skipped. A destination file that is not older than its source is left alone
 // and counted as unmodified; a source without modification times, such as an
@@ -100,6 +109,7 @@ func Collect(finder *Finder, opts CollectOptions) (CollectResult, error) {
 		}
 	}
 	c := &collector{root: root, opts: opts, found: map[string]bool{}}
+	c.result.link = opts.Link
 	if opts.Clear {
 		if err := c.clearDir(""); err != nil {
 			return c.result, err
@@ -194,9 +204,13 @@ func (c *collector) collect(m Match) error {
 	if err != nil {
 		return err
 	}
-	stale, err := c.removeStale(m, dest)
+	link := c.opts.Link && m.Source.Root != ""
+	stale, err := c.removeStale(m, dest, link)
 	if err != nil || !stale {
 		return err
+	}
+	if link {
+		return c.link(m, dest)
 	}
 	if c.opts.DryRun {
 		c.log(1, "Pretending to copy '%s'", m.Location)
@@ -207,6 +221,25 @@ func (c *collector) collect(m Match) error {
 		}
 	}
 	c.result.Copied = append(c.result.Copied, m.Path)
+	return nil
+}
+
+// link creates the symbolic link from dest to the file of a match, which
+// lies in a directory on disk (Django's link_file). The link holds the
+// absolute path of the file.
+func (c *collector) link(m Match, dest string) error {
+	if c.opts.DryRun {
+		c.log(1, "Pretending to link '%s'", m.Location)
+	} else {
+		c.log(2, "Linking '%s'", m.Location)
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return fmt.Errorf("staticfiles: link %s: %w", m.Location, err)
+		}
+		if err := os.Symlink(m.Location, dest); err != nil {
+			return fmt.Errorf("staticfiles: link %s: %w", m.Location, err)
+		}
+	}
+	c.result.Linked = append(c.result.Linked, m.Path)
 	return nil
 }
 
@@ -223,11 +256,13 @@ func (c *collector) destination(m Match) (string, error) {
 }
 
 // removeStale is Django's delete_file: it reports whether the file has to be
-// copied, and removes what is in the way at the destination first. A regular
-// file that is not older than the source stays and counts as unmodified.
-// Whole seconds are compared, as in Django, because not every filesystem
-// keeps more.
-func (c *collector) removeStale(m Match, dest string) (bool, error) {
+// copied or, with link, linked, and removes what is in the way at the
+// destination first. A destination that is not older than the source stays
+// and counts as unmodified when it is what the run creates: a symbolic link
+// with link, else a regular file. The time of a link is that of the file it
+// points to. Whole seconds are compared, as in Django, because not every
+// filesystem keeps more.
+func (c *collector) removeStale(m Match, dest string, link bool) (bool, error) {
 	target, err := os.Lstat(dest)
 	if errors.Is(err, fs.ErrNotExist) {
 		return true, nil
@@ -242,9 +277,14 @@ func (c *collector) removeStale(m Match, dest string) (bool, error) {
 	}
 	// The zero time means that the source keeps no modification times, as an
 	// embed.FS does: nothing can be said about such a file, so it is copied.
-	// A symbolic link at the destination is replaced by a copy.
-	known := !source.ModTime().IsZero()
-	if known && target.Mode().IsRegular() && target.ModTime().Unix() >= source.ModTime().Unix() {
+	isLink := target.Mode()&fs.ModeSymlink != 0
+	same := isLink == link && (isLink || target.Mode().IsRegular())
+	if same && isLink {
+		// A link to nothing has no time and is replaced.
+		target, err = os.Stat(dest)
+		same = err == nil
+	}
+	if same && !source.ModTime().IsZero() && target.ModTime().Unix() >= source.ModTime().Unix() {
 		c.result.Unmodified = append(c.result.Unmodified, m.Path)
 		c.log(2, "Skipping '%s' (not modified)", name)
 		return false, nil
@@ -292,19 +332,28 @@ func copyFile(m Match, dest string) error {
 // Summary is the closing line of Django's collectstatic, without the blank
 // line before it: "N static files copied to '/root'." with "M static files
 // deleted, " in front after a Clear, and ", M unmodified" and ", M skipped due
-// to conflict" appended when M is not zero. A dry run has the same wording.
-// The root is printed as an absolute path and left out when it is empty.
+// to conflict" appended when M is not zero. A run with Link counts the links:
+// "N static files symlinked", followed by ", M copied" when files of an
+// embedded source were copied. A dry run has the same wording. The root is
+// printed as an absolute path and left out when it is empty.
 func (r CollectResult) Summary(root string) string {
 	summary := ""
 	if n := len(r.Deleted); n > 0 {
 		summary = fmt.Sprintf("%d static file%s deleted, ", n, plural(n))
 	}
-	summary += fmt.Sprintf("%d static file%s copied", len(r.Copied), plural(len(r.Copied)))
+	modified, action := len(r.Copied), "copied"
+	if r.link {
+		modified, action = len(r.Linked), "symlinked"
+	}
+	summary += fmt.Sprintf("%d static file%s %s", modified, plural(modified), action)
 	if root != "" {
 		if abs, err := filepath.Abs(root); err == nil {
 			root = abs
 		}
 		summary += fmt.Sprintf(" to '%s'", root)
+	}
+	if n := len(r.Copied); r.link && n > 0 {
+		summary += fmt.Sprintf(", %d copied", n)
 	}
 	if n := len(r.Unmodified); n > 0 {
 		summary += fmt.Sprintf(", %d unmodified", n)

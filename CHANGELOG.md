@@ -678,6 +678,14 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   The new files honor the umask. `-v 2` reports the rendering, the download
   and the cleanup. `scaffold.Tree` renders such a template from Go, and
   `manage.OptionalValue` gives a flag whose value can be left out.
+- Static files: `collectstatic -l`/`--link` creates a symbolic link to each
+  file of `Settings.StaticFilesDirs` instead of a copy, as Django does. The
+  embedded static files of the apps and the admin have no path on disk and
+  are copied. A run with `--link` replaces the copies of an earlier run with
+  links, and a run without it replaces the links with copies. The summary
+  reads "N static files symlinked" and adds ", M copied" for the embedded
+  files. In Go, `staticfiles.CollectOptions.Link` selects it and
+  `CollectResult.Linked` lists the links.
 
 ### Changed
 

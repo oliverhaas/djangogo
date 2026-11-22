@@ -11,15 +11,16 @@ import (
 
 // The tests in this file are ports of the collection tests of Django's
 // tests/staticfiles_tests/test_management.py: which files collectstatic
-// copies. The tests of what it prints are in django_collectstatic_output_test.go
-// and the findstatic tests in django_findstatic_test.go.
+// copies. The tests of what it prints are in django_collectstatic_output_test.go,
+// those of --link in django_collectstatic_links_test.go and the findstatic
+// tests in django_findstatic_test.go.
 //
 // Not ported, because they test the command line or a feature outside this
 // package: TestCollectionHelpSubcommand, TestInteractiveMessages (the
-// confirmation prompt), the tests of TestCollectionLinks that need --link, the
-// post-processing and manifest storage tests, TestCollectionPathLib (a
-// pathlib.Path as STATIC_ROOT, which has no counterpart where paths are
-// strings), and the tests of storages that are not directories
+// confirmation prompt), the post-processing and manifest storage tests,
+// TestCollectionPathLib (a pathlib.Path as STATIC_ROOT, which has no
+// counterpart where paths are strings), and the tests of storages that are
+// not directories
 // (TestCollectionNonLocalStorage,
 // TestCollectionClear.test_handle_path_notimplemented,
 // TestConfiguration.test_local_storage_detection_helper).

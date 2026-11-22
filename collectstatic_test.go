@@ -83,6 +83,28 @@ func TestCollectstaticNoinputCopiesFiles(t *testing.T) {
 	}
 }
 
+// TestCollectstaticLink checks that --link links the files of a static
+// directory and words the summary as Django does.
+//
+// No Django test exists: TestCollectionLinks calls the command function, the
+// port is in staticfiles.
+func TestCollectstaticLink(t *testing.T) {
+	f := newStaticFixture(t, true, "")
+	if err := f.app.Execute([]string{"collectstatic", "--noinput", "-l", "--ignore", "*.css"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "\n1 static file symlinked to '" + f.root + "'.\n"; !strings.HasSuffix(f.out.String(), want) {
+		t.Errorf("output = %q, want suffix %q", f.out.String(), want)
+	}
+	target, err := os.Readlink(filepath.Join(f.root, "test", "file.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(f.src, "test", "file.txt"); target != want {
+		t.Errorf("link target = %q, want %q", target, want)
+	}
+}
+
 // TestCollectstaticWithoutStaticRoot checks the error of a missing root.
 func TestCollectstaticWithoutStaticRoot(t *testing.T) {
 	f := newStaticFixture(t, false, "")

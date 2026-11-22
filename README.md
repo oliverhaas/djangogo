@@ -249,8 +249,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `{% if messages %}`, marks them as read.
 - **contenttypes:** no `GenericForeignKey` and no removal of stale content types.
 - **Commands:** `runserver` has no autoreload, and `shell` is a query shell over
-  the models, not a Go REPL. `collectstatic` has no `--link` and no
-  post-processing (manifest or hashed names). A `startproject` or `startapp`
+  the models, not a Go REPL. `collectstatic` has no post-processing (manifest
+  or hashed names), and `collectstatic --link` copies the embedded static
+  files of the apps, which have no path to link to. A `startproject` or `startapp`
   template is a Go `text/template` with the delimiters `[[` and `]]`, not a
   Django template, and it cannot be an lzma or xz archive or an ftp URL.
   `createsuperuser` reads answers line by line when stdin is not a terminal.

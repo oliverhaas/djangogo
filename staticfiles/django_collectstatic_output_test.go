@@ -129,51 +129,6 @@ func TestCollectionClearVerbosity2(t *testing.T) {
 	}
 }
 
-// TestCollectionLinksClearBrokenSymlink deletes a broken symbolic link under
-// --clear. Django's test class collects with --link, which this package does
-// not have; clearing does not depend on it.
-//
-// Ported from Django: tests/staticfiles_tests/test_management.py::TestCollectionLinks.test_clear_broken_symlink
-func TestCollectionLinksClearBrokenSymlink(t *testing.T) {
-	root := t.TempDir()
-	broken := filepath.Join(root, "symlink.txt")
-	if err := os.Symlink(filepath.Join(root, "nonexistent.txt"), broken); err != nil {
-		t.Skipf("symbolic links are not supported: %v", err)
-	}
-
-	runCollectstatic(t, newSite(t).finder(), staticfiles.CollectOptions{Root: root, Clear: true})
-
-	if _, err := os.Lstat(broken); !os.IsNotExist(err) {
-		t.Errorf("the broken symbolic link is still there (Lstat error: %v)", err)
-	}
-}
-
-// TestCollectionLinksSymlinksAndFilesReplaced replaces a symbolic link in
-// STATIC_ROOT with a copy of the file. Django's test also runs the other
-// direction with --link, which this package does not have, so the port
-// creates the link that a --link run leaves behind. The copy must replace the
-// link and not write through it into the source.
-//
-// Ported from Django: tests/staticfiles_tests/test_management.py::TestCollectionLinks.test_symlinks_and_files_replaced
-func TestCollectionLinksSymlinksAndFilesReplaced(t *testing.T) {
-	s := newSite(t)
-	root := t.TempDir()
-	link := filepath.Join(root, "test.txt")
-	if err := os.Symlink(s.path("documents", "test.txt"), link); err != nil {
-		t.Skipf("symbolic links are not supported: %v", err)
-	}
-
-	runCollectstatic(t, s.finder(), staticfiles.CollectOptions{Root: root})
-
-	info, err := os.Lstat(link)
-	if err != nil {
-		t.Fatalf("stat the collected file: %v", err)
-	}
-	djangotest.AssertEqual(t, info.Mode().IsRegular(), true)
-	assertFileContains(t, staticRoot(root), "test.txt", "Can we find")
-	assertFileContains(t, staticRoot(s.path("documents")), "test.txt", "Can we find")
-}
-
 // TestCollectionFilesOverrideOrderingOverride collects the file of the first
 // app that has it, although the file of a later app is newer. Both runs must
 // keep it: the second one finds the collected file not older than the first
