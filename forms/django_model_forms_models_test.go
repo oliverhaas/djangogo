@@ -133,14 +133,39 @@ func (ExplicitPK) Meta() orm.Meta {
 	return orm.Meta{UniqueTogether: [][]string{{"Key", "Desc"}}}
 }
 
-// Post is the Post model of Django's tests/model_forms/models.py, without the
-// unique_for_date, unique_for_year and unique_for_month options.
+// Post is the Post model of Django's tests/model_forms/models.py.
 type Post struct {
 	ID       int64
-	Title    string `orm:"max_length=50;blank"`
-	Slug     string `orm:"max_length=50;blank"`
-	Subtitle string `orm:"max_length=50;blank"`
-	Posted   time.Time
+	Title    string `orm:"max_length=50;unique_for_date=posted;blank"`
+	Slug     string `orm:"max_length=50;unique_for_year=posted;blank"`
+	Subtitle string `orm:"max_length=50;unique_for_month=posted;blank"`
+	Posted   orm.Date
+}
+
+// String returns the title, the __str__ of Django's Post.
+func (p Post) String() string { return p.Title }
+
+// DateTimePost is the DateTimePost model of Django's
+// tests/model_forms/models.py.
+type DateTimePost struct {
+	ID       int64
+	Title    string    `orm:"max_length=50;unique_for_date=posted;blank"`
+	Slug     string    `orm:"max_length=50;unique_for_year=posted;blank"`
+	Subtitle string    `orm:"max_length=50;unique_for_month=posted;blank"`
+	Posted   time.Time `orm:"editable=false"`
+}
+
+// String returns the title, the __str__ of Django's DateTimePost.
+func (p DateTimePost) String() string { return p.Title }
+
+// FlexibleDatePost is the FlexibleDatePost model of Django's
+// tests/model_forms/models.py.
+type FlexibleDatePost struct {
+	ID       int64
+	Title    string    `orm:"max_length=50;unique_for_date=posted;blank"`
+	Slug     string    `orm:"max_length=50;unique_for_year=posted;blank"`
+	Subtitle string    `orm:"max_length=50;unique_for_month=posted;blank"`
+	Posted   *orm.Date `orm:"blank;null"`
 }
 
 // Character is the Character model of Django's tests/model_forms/models.py.
@@ -291,7 +316,8 @@ func (AttnameConstraintsModel) Meta() orm.Meta {
 func mfModels() []any {
 	return []any{
 		&Person{}, &Category{}, &Writer{}, &Article{}, &Product{}, &Price{}, &Book{},
-		&DerivedBook{}, &Triple{}, &ExplicitPK{}, &Post{}, &Character{}, &Student{},
+		&DerivedBook{}, &Triple{}, &ExplicitPK{}, &Post{}, &DateTimePost{}, &FlexibleDatePost{},
+		&Character{}, &Student{},
 		&Award{}, &PublicationDefaults{}, &ArticleStatus{}, &CustomErrorMessage{},
 		&NullableUniqueCharFieldModel{}, &ConstraintsModel{}, &AttnameConstraintsModel{},
 	}

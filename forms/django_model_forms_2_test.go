@@ -3,6 +3,7 @@ package forms_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/forms"
@@ -423,20 +424,112 @@ func TestUniqueMultipleFieldUniqueTogether(t *testing.T) {
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_unique_for_date
 func TestUniqueUniqueForDate(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no unique_for_date, unique_for_month or unique_for_year, Django: Post.title is unique per day of posted, slug per year and subtitle per month")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		p := &Post{Title: "Django 1.0 is released", Slug: "Django 1.0", Subtitle: "Finally", Posted: orm.NewDate(2008, 9, 3)}
+		if err := orm.Query[Post](db).Create(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+		newForm := func() *forms.ModelForm[Post] {
+			return forms.NewModelForm[Post](db, forms.WithFields(forms.AllFields))
+		}
+		form := newForm().Bind(vals("title", "Django 1.0 is released", "posted", "2008-09-03"))
+		djangotest.AssertEqual(t, form.IsValid(), false)
+		djangotest.AssertEqual(t, form.Errors().Len(), 1)
+		djangotest.AssertEqual(t, form.Errors().Messages()["title"], []string{"Title must be unique for Posted date."})
+		form = newForm().Bind(vals("title", "Work on Django 1.1 begins", "posted", "2008-09-03"))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+		form = newForm().Bind(vals("title", "Django 1.0 is released", "posted", "2008-09-04"))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+		form = newForm().Bind(vals("slug", "Django 1.0", "posted", "2008-01-01"))
+		djangotest.AssertEqual(t, form.IsValid(), false)
+		djangotest.AssertEqual(t, form.Errors().Len(), 1)
+		djangotest.AssertEqual(t, form.Errors().Messages()["slug"], []string{"Slug must be unique for Posted year."})
+		form = newForm().Bind(vals("subtitle", "Finally", "posted", "2008-09-30"))
+		djangotest.AssertEqual(t, form.IsValid(), false)
+		djangotest.AssertEqual(t, form.Errors().Messages()["subtitle"], []string{"Subtitle must be unique for Posted month."})
+		form = newForm().WithInstance(p).Bind(vals(
+			"subtitle", "Finally",
+			"title", "Django 1.0 is released",
+			"slug", "Django 1.0",
+			"posted", "2008-09-03",
+		))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+		form = newForm().Bind(vals("title", "Django 1.0 is released"))
+		djangotest.AssertEqual(t, form.IsValid(), false)
+		djangotest.AssertEqual(t, form.Errors().Len(), 1)
+		djangotest.AssertEqual(t, form.Errors().Messages()["posted"], []string{"This field is required."})
+	})
 }
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_unique_for_date_in_exclude
+//
+// If the date for unique_for_* constraints is excluded from the ModelForm
+// (in this case 'posted' has editable=False, then the constraint should be
+// ignored.
 func TestUniqueUniqueForDateInExclude(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no unique_for_date, Django: a unique_for_date check is skipped when the date field is excluded (DateTimePost)")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		if err := orm.Query[DateTimePost](db).Create(context.Background(), &DateTimePost{
+			Title:    "Django 1.0 is released",
+			Slug:     "Django 1.0",
+			Subtitle: "Finally",
+			Posted:   time.Date(2008, 9, 3, 10, 10, 1, 0, time.UTC),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		newForm := func() *forms.ModelForm[DateTimePost] {
+			return forms.NewModelForm[DateTimePost](db, forms.WithFields(forms.AllFields))
+		}
+		// 'title' has unique_for_date='posted'
+		form := newForm().Bind(vals("title", "Django 1.0 is released", "posted", "2008-09-03"))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+		// 'slug' has unique_for_year='posted'
+		form = newForm().Bind(vals("slug", "Django 1.0", "posted", "2008-01-01"))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+		// 'subtitle' has unique_for_month='posted'
+		form = newForm().Bind(vals("subtitle", "Finally", "posted", "2008-09-30"))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+	})
 }
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_unique_for_date_with_nullable_date
 func TestUniqueUniqueForDateWithNullableDate(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no unique_for_date, Django: a unique_for_date check is skipped for a null date (FlexibleDatePost)")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		posted := orm.NewDate(2008, 9, 3)
+		p := &FlexibleDatePost{Title: "Django 1.0 is released", Slug: "Django 1.0", Subtitle: "Finally", Posted: &posted}
+		if err := orm.Query[FlexibleDatePost](db).Create(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+		newForm := func() *forms.ModelForm[FlexibleDatePost] {
+			return forms.NewModelForm[FlexibleDatePost](db, forms.WithFields(forms.AllFields))
+		}
+		djangotest.AssertEqual(t, newForm().Bind(vals("title", "Django 1.0 is released")).IsValid(), true)
+		djangotest.AssertEqual(t, newForm().Bind(vals("slug", "Django 1.0")).IsValid(), true)
+		djangotest.AssertEqual(t, newForm().Bind(vals("subtitle", "Finally")).IsValid(), true)
+		form := newForm().WithInstance(p).Bind(vals(
+			"subtitle", "Finally",
+			"title", "Django 1.0 is released",
+			"slug", "Django 1.0",
+		))
+		djangotest.AssertEqual(t, form.IsValid(), true)
+	})
 }
 
 // Ported from Django: tests/model_forms/tests.py::UniqueTest.test_override_unique_for_date_message
 func TestUniqueOverrideUniqueForDateMessage(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no unique_for_date, Django: Meta.error_messages 'unique_for_date' gives \"%(model_name)s's %(field_label)s not unique for %(date_field_label)s date.\"")
+	eachMF(t, func(t *testing.T, db *orm.DB) {
+		if err := orm.Query[Post](db).Create(context.Background(), &Post{
+			Title:    "Django 1.0 is released",
+			Slug:     "Django 1.0",
+			Subtitle: "Finally",
+			Posted:   orm.NewDate(2008, 9, 3),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		form := forms.NewModelForm[Post](db, forms.WithFields(forms.AllFields),
+			forms.WithErrorMessages("title", map[string]string{
+				"unique_for_date": "%(model_name)s's %(field_label)s not unique for %(date_field_label)s date.",
+			})).Bind(vals("title", "Django 1.0 is released", "posted", "2008-09-03"))
+		djangotest.AssertEqual(t, form.Errors().Len(), 1)
+		djangotest.AssertEqual(t, form.Errors().Messages()["title"], []string{"Post's Title not unique for Posted date."})
+	})
 }

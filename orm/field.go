@@ -135,6 +135,16 @@ type Field struct {
 	VerboseName string
 	// HelpText is descriptive text shown beside the field's form widget.
 	HelpText string
+	// UniqueForDate is the attribute name of the date field this field is
+	// unique for per day (Django's unique_for_date), or "". Model validation
+	// checks it; the database does not.
+	UniqueForDate string
+	// UniqueForYear is the attribute name of the date field this field is
+	// unique for per year (Django's unique_for_year), or "".
+	UniqueForYear string
+	// UniqueForMonth is the attribute name of the date field this field is
+	// unique for per month of the year (Django's unique_for_month), or "".
+	UniqueForMonth string
 	// DBIndex requests a single-column database index (Django's db_index=True).
 	DBIndex bool
 	// MaxDigits is the maximum total digit count for KindDecimal (0 means unspecified).
@@ -288,6 +298,20 @@ func applyCommonTagOption(f *Field, fieldName, token string) (bool, error) {
 		f.VerboseName = token[len("verbose_name="):]
 	case strings.HasPrefix(token, "help_text="):
 		f.HelpText = token[len("help_text="):]
+	case strings.HasPrefix(token, "unique_for_date="), strings.HasPrefix(token, "unique_for_year="),
+		strings.HasPrefix(token, "unique_for_month="):
+		option, name, _ := strings.Cut(token, "=")
+		if name == "" {
+			return true, fmt.Errorf("orm: field %s: %s must name a date field", fieldName, option)
+		}
+		switch option {
+		case "unique_for_date":
+			f.UniqueForDate = name
+		case "unique_for_year":
+			f.UniqueForYear = name
+		default:
+			f.UniqueForMonth = name
+		}
 	case strings.HasPrefix(token, "column="):
 		name := token[len("column="):]
 		if name == "" {
@@ -373,7 +397,8 @@ func parseDefault(kind Kind, raw string) (any, error) {
 
 // applyRelationTagOption applies a single parsed tag token to a relation field.
 // A relation field accepts the common options (null, unique, blank, index,
-// editable=, verbose_name=, help_text=, column=) and on_delete=, but rejects
+// editable=, verbose_name=, help_text=, unique_for_date=, unique_for_year=,
+// unique_for_month=, column=) and on_delete=, but rejects
 // scalar-only options such as max_length, type=text, and pk.
 func applyRelationTagOption(f *Field, fieldName, token string) error {
 	if handled, err := applyCommonTagOption(f, fieldName, token); handled || err != nil {

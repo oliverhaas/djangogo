@@ -181,9 +181,10 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   underscore (`Parent1` becomes `parent1`).
 - **Model options:** `orm.Meta` has `ordering`, `unique_together`, `indexes`,
   verbose names, `db_table`, per-field choices, validators and error
-  messages, `limit_choices_to` and `constraints`. There is no
-  `unique_for_date`, no custom managers and no abstract, proxy or multi-table
-  inheritance. A constraint has no `deferrable`, `include` or `opclasses`,
+  messages, `limit_choices_to` and `constraints`. There are no custom
+  managers and no abstract, proxy or multi-table inheritance.
+  `unique_for_date`, `unique_for_year` and `unique_for_month` read a datetime
+  in UTC. A constraint has no `deferrable`, `include` or `opclasses`,
   cannot refer to a field across a relation, and its expressions cannot be
   ordered. SQLite does not create a unique constraint with
   `NullsNotDistinct`, which PostgreSQL 15 needs. A migration writes the

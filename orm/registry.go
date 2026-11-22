@@ -230,6 +230,9 @@ func (r *Registry) RegisterApp(app string, model any) (*Model, error) {
 	if err := applyModelMeta(m, model); err != nil {
 		return nil, err
 	}
+	if err := resolveUniqueFor(m); err != nil {
+		return nil, err
+	}
 	r.models = append(r.models, m)
 	r.byType[st] = m
 	r.byLabel[label] = m

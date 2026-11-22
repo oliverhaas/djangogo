@@ -207,14 +207,12 @@ type Poem struct {
 // String returns the name.
 func (p Poem) String() string { return p.Name }
 
-// Post is the Post model of Django's tests/model_formsets/models.py,
-// without unique_for_date, unique_for_year and unique_for_month, which the
-// Go ORM does not have.
+// Post is the Post model of Django's tests/model_formsets/models.py.
 type Post struct {
 	ID       int64
-	Title    string   `orm:"max_length=50;blank"`
-	Slug     string   `orm:"max_length=50;blank"`
-	Subtitle string   `orm:"max_length=50;blank"`
+	Title    string   `orm:"max_length=50;unique_for_date=posted;blank"`
+	Slug     string   `orm:"max_length=50;unique_for_year=posted;blank"`
+	Subtitle string   `orm:"max_length=50;unique_for_month=posted;blank"`
 	Posted   orm.Date `orm:"type=date"`
 }
 

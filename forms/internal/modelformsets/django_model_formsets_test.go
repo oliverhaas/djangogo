@@ -1651,10 +1651,6 @@ func TestGetQuerysetUnchangedWhenAlreadyTotallyOrdered(t *testing.T) {
 }
 
 // Ported from Django: tests/model_formsets/tests.py::ModelFormsetTest.test_prevent_duplicates_from_with_the_same_formset
-//
-// FIXME-PORT: Go: the ORM has no unique_for_date, unique_for_year or
-// unique_for_month, Django: the last part of the test checks the duplicate
-// Post data against them.
 func TestPreventDuplicatesFromWithTheSameFormset(t *testing.T) {
 	eachDB(t, func(t *testing.T, db *orm.DB) {
 		products := forms.NewModelFormSet[Product](db)
@@ -1726,6 +1722,68 @@ func TestPreventDuplicatesFromWithTheSameFormset(t *testing.T) {
 			[]string{"Please correct the duplicate data for title."})
 		djangotest.AssertEqual(t, errorMessages(booksBound.Errors()), []map[string][]string{
 			{}, {"__all__": {"Please correct the duplicate values below."}},
+		})
+
+		posts := forms.NewModelFormSet[Post](db)
+		posts.Extra = 2
+		data = postData(
+			"form-TOTAL_FORMS", "2",
+			"form-INITIAL_FORMS", "0",
+			"form-MAX_NUM_FORMS", "",
+			"form-0-title", "blah",
+			"form-0-slug", "Morning",
+			"form-0-subtitle", "foo",
+			"form-0-posted", "2009-01-01",
+			"form-1-title", "blah",
+			"form-1-slug", "Morning in Prague",
+			"form-1-subtitle", "rawr",
+			"form-1-posted", "2009-01-01",
+		)
+		postsBound := posts.Bind(data)
+		djangotest.AssertEqual(t, postsBound.IsValid(), false)
+		djangotest.AssertEqual(t, postsBound.NonFormErrors().Messages(), []string{
+			"Please correct the duplicate data for title which must be unique for the date in posted.",
+		})
+		djangotest.AssertEqual(t, errorMessages(postsBound.Errors()), []map[string][]string{
+			{}, {"__all__": {"Please correct the duplicate values below."}},
+		})
+
+		data = postData(
+			"form-TOTAL_FORMS", "2",
+			"form-INITIAL_FORMS", "0",
+			"form-MAX_NUM_FORMS", "",
+			"form-0-title", "foo",
+			"form-0-slug", "Morning in Prague",
+			"form-0-subtitle", "foo",
+			"form-0-posted", "2009-01-01",
+			"form-1-title", "blah",
+			"form-1-slug", "Morning in Prague",
+			"form-1-subtitle", "rawr",
+			"form-1-posted", "2009-08-02",
+		)
+		postsBound = posts.Bind(data)
+		djangotest.AssertEqual(t, postsBound.IsValid(), false)
+		djangotest.AssertEqual(t, postsBound.NonFormErrors().Messages(), []string{
+			"Please correct the duplicate data for slug which must be unique for the year in posted.",
+		})
+
+		data = postData(
+			"form-TOTAL_FORMS", "2",
+			"form-INITIAL_FORMS", "0",
+			"form-MAX_NUM_FORMS", "",
+			"form-0-title", "foo",
+			"form-0-slug", "Morning in Prague",
+			"form-0-subtitle", "rawr",
+			"form-0-posted", "2008-08-01",
+			"form-1-title", "blah",
+			"form-1-slug", "Prague",
+			"form-1-subtitle", "rawr",
+			"form-1-posted", "2009-08-02",
+		)
+		postsBound = posts.Bind(data)
+		djangotest.AssertEqual(t, postsBound.IsValid(), false)
+		djangotest.AssertEqual(t, postsBound.NonFormErrors().Messages(), []string{
+			"Please correct the duplicate data for subtitle which must be unique for the month in posted.",
 		})
 	})
 }

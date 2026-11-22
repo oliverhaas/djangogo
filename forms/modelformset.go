@@ -445,8 +445,9 @@ func (s *ModelFormSet[T]) ModelForms() []*ModelForm[T] {
 	return out
 }
 
-// validateUnique checks the unique fields across the valid forms that are
-// not marked for deletion, Django's validate_unique of a model formset. A
+// validateUnique checks the unique fields and the unique_for_date,
+// unique_for_year and unique_for_month options across the valid forms that
+// are not marked for deletion, Django's validate_unique of a model formset. A
 // form that repeats the values of an earlier one gets the non-field error
 // "Please correct the duplicate values below." and loses those values from
 // its cleaned data; the formset gets one error per repetition.
@@ -462,17 +463,25 @@ func (s *ModelFormSet[T]) validateUnique() error {
 	}
 	var valid []*Form
 	var checks [][]string
+	var dateChecks []orm.DateCheck
 	seenCheck := map[string]bool{}
+	seenDateCheck := map[orm.DateCheck]bool{}
 	for _, f := range s.Forms() {
 		if !f.IsValid() || deleted[f] {
 			continue
 		}
 		valid = append(valid, f)
-		mf := s.st.forms[f]
-		for _, check := range s.model.UniqueChecksWithConstraints(mf.validationExclusions(f)...) {
+		exclude := s.st.forms[f].validationExclusions(f)
+		for _, check := range s.model.UniqueChecksWithConstraints(exclude...) {
 			if key := strings.Join(check, "\x00"); !seenCheck[key] {
 				seenCheck[key] = true
 				checks = append(checks, check)
+			}
+		}
+		for _, check := range s.model.DateChecks(exclude...) {
+			if !seenDateCheck[check] {
+				seenDateCheck[check] = true
+				dateChecks = append(dateChecks, check)
 			}
 		}
 	}
@@ -490,6 +499,28 @@ func (s *ModelFormSet[T]) validateUnique() error {
 				for _, name := range check {
 					delete(f.cleaned, name)
 				}
+			}
+			seen[key] = true
+		}
+	}
+	for _, check := range dateChecks {
+		seen := map[string]bool{}
+		for _, f := range valid {
+			value, ok := s.uniqueKey(f, []string{check.Field})
+			if !ok {
+				continue
+			}
+			period, ok := s.model.DatePeriod(check, f.cleaned[check.DateField])
+			if !ok {
+				continue
+			}
+			key := value + "\x00" + period.String()
+			if seen[key] {
+				errs = append(errs, NewValidationError(fmt.Sprintf(
+					"Please correct the duplicate data for %s which must be unique for the %s in %s.",
+					check.Field, check.Lookup, check.DateField), ""))
+				f.replaceNonFieldErrors(NewValidationError("Please correct the duplicate values below.", ""))
+				delete(f.cleaned, check.Field)
 			}
 			seen[key] = true
 		}

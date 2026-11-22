@@ -774,6 +774,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   data, or `GetSuccessMessage`, which also receives the saved or deleted
   object. The view needs `messages.Middleware`. A `DELETE` request adds no
   message, as in Django.
+- ORM: the field tag options `unique_for_date=`, `unique_for_year=` and
+  `unique_for_month=` name a date or datetime field, as Django's options of
+  the same names do. `FullClean`, `ValidateUnique`, model forms and the admin
+  reject a value that another row already has on the same day, in the same
+  year or in the same month of that field. A model formset also rejects such
+  a value repeated in two of its forms. `Model.DateChecks` lists the checks.
+  The database holds no constraint for them, so no migration is needed.
 
 ### Changed
 

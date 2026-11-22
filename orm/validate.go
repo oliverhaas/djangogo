@@ -63,6 +63,7 @@ var defaultFieldErrorMessages = map[string]string{
 	"blank":           "This field cannot be blank.",
 	"unique":          "%(model_name)s with this %(field_label)s already exists.",
 	"unique_together": "%(model_name)s with this %(field_labels)s already exists.",
+	"unique_for_date": "%(field_label)s must be unique for %(date_field_label)s %(lookup_type)s.",
 	"fk_invalid":      "%(model)s instance with %(field)s %(value)r is not a valid choice.",
 }
 
@@ -427,7 +428,8 @@ func (m *Model) CleanFields(instance any, opts ...CleanOption) error {
 }
 
 // ValidateUnique checks single-field unique constraints, primary-key uniqueness
-// (when adding), and Meta.UniqueTogether sets against db, returning a
+// (when adding), Meta.UniqueTogether sets and the unique_for_date,
+// unique_for_year and unique_for_month options against db, returning a
 // dictionary *ValidationError if any constraint is violated. It mirrors
 // Django's Model.validate_unique(exclude=...).
 func ValidateUnique(ctx context.Context, db *DB, instance any, opts ...CleanOption) error {
@@ -775,6 +777,9 @@ func validateUniqueInternal(ctx context.Context, db *DB, m *Model, instance any,
 			}
 			errs[key] = append(errs[key], uniqueErrorMessage(m, check))
 		}
+	}
+	if err := performDateChecks(ctx, db, m, rv, exclude, adding, errs); err != nil {
+		return err
 	}
 
 	if len(errs) > 0 {
