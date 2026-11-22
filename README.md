@@ -204,15 +204,17 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `icontains`, not full-text search. A template option such as
   `ChangeFormTemplate` names one template, not a list. Blocks that Django names with hyphens, such as `object-tools-items`,
   have underscores.
-- **Auth:** no custom user model. The login, logout and password change views
-  are mounted by hand: there is no counterpart of `django.contrib.auth.urls`. No
-  `LoginRequiredMiddleware`. In templates, `perms` does not grant an
-  active superuser the permissions that are missing from the database, and
-  `user` has no related objects such as groups. `LoginRequired` escapes the
-  slashes of `next` (`%2F`), where Django keeps them.
+- **Auth:** no custom user model and no password reset views, so `auth.URLs`
+  has only the login, logout and password change routes.
+  `LoginRequiredMiddleware` sees `LoginNotRequired` and the guards only on the
+  handler of the route or through `Unwrap` methods. In templates, `perms` does
+  not grant an active superuser the permissions that are missing from the
+  database, and `user` has no related objects such as groups.
 - **Sessions and messages:** no cache, cache_db or file session stores. The
   database store needs a database and the installed `sessions` app; without
-  them, sessions use signed cookies. Messages use the session only: no cookie or
+  them, sessions use signed cookies. The middleware loads the session of the
+  cookie with each request, also when no view reads it, where Django loads it
+  on first access. Messages use the session only: no cookie or
   fallback storage. A message added after the response
   headers are written is lost, and reading `messages` in a template, also in
   `{% if messages %}`, marks them as read.

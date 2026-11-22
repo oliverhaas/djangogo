@@ -11,6 +11,7 @@ import (
 	"github.com/oliverhaas/djangogo/admin"
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/csrf"
+	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/orm/backends/sqlite"
 	"github.com/oliverhaas/djangogo/sessions"
@@ -248,4 +249,31 @@ func TestLoginPOSTInactiveStaffRejected(t *testing.T) {
 	if rec.Header().Get("Location") != "" {
 		t.Errorf("inactive staff login POST should not redirect (got Location %q)", rec.Header().Get("Location"))
 	}
+}
+
+// Ported from Django: tests/auth_tests/test_middleware.py::TestLoginRequiredMiddleware.test_admin_path
+func TestLoginRequiredMiddlewareAdminPath(t *testing.T) {
+	db := newUserDB(t)
+	site, err := admin.NewAdminSite(db)
+	if err != nil {
+		t.Fatalf("NewAdminSite: %v", err)
+	}
+	router := urls.NewRouter(site.Routes()...)
+	store := sessions.NewSignedCookieStore([]byte("login-required-secret"))
+	h := auth.LoginRequiredMiddleware(router.HandlerFor)(router)
+	h = auth.Middleware(db)(h)
+	h = csrf.Middleware(h)
+	h = sessions.Middleware(store, djangotest.DefaultSessionCookie)(h)
+	client := djangotest.NewClient(t, h, djangotest.WithDB(db),
+		djangotest.WithSessions(store, djangotest.DefaultSessionCookie))
+
+	adminURL, err := router.Reverse("admin:index")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginURL, err := router.Reverse("admin:login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	djangotest.AssertRedirects(t, client.Get(adminURL), loginURL+"?next="+adminURL)
 }

@@ -206,19 +206,33 @@ type exemptHandler struct {
 	http.Handler
 }
 
+// Unwrap returns the wrapped handler.
+func (h exemptHandler) Unwrap() http.Handler { return h.Handler }
+
 // Exempt marks a handler as not to be checked (Django's csrf_exempt). Use it
 // for endpoints that authenticate every request by other means, such as a
 // signed webhook.
 //
 // The middleware runs before the router picks a handler, so it only sees the
-// mark when Options.Resolve tells it which handler will serve the request,
-// and only when Exempt is the outermost wrapper of that handler.
+// mark when Options.Resolve tells it which handler will serve the request.
+// The mark can sit under other wrappers that have an Unwrap() http.Handler
+// method, such as auth.LoginNotRequired.
 func Exempt(h http.Handler) http.Handler {
 	return exemptHandler{h}
 }
 
-// IsExempt reports whether h was marked with Exempt.
+// IsExempt reports whether h, or a handler that h wraps, was marked with
+// Exempt. It follows the Unwrap() http.Handler methods of the wrappers.
 func IsExempt(h http.Handler) bool {
-	_, ok := h.(exemptHandler)
-	return ok
+	for h != nil {
+		if _, ok := h.(exemptHandler); ok {
+			return true
+		}
+		u, ok := h.(interface{ Unwrap() http.Handler })
+		if !ok {
+			return false
+		}
+		h = u.Unwrap()
+	}
+	return false
 }

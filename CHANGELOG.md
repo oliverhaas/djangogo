@@ -579,6 +579,18 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   the keys of the related rows as the initial value of such a many-to-many
   field. Both constructors panic on a field name the model does not have or
   a label function for another model.
+- Auth: `auth.LoginRequiredMiddleware`, Django's `LoginRequiredMiddleware`,
+  sends anonymous users to the login page unless the view opts out with
+  `auth.LoginNotRequired`, Django's `login_not_required`. The login view and
+  the admin login page opt out. Add it with
+  `app.Use(auth.LoginRequiredMiddleware(app.HandlerFor))`. A view behind
+  `LoginRequired` or another guard keeps the login URL and the redirect field
+  name of its guard, and an admin view sends anonymous users to the admin
+  login page. `auth.URLs` returns the login, logout and password change
+  routes of `django.contrib.auth.urls` with their names.
+- URLs: `Router.HandlerFor` and `Application.HandlerFor` return the view that
+  serves a request, the resolve function of `auth.LoginRequiredMiddleware` and
+  of `csrf.Options.Resolve`.
 
 ### Changed
 

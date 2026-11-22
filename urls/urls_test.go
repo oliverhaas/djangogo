@@ -332,3 +332,32 @@ func TestNewRouterPanicsOnBadRoute(t *testing.T) {
 	}()
 	urls.NewRouter(bad)
 }
+
+func TestRouterHandlerFor(t *testing.T) {
+	page, form := handlerFunc(http.StatusOK), handlerFunc(http.StatusCreated)
+	rt := urls.NewRouter(
+		urls.Path("", page, "home"),
+		urls.Path("POST /form/{$}", form, "form"),
+	)
+	for _, tc := range []struct {
+		method, path string
+		want         http.Handler
+	}{
+		{http.MethodGet, "/", page},
+		{http.MethodPost, "/form/", form},
+		{http.MethodGet, "/form/", nil},
+		{http.MethodGet, "/missing/", nil},
+	} {
+		got := rt.HandlerFor(httptest.NewRequest(tc.method, tc.path, http.NoBody))
+		rec, wantRec := httptest.NewRecorder(), httptest.NewRecorder()
+		if got != nil {
+			got.ServeHTTP(rec, nil)
+		}
+		if tc.want != nil {
+			tc.want.ServeHTTP(wantRec, nil)
+		}
+		if (got == nil) != (tc.want == nil) || rec.Code != wantRec.Code {
+			t.Errorf("HandlerFor(%s %s) = %v, want %v", tc.method, tc.path, got, tc.want)
+		}
+	}
+}

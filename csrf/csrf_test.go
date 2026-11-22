@@ -132,7 +132,16 @@ func TestIsExempt(t *testing.T) {
 	if csrf.IsExempt(wrapped) {
 		t.Error("IsExempt(wrapper around Exempt) = true")
 	}
+	// A wrapper with an Unwrap method shows the mark.
+	if !csrf.IsExempt(unwrapper{csrf.Exempt(postFormView)}) {
+		t.Error("IsExempt(unwrapper around Exempt) = false")
+	}
 }
+
+// unwrapper is a wrapper that shows the handler it wraps.
+type unwrapper struct{ http.Handler }
+
+func (u unwrapper) Unwrap() http.Handler { return u.Handler }
 
 func TestIsSecureOptionDecidesTheScheme(t *testing.T) {
 	behindProxy := func(r *http.Request) bool { return r.Header.Get("X-Forwarded-Proto") == "https" }

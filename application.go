@@ -344,7 +344,7 @@ func (a *Application) defaultMiddleware() ([]func(http.Handler) http.Handler, er
 		}),
 		security,
 		sessions.MiddlewareWithOptions(a.sessions, a.sessionOptions()),
-		csrf.MiddlewareWithOptions(a.csrfOptions(a.resolveView())),
+		csrf.MiddlewareWithOptions(a.csrfOptions(a.HandlerFor)),
 	}
 	// Authentication loads the request user from the database.
 	if a.DB != nil {
@@ -392,21 +392,17 @@ func (a *Application) router() (http.Handler, error) {
 	return router, nil
 }
 
-// resolveView returns the function the CSRF middleware asks for the view of
-// a request, so that a view marked with csrf.Exempt is not checked. It is nil
-// for a project without routes.
-func (a *Application) resolveView() func(*http.Request) http.Handler {
-	router, ok := a.root.(*urls.Router)
-	if !ok {
-		return nil
+// HandlerFor returns the view that serves r, or nil when no route matches
+// r. The CSRF middleware asks it for the view of a request, so that a view
+// marked with csrf.Exempt is not checked. It is the resolve function of
+// auth.LoginRequiredMiddleware:
+//
+//	app.Use(auth.LoginRequiredMiddleware(app.HandlerFor))
+func (a *Application) HandlerFor(r *http.Request) http.Handler {
+	if router, ok := a.root.(*urls.Router); ok {
+		return router.HandlerFor(r)
 	}
-	return func(r *http.Request) http.Handler {
-		m, err := router.Resolve(r.URL.Path)
-		if err != nil {
-			return nil
-		}
-		return m.Handler
-	}
+	return nil
 }
 
 // notFound answers a request no route matches with the 404.html of the

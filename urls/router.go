@@ -119,6 +119,16 @@ func (rt *Router) IsValidPath(path string) bool {
 	return rt.lookup("", path) != nil
 }
 
+// HandlerFor returns the handler of the route that serves r, or nil when no
+// route matches the path and method of r. It is the resolve function that
+// auth.LoginRequiredMiddleware and csrf.Options.Resolve take.
+func (rt *Router) HandlerFor(r *http.Request) http.Handler {
+	if m := rt.lookup(r.Method, r.URL.Path); m != nil {
+		return m.Handler
+	}
+	return nil
+}
+
 // lookup finds the route for a path without recording the tried patterns.
 // An empty method skips the method check.
 func (rt *Router) lookup(method, path string) *ResolverMatch {
@@ -183,6 +193,9 @@ type noAppendSlash struct{ http.Handler }
 
 // ShouldAppendSlash opts the handler out of the slash redirect.
 func (noAppendSlash) ShouldAppendSlash() bool { return false }
+
+// Unwrap returns the wrapped handler.
+func (h noAppendSlash) Unwrap() http.Handler { return h.Handler }
 
 // NoAppendSlash wraps a handler so that a request for its URL without the
 // trailing slash gets a 404 instead of the redirect, Django's

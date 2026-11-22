@@ -281,6 +281,10 @@ func (v *LoginView) successURL(r *http.Request) string {
 	return configuredLoginRedirectURL()
 }
 
+// LoginRequired lets anonymous users reach the login page under
+// LoginRequiredMiddleware, as Django's LoginView is login_not_required.
+func (*LoginView) LoginRequired() bool { return false }
+
 // ServeHTTP implements http.Handler.
 func (v *LoginView) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	neverCache(w)

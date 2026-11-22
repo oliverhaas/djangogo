@@ -154,6 +154,24 @@ func TestCSRFSettingsAndExemptViews(t *testing.T) {
 	}
 }
 
+// TestLoginRequiredMiddlewareWithHandlerFor sends an anonymous request for a
+// protected route to the login page, and lets it reach a route marked with
+// auth.LoginNotRequired and the 404 of a missing route.
+func TestLoginRequiredMiddlewareWithHandlerFor(t *testing.T) {
+	ok := func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }
+	app := newWiredApp(t, conf.Settings{}, routeApp{[]urls.Route{
+		urls.PathFunc("private/", ok, "private"),
+		urls.Path("public/", auth.LoginNotRequired(http.HandlerFunc(ok)), "public"),
+	}})
+	app.Use(auth.LoginRequiredMiddleware(app.HandlerFor))
+
+	rec := request(app, http.MethodGet, "/private/")
+	djangotest.AssertEqual(t, rec.Code, http.StatusFound)
+	djangotest.AssertEqual(t, rec.Header().Get("Location"), "/accounts/login/?next=/private/")
+	djangotest.AssertEqual(t, request(app, http.MethodGet, "/public/").Code, http.StatusOK)
+	djangotest.AssertEqual(t, request(app, http.MethodGet, "/missing/").Code, http.StatusNotFound)
+}
+
 // TestMessagesMiddlewareIsInstalled lets a view add a message.
 func TestMessagesMiddlewareIsInstalled(t *testing.T) {
 	view := func(w http.ResponseWriter, r *http.Request) {

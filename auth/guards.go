@@ -131,26 +131,51 @@ func nextFor(r *http.Request, loginURL string) string {
 }
 
 // wrap returns middleware that lets a request through when test passes for
-// its user. An error of test is a 500: the guard cannot tell whether the user
-// may pass.
+// its user.
 func (g *guard) wrap(test func(r *http.Request, u *User) (bool, error)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			u, err := GetUser(r)
-			if err == nil {
-				var ok bool
-				if ok, err = test(r, u); err == nil && ok {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-			if err != nil {
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-				return
-			}
-			g.deny(w, r, u)
-		})
+		return &guardHandler{guard: g, test: test, next: next}
 	}
+}
+
+// guardHandler is the handler a guard wraps a view in.
+type guardHandler struct {
+	guard *guard
+	test  func(r *http.Request, u *User) (bool, error)
+	next  http.Handler
+}
+
+// ServeHTTP serves the view when the test passes for the user of the request.
+// An error of the test is a 500: the guard cannot tell whether the user may
+// pass.
+func (h *guardHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	u, err := GetUser(r)
+	if err == nil {
+		var ok bool
+		if ok, err = h.test(r, u); err == nil && ok {
+			h.next.ServeHTTP(w, r)
+			return
+		}
+	}
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	h.guard.deny(w, r, u)
+}
+
+// Unwrap returns the view.
+func (h *guardHandler) Unwrap() http.Handler { return h.next }
+
+// LoginRedirect returns the login URL and the redirect field name of the
+// guard for LoginRequiredMiddleware, as Django's user_passes_test sets them
+// on the view.
+func (h *guardHandler) LoginRedirect() []GuardOption {
+	opts := []GuardOption{WithRedirectFieldName(h.guard.redirectField)}
+	if h.guard.loginURL != "" {
+		opts = append(opts, WithLoginURL(h.guard.loginURL))
+	}
+	return opts
 }
 
 // LoginRequired returns middleware that lets logged-in users through and

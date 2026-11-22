@@ -326,7 +326,7 @@ func (s *AdminSite) AdminView(h http.Handler) http.Handler {
 // headers. Requests that fail HasPermission are redirected to login (or to
 // admin:index when hitting the logout URL, matching Django).
 func (s *AdminSite) adminView(fn http.HandlerFunc, cacheable bool) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return adminViewHandler{site: s, HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
 		if !cacheable {
 			neverCache(w)
 		}
@@ -339,7 +339,20 @@ func (s *AdminSite) adminView(fn http.HandlerFunc, cacheable bool) http.Handler 
 			return
 		}
 		fn(w, r)
-	})
+	}}
+}
+
+// adminViewHandler is the handler of an admin view.
+type adminViewHandler struct {
+	http.HandlerFunc
+	site *AdminSite
+}
+
+// LoginRedirect sends anonymous users of auth.LoginRequiredMiddleware to the
+// admin login page, the login_url that Django's AdminSite.get_urls sets on
+// its views.
+func (h adminViewHandler) LoginRedirect() []auth.GuardOption {
+	return []auth.GuardOption{auth.WithLoginURL(h.site.loginURL())}
 }
 
 // Routes returns the admin's URL routes mounted under Prefix with application
@@ -360,7 +373,7 @@ func (s *AdminSite) Routes() []urls.Route {
 func (s *AdminSite) buildRoutes() []urls.Route {
 	inner := []urls.Route{
 		urls.Path("", s.adminView(s.index, false), "index"),
-		urls.Path("login/", http.HandlerFunc(s.login), "login"),
+		urls.Path("login/", auth.LoginNotRequired(http.HandlerFunc(s.login)), "login"),
 		urls.Path("logout/", s.adminView(s.logout, false), "logout"),
 		urls.Path("password_change/", s.adminView(s.passwordChange, true), "password_change"),
 		urls.Path("password_change/done/", s.adminView(s.passwordChangeDone, true), "password_change_done"),

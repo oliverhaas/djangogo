@@ -59,8 +59,15 @@ type viewsSite struct {
 // validators are off, as in Django's test settings.
 func newViewsSite(t *testing.T, db *orm.DB) *viewsSite {
 	t.Helper()
+	return newViewsSiteServing(t, db, viewsURLs())
+}
+
+// newViewsSiteServing is newViewsSite for a site that serves handler, such
+// as viewsURLs behind more middleware.
+func newViewsSiteServing(t *testing.T, db *orm.DB, handler http.Handler) *viewsSite {
+	t.Helper()
 	noValidators(t)
-	s := &viewsSite{site: newSite(t, db, viewsURLs())}
+	s := &viewsSite{site: newSite(t, db, handler)}
 	s.u1 = createUserWithEmail(t, db, "testclient", "password", "testclient@example.com")
 	s.u3 = createUserWithEmail(t, db, "staff", "password", "staffmember@example.com")
 	return s
@@ -293,7 +300,16 @@ func TestDjangoPasswordChangeRedirectCustomNamed(t *testing.T) {
 
 // Ported from Django: tests/auth_tests/test_views.py::ChangePasswordTest.test_access_under_login_required_middleware
 func TestDjangoPasswordChangeAccessUnderLoginRequiredMiddleware(t *testing.T) {
-	t.Skip("LoginRequiredMiddleware is not ported")
+	eachDB(t, func(t *testing.T, db *orm.DB) {
+		s := newViewsSiteServing(t, db, withLoginRequired(viewsURLs()))
+		resp := s.Post("/password_change/", passwordChangeData)
+		djangotest.AssertRedirects(t, resp, auth.DefaultLoginURL+"?next=/password_change/",
+			djangotest.FetchRedirectResponse(false))
+
+		s.login(t, "testclient", "password", "/login/")
+		resp = s.Post("/password_change/", passwordChangeData)
+		djangotest.AssertRedirects(t, resp, "/password_change/done/", djangotest.FetchRedirectResponse(false))
+	})
 }
 
 // Ported from Django: tests/auth_tests/test_views.py::LoginTest.test_current_site_in_context_after_login
@@ -456,7 +472,10 @@ func TestDjangoLoginRedirectURLOverridesGetDefaultRedirectURL(t *testing.T) {
 
 // Ported from Django: tests/auth_tests/test_views.py::LoginTest.test_access_under_login_required_middleware
 func TestDjangoLoginAccessUnderLoginRequiredMiddleware(t *testing.T) {
-	t.Skip("LoginRequiredMiddleware is not ported")
+	eachDB(t, func(t *testing.T, db *orm.DB) {
+		s := newViewsSiteServing(t, db, withLoginRequired(viewsURLs()))
+		djangotest.AssertStatus(t, s.Get("/login/"), http.StatusOK)
+	})
 }
 
 // assertLoginURLEquals is LoginURLSettings.assertLoginURLEquals. The named
@@ -996,7 +1015,15 @@ func TestDjangoLogoutRedirectURLNamedSetting(t *testing.T) {
 
 // Ported from Django: tests/auth_tests/test_views.py::LogoutTest.test_access_under_login_required_middleware
 func TestDjangoLogoutAccessUnderLoginRequiredMiddleware(t *testing.T) {
-	t.Skip("LoginRequiredMiddleware is not ported")
+	eachDB(t, func(t *testing.T, db *orm.DB) {
+		s := newViewsSiteServing(t, db, withLoginRequired(viewsURLs()))
+		resp := s.Post("/logout/", nil)
+		djangotest.AssertRedirects(t, resp, auth.DefaultLoginURL+"?next=/logout/",
+			djangotest.FetchRedirectResponse(false))
+
+		s.login(t, "testclient", "password", "/login/")
+		djangotest.AssertStatus(t, s.Post("/logout/", nil), http.StatusOK)
+	})
 }
 
 // The logout view takes POST only since Django 5; a GET answers 405.
