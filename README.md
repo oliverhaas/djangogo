@@ -199,7 +199,8 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `RegisterTransform` applies to one field kind, where Django's registration
   on `CharField` also covers its subclasses. `OrderBy` takes keys, not
   expressions: annotate an expression to order by it. There is
-  no `extra()`, no fetch modes and no `select_related()` without arguments. A model keeps prefetched
+  no `extra()` and no fetch modes. `SelectRelated` needs field names: Django
+  6.1 deprecates `select_related()` without arguments. A model keeps prefetched
   reverse and many-to-many sets only when it embeds `orm.RelCache`, and the
   queryset of an `orm.Prefetch` cannot be sliced. `Raw` leaves the fields missing
   from a result at their zero value, where Django defers and loads them.

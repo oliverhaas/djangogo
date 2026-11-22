@@ -263,12 +263,12 @@ func TestSelectRelatedListWithoutSelectRelated(t *testing.T) {
 
 // Ported from Django: tests/select_related/tests.py::SelectRelatedTests.test_list_with_select_related
 func TestSelectRelatedListWithSelectRelated(t *testing.T) {
-	t.Skip("needs select_related() without arguments, which the ORM does not have")
+	t.Skip("needs select_related() without arguments, which Django 6.1 deprecates and the ORM leaves out")
 }
 
 // Ported from Django: tests/select_related/tests.py::SelectRelatedTests.test_select_related_no_arguments_deprecated
 func TestSelectRelatedSelectRelatedNoArgumentsDeprecated(t *testing.T) {
-	t.Skip("needs select_related() without arguments, which the ORM does not have")
+	t.Skip("needs select_related() without arguments, which Django 6.1 deprecates and the ORM leaves out")
 }
 
 // Ported from Django: tests/select_related/tests.py::SelectRelatedTests.test_list_with_depth
@@ -346,9 +346,21 @@ func TestSelectRelatedFieldTraversal(t *testing.T) {
 	})
 }
 
+// Go has no None among string arguments: SelectRelated() without names is
+// select_related(None). Django inspects query.select_related; the test checks
+// that the species come without their genus instead.
+//
 // Ported from Django: tests/select_related/tests.py::SelectRelatedTests.test_none_clears_list
 func TestSelectRelatedNoneClearsList(t *testing.T) {
-	t.Skip("needs select_related(None), which the ORM does not have")
+	djangotest.EachDB(t, selModels(), func(t *testing.T, db *orm.DB) {
+		selSetUp(t, db)
+		world := mustAll(t, orm.Query[selSpecies](db).SelectRelated("genus").SelectRelated())
+		djangotest.AssertEqual(t, len(world) > 0, true)
+		for _, s := range world {
+			_, loaded := s.Genus.Object()
+			djangotest.AssertEqual(t, loaded, false)
+		}
+	})
 }
 
 // Django unpacks an unordered slice of two species; Go orders by id to make

@@ -45,8 +45,16 @@ func (qs *QuerySet[T]) prefetchQuery() *query { return qs.q }
 //
 // The JOIN is INNER for a non-null foreign key and LEFT OUTER for a nullable
 // one, so a row without a related object is kept and its FK stays unloaded.
+//
+// SelectRelated() without names clears the relations of earlier calls, as
+// Django's select_related(None) does. Django 6.1 deprecates select_related()
+// without arguments, which follows every non-null foreign key.
 func (qs *QuerySet[T]) SelectRelated(fields ...string) *QuerySet[T] {
 	cp := qs.q.clone()
+	if len(fields) == 0 {
+		cp.selectRelated = nil
+		return &QuerySet[T]{q: cp}
+	}
 	cp.selectRelated = append(cp.selectRelated, fields...)
 	return &QuerySet[T]{q: cp}
 }

@@ -792,6 +792,8 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   function fails. `ErrTransactionManagement` matches the error of a query in
   a transaction marked for rollback, and of the rollback flag functions
   outside a transaction.
+- ORM: `SelectRelated()` without names clears the relations of earlier
+  calls, as Django's `select_related(None)` does. Before, it did nothing.
 
 ### Changed
 
