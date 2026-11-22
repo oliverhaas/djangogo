@@ -40,6 +40,8 @@ var djangoDefaults = map[string]any{
 	"LOGIN_REDIRECT_URL":  "/accounts/profile/",
 	"LOGOUT_REDIRECT_URL": "",
 
+	"PASSWORD_RESET_TIMEOUT": 259200 * time.Second,
+
 	"APPEND_SLASH":         true,
 	"USE_X_FORWARDED_HOST": false,
 	"USE_X_FORWARDED_PORT": false,

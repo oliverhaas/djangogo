@@ -35,7 +35,7 @@ const (
 // templateFS holds the admin's embedded pongo2 templates under templates/admin
 // and templates/registration.
 //
-//go:embed templates/admin/*.html templates/admin/includes/*.html templates/admin/edit_inline/*.html templates/admin/auth/user/*.html templates/registration/*.html
+//go:embed templates/admin/*.html templates/admin/includes/*.html templates/admin/edit_inline/*.html templates/admin/auth/user/*.html templates/registration/*.html templates/registration/*.txt
 var templateFS embed.FS
 
 // entryKey uniquely identifies a registered model within an AdminSite by app
@@ -160,9 +160,21 @@ type AdminSite struct {
 	// ExtraContext returns values to add to the template context of a page
 	// of the site, Django's extra_context argument of the views of
 	// AdminSite. view is "index", "app_index", "login", "logout",
-	// "password_change" or "password_change_done". The values replace those
-	// of the page. ModelAdmin.ExtraContext covers the pages of a model.
+	// "password_change", "password_change_done", "password_reset",
+	// "password_reset_done", "password_reset_confirm" or
+	// "password_reset_complete". The values replace those of the page.
+	// ModelAdmin.ExtraContext covers the pages of a model.
 	ExtraContext func(r *http.Request, view string) map[string]any
+	// PasswordReset mounts the password reset pages of the auth package
+	// under Prefix, styled as the admin: "password_reset/" named
+	// "admin_password_reset", "password_reset/done/" named
+	// "password_reset_done", "reset/<uidb64>/<token>/" named
+	// "password_reset_confirm" and "reset/done/" named
+	// "password_reset_complete". The names are outside the admin namespace,
+	// as the URLs that Django's documentation adds for the admin, and the
+	// login page links to the first one. An app sets it in RegisterAdmin.
+	// The pages send email with the mail package.
+	PasswordReset bool
 
 	actions   []Action
 	revMu     sync.RWMutex
@@ -361,6 +373,8 @@ func (h adminViewHandler) LoginRedirect() []auth.GuardOption {
 // Django's convention: "admin:index", "admin:login", "admin:logout",
 // "admin:password_change", "admin:password_change_done", "admin:app_list", and
 // per-model "admin:<app>_<model>_{changelist,add,change,delete,history}".
+//
+// With PasswordReset set, the routes also hold the password reset pages.
 func (s *AdminSite) Routes() []urls.Route {
 	routes := s.buildRoutes()
 	rt := urls.NewRouter(routes...)
@@ -413,7 +427,13 @@ func (s *AdminSite) buildRoutes() []urls.Route {
 		inner = append(inner, urls.RePath("^(?P<url>.*)$", urls.NoAppendSlash(s.adminView(s.catchAllView, false)), ""))
 	}
 
-	return urls.IncludeApp(s.prefix(), defaultSiteName, s.siteName(), inner...)
+	routes := urls.IncludeApp(s.prefix(), defaultSiteName, s.siteName(), inner...)
+	if s.PasswordReset {
+		// The reset pages come first: the catch-all view of the admin
+		// matches their paths too.
+		routes = append(s.passwordResetRoutes(), routes...)
+	}
+	return routes
 }
 
 // invalidateReverseRouter clears the cached reverse router after a model

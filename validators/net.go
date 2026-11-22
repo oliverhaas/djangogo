@@ -221,10 +221,14 @@ func IPAddressValidators(protocol string, unpackIPv4 bool) ([]Validator, string,
 }
 
 // Patterns of the local part and the literal domain of an email address, the
-// user_regex and literal_regex of Django's EmailValidator.
+// user_regex and literal_regex of Django's EmailValidator. Under
+// re.IGNORECASE a Python class with the letter i also matches the Turkish
+// "İ" and "ı"; Go's case folding does not, so the classes name them. The
+// other two letters that Python adds, "ſ" and the Kelvin sign, Go folds
+// itself.
 var (
-	emailUserRE = regexp.MustCompile("(?i)^[-!#$%&'*+/=?^_`{}|~0-9A-Z]+(\\.[-!#$%&'*+/=?^_`{}|~0-9A-Z]+)*\\z" +
-		`|^"([\x01-\x08\x0b\x0c\x0e-\x1f!#-\[\]-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*"\z`)
+	emailUserRE = regexp.MustCompile("(?i)^[-!#$%&'*+/=?^_`{}|~0-9A-Zİı]+(\\.[-!#$%&'*+/=?^_`{}|~0-9A-Zİı]+)*\\z" +
+		`|^"([\x01-\x08\x0b\x0c\x0e-\x1f!#-\[\]-\x7fİı]|\\[\x01-\x09\x0b\x0c\x0e-\x7fİı])*"\z`)
 	emailLiteralRE = regexp.MustCompile(`(?i)^\[([A-F0-9:.]+)\]\z`)
 )
 

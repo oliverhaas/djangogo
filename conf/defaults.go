@@ -48,9 +48,10 @@ func Defaults() Settings {
 
 		StaticURL: "/static/",
 
-		LoginURL:         "/accounts/login/",
-		LoginRedirectURL: "/accounts/profile/",
-		AppendSlash:      true,
+		LoginURL:             "/accounts/login/",
+		LoginRedirectURL:     "/accounts/profile/",
+		PasswordResetTimeout: 3 * 24 * time.Hour,
+		AppendSlash:          true,
 
 		SessionEngine:         SessionEngineDB,
 		SessionCookieName:     "sessionid",

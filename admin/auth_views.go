@@ -10,6 +10,7 @@ import (
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/forms"
 	"github.com/oliverhaas/djangogo/templates"
+	"github.com/oliverhaas/djangogo/urls"
 )
 
 // msgInvalidAdminLogin is Django's AdminAuthenticationForm.error_messages["invalid_login"].
@@ -182,4 +183,67 @@ func (s *AdminSite) safeRedirectTarget(r *http.Request, fallback string) string 
 		return next
 	}
 	return fallback
+}
+
+// passwordResetRoutes returns the routes of AdminSite.PasswordReset: the
+// password reset views of the auth package, rendered with the admin's
+// templates and site context.
+func (s *AdminSite) passwordResetRoutes() []urls.Route {
+	return urls.Include(s.prefix(), "",
+		urls.Path("password_reset/", auth.LoginNotRequired(http.HandlerFunc(s.passwordReset)), "admin_password_reset"),
+		urls.Path("password_reset/done/", auth.LoginNotRequired(http.HandlerFunc(s.passwordResetDone)), "password_reset_done"),
+		urls.Path("reset/<uidb64>/<token>/", auth.LoginNotRequired(http.HandlerFunc(s.passwordResetConfirm)), "password_reset_confirm"),
+		urls.Path("reset/done/", auth.LoginNotRequired(http.HandlerFunc(s.passwordResetComplete)), "password_reset_complete"),
+	)
+}
+
+// passwordResetContext returns the template context of the password reset
+// page view: the context of every admin page, the login URL of the admin and
+// the ExtraContext values of view.
+func (s *AdminSite) passwordResetContext(r *http.Request, view string) map[string]any {
+	ctx := s.EachContext(r)
+	ctx["login_url"] = s.loginURL()
+	maps.Copy(ctx, s.extraContext(r, view))
+	return ctx
+}
+
+// passwordReset serves the page that asks for the email address.
+func (s *AdminSite) passwordReset(w http.ResponseWriter, r *http.Request) {
+	v := &auth.PasswordResetView{
+		DB:           s.db,
+		Templates:    s.engine,
+		SuccessURL:   s.prefix() + "/password_reset/done/",
+		ExtraContext: s.passwordResetContext(r, "password_reset"),
+	}
+	v.ServeHTTP(w, r.WithContext(templates.WithCurrentApp(r.Context(), s.siteName())))
+}
+
+// passwordResetDone serves the page after the email is sent.
+func (s *AdminSite) passwordResetDone(w http.ResponseWriter, r *http.Request) {
+	v := &auth.PasswordResetDoneView{
+		Templates:    s.engine,
+		ExtraContext: s.passwordResetContext(r, "password_reset_done"),
+	}
+	v.ServeHTTP(w, r.WithContext(templates.WithCurrentApp(r.Context(), s.siteName())))
+}
+
+// passwordResetConfirm serves the link of the email and the new password
+// form.
+func (s *AdminSite) passwordResetConfirm(w http.ResponseWriter, r *http.Request) {
+	v := &auth.PasswordResetConfirmView{
+		DB:           s.db,
+		Templates:    s.engine,
+		SuccessURL:   s.prefix() + "/reset/done/",
+		ExtraContext: s.passwordResetContext(r, "password_reset_confirm"),
+	}
+	v.ServeHTTP(w, r.WithContext(templates.WithCurrentApp(r.Context(), s.siteName())))
+}
+
+// passwordResetComplete serves the page after the new password is set.
+func (s *AdminSite) passwordResetComplete(w http.ResponseWriter, r *http.Request) {
+	v := &auth.PasswordResetCompleteView{
+		Templates:    s.engine,
+		ExtraContext: s.passwordResetContext(r, "password_reset_complete"),
+	}
+	v.ServeHTTP(w, r.WithContext(templates.WithCurrentApp(r.Context(), s.siteName())))
 }

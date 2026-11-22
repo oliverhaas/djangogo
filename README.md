@@ -38,8 +38,9 @@ unstable and can change between commits.
 - **M9 spec completion.** Django's URL dispatch, auth tables and password
   hashers, sessions, CSRF, messages, generic views and commands; Django's field
   kinds, `orm.Meta`, model validation, reverse, one-to-one and many-to-many
-  relations with `PrefetchRelated`; the admin's URL layout, permissions, changelist and actions; and
-  SQL fidelity tests for queries and migrations.
+  relations with `PrefetchRelated`; the admin's URL layout, permissions, changelist and actions;
+  email and the password reset views; and SQL fidelity tests for queries and
+  migrations.
 
 ## Quickstart
 
@@ -241,9 +242,10 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `icontains`, not full-text search. A template option such as
   `ChangeFormTemplate` names one template, not a list. Blocks that Django names with hyphens, such as `object-tools-items`,
   have underscores.
-- **Auth:** no custom user model and no password reset views, so `auth.URLs`
-  has only the login, logout and password change routes.
-  `LoginRequiredMiddleware` sees `LoginNotRequired` and the guards only on the
+- **Auth:** no custom user model. There is no sites framework, so the
+  password reset email names the host of the request as domain and site name.
+  A password reset view without `SuccessURL` redirects to `done/` below its
+  own path, not to a named URL. `LoginRequiredMiddleware` sees `LoginNotRequired` and the guards only on the
   handler of the route or through `Unwrap` methods. In templates, `perms` does
   not grant an active superuser the permissions that are missing from the
   database, and `user` has no related objects such as groups.

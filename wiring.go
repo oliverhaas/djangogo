@@ -43,6 +43,12 @@ func (a *Application) configureAuth() error {
 	cfg.LoginRedirectURL = s.LoginRedirectURL
 	cfg.LogoutRedirectURL = s.LogoutRedirectURL
 	cfg.IsSecure = a.isSecure
+	cfg.PasswordResetTimeout = s.PasswordResetTimeout
+	loc, err := s.Location()
+	if err != nil {
+		return err
+	}
+	cfg.Location = loc
 	if len(s.PasswordHashers) > 0 {
 		hashers := make([]auth.Hasher, 0, len(s.PasswordHashers))
 		for _, name := range s.PasswordHashers {

@@ -95,6 +95,10 @@ type Settings struct {
 	// LogoutRedirectURL is where a logout leads; empty renders the logged-out
 	// page (LOGOUT_REDIRECT_URL, default unset).
 	LogoutRedirectURL string `env:"LOGOUT_REDIRECT_URL"`
+	// PasswordResetTimeout is how long a password reset link stays valid
+	// (PASSWORD_RESET_TIMEOUT, default three days). The environment value is
+	// a number of seconds, as in Django, or a Go duration such as "1h".
+	PasswordResetTimeout time.Duration `env:"PASSWORD_RESET_TIMEOUT"`
 
 	// AppendSlash redirects a URL without a trailing slash to the one with it
 	// when only that one resolves (APPEND_SLASH, default true).

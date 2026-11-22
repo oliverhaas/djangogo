@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"slices"
@@ -60,7 +61,8 @@ type validatedHostKey struct{}
 // host: a request whose host is not allowed is answered with 400 Bad Request
 // and does not reach the wrapped handler. The body is Django's plain 400 page.
 // With Debug on it also carries the message of the DisallowedHost error, which
-// names the host to add.
+// names the host to add. The message is logged at the error level, as
+// Django's django.security.DisallowedHost logger does.
 //
 // Put it outside every middleware and handler that uses the host of the
 // request, for example to build a redirect or a link.
@@ -71,6 +73,7 @@ func AllowedHosts(opts AllowedHostsOptions) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			host, err := GetHost(r, opts)
 			if err != nil {
+				slog.ErrorContext(r.Context(), err.Error(), "status", http.StatusBadRequest)
 				details := ""
 				if opts.Debug {
 					details = escapeHTML(err.Error())
@@ -84,9 +87,11 @@ func AllowedHosts(opts AllowedHostsOptions) func(http.Handler) http.Handler {
 	}
 }
 
-// validatedHost returns the host the AllowedHosts middleware validated for the
-// request, if the request passed one.
-func validatedHost(r *http.Request) (string, bool) {
+// ValidatedHost returns the host the AllowedHosts middleware validated for the
+// request, if the request passed one. Code that writes the host into a link,
+// such as a password reset email, reads it here: the Host header itself can
+// name any domain.
+func ValidatedHost(r *http.Request) (string, bool) {
 	host, ok := r.Context().Value(validatedHostKey{}).(string)
 	return host, ok
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Defaults of the URL settings, as in Django's global settings.
@@ -66,6 +67,17 @@ type Config struct {
 	// used TLS. Set it when a proxy terminates TLS. A secure request is
 	// redirected to https URLs only.
 	IsSecure func(*http.Request) bool
+
+	// PasswordResetTimeout is how long a password reset link stays valid
+	// (Django's PASSWORD_RESET_TIMEOUT). Zero means
+	// DefaultPasswordResetTimeout, three days.
+	PasswordResetTimeout time.Duration
+
+	// Location is the time zone of the project (Django's TIME_ZONE). The
+	// password reset tokens count seconds on its wall clock, as Django
+	// does, so that a token made by Django checks out here. Nil means the
+	// local time zone of the process.
+	Location *time.Location
 }
 
 // current is the active configuration. It is replaced as a whole, so a reader

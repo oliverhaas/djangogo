@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	"github.com/flosch/pongo2/v6"
+
+	"github.com/oliverhaas/djangogo/urls"
 )
 
 // StaticBase is the URL prefix for {% static %} (default "/static/").
@@ -31,7 +33,7 @@ const resolverContextKey = "__djangogo_url_resolver__"
 var (
 	urlResolverMu sync.RWMutex
 	urlResolverFn Resolver = func(name string, _ ...any) (string, error) {
-		return "", fmt.Errorf("templates: no URLResolver configured (cannot reverse %q)", name)
+		return "", fmt.Errorf("templates: no URLResolver configured (cannot reverse %q): %w", name, urls.ErrNoReverseMatch)
 	}
 )
 

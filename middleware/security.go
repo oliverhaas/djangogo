@@ -152,7 +152,7 @@ func (s *security) redirect(w http.ResponseWriter, r *http.Request) {
 	host := s.opts.SSLHost
 	if host == "" {
 		var ok bool
-		if host, ok = validatedHost(r); !ok {
+		if host, ok = ValidatedHost(r); !ok {
 			host = r.Host
 			// Without AllowedHosts in front the host is whatever the client
 			// sent. Refuse one that is not a host at all before it becomes

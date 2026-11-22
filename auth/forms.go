@@ -185,10 +185,10 @@ func (f *UsernameField) WidgetAttrs(w forms.Widget) forms.Attrs {
 	return attrs
 }
 
-// newPasswordFields returns the new password and its confirmation, Django's
-// SetPasswordMixin.create_password_fields. The help text of the first lists
-// the rules of the configured password validators.
-func newPasswordFields() (password1, password2 *forms.CharField) {
+// newPasswordFields returns the new password and its confirmation with the
+// given labels, Django's SetPasswordMixin.create_password_fields. The help
+// text of the first lists the rules of the configured password validators.
+func newPasswordFields(label1, label2 string) (password1, password2 *forms.CharField) {
 	field := func(label, help string) *forms.CharField {
 		return forms.NewCharField(
 			forms.Label(label),
@@ -197,8 +197,8 @@ func newPasswordFields() (password1, password2 *forms.CharField) {
 			forms.HelpText(help),
 		)
 	}
-	return field("Password", PasswordValidatorsHelpTextHTML(nil)),
-		field("Password confirmation", helpPasswordConfirm)
+	return field(label1, PasswordValidatorsHelpTextHTML(nil)),
+		field(label2, helpPasswordConfirm)
 }
 
 // newUsablePasswordField returns the choice between a password and no
@@ -217,11 +217,17 @@ func newUsablePasswordField(help string) *forms.ChoiceField {
 // cleanPasswords reports a password2 that differs from password1, Django's
 // SetPasswordMixin.validate_passwords.
 func cleanPasswords(form *forms.Form) {
+	cleanPasswordPair(form, "password1", "password2")
+}
+
+// cleanPasswordPair reports a field2 that differs from field1, Django's
+// SetPasswordMixin.validate_passwords with the names of the fields.
+func cleanPasswordPair(form *forms.Form, field1, field2 string) {
 	cleaned := form.CleanedData()
-	password1, _ := cleaned["password1"].(string)
-	password2, _ := cleaned["password2"].(string)
+	password1, _ := cleaned[field1].(string)
+	password2, _ := cleaned[field2].(string)
 	if password1 != "" && password2 != "" && password1 != password2 {
-		form.AddError("password2", forms.NewValidationError(msgPasswordMismatch, "password_mismatch"))
+		form.AddError(field2, forms.NewValidationError(msgPasswordMismatch, "password_mismatch"))
 	}
 }
 
@@ -255,11 +261,17 @@ func cleanOptionalPasswords(form *forms.Form) {
 // user and reports their complaints on password2, Django's
 // validate_password_for_user. A form that sets no usable password skips it.
 func validatePasswordForUser(form *forms.Form, user *User) {
-	cleaned := form.CleanedData()
-	if usable, ok := cleaned["set_usable_password"].(bool); ok && !usable {
+	if usable, ok := form.CleanedData()["set_usable_password"].(bool); ok && !usable {
 		return
 	}
-	password, _ := cleaned["password2"].(string)
+	validatePasswordField(form, user, "password2")
+}
+
+// validatePasswordField runs the password validators over the value of field
+// for user and reports their complaints on field, Django's
+// validate_password_for_user with the name of the field.
+func validatePasswordField(form *forms.Form, user *User, field string) {
+	password, _ := form.CleanedData()[field].(string)
 	if password == "" {
 		return
 	}
@@ -271,7 +283,7 @@ func validatePasswordForUser(form *forms.Form, user *User) {
 	for i, pe := range refused {
 		errs[i] = forms.NewValidationError(pe.Message, pe.Code)
 	}
-	form.AddError("password2", forms.ValidationErrors(errs...))
+	form.AddError(field, forms.ValidationErrors(errs...))
 }
 
 // SetPasswordFromForm sets the password of user from the cleaned data of a
@@ -311,7 +323,7 @@ func AdminUserCreationFormOptions(db *orm.DB) []forms.ModelFormOption {
 // creationFormOptions returns the options of the user creation forms; admin
 // selects those of the admin.
 func creationFormOptions(db *orm.DB, admin bool) []forms.ModelFormOption {
-	password1, password2 := newPasswordFields()
+	password1, password2 := newPasswordFields("Password", "Password confirmation")
 	opts := []forms.ModelFormOption{
 		forms.WithFieldClass("username", newAutofocusUsernameField),
 		forms.WithFormField("password1", password1),
@@ -476,7 +488,7 @@ type AdminPasswordChangeForm struct {
 func NewAdminPasswordChangeForm(user *User) *AdminPasswordChangeForm {
 	form := forms.New()
 	form.RequiredCSSClass = "required"
-	password1, password2 := newPasswordFields()
+	password1, password2 := newPasswordFields("Password", "Password confirmation")
 	password1.Widget = forms.PasswordInput{Attrs: forms.Attrs{"autocomplete": "new-password", "autofocus": true}}
 	form.AddField("password1", password1)
 	form.AddField("password2", password2)

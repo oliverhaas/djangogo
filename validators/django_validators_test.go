@@ -79,6 +79,17 @@ func TestEmailValidatorInvalidUsernameError(t *testing.T) {
 	djangotest.AssertEqual(t, ve.Params, map[string]any{"value": "not valid@example.com", "username": "not valid"})
 }
 
+// No Django test exists: the local part of an address takes the letters that
+// Python's re.IGNORECASE matches with [A-Z] beyond ASCII, "İ", "ı", "ſ" and
+// the Kelvin sign, and no other letter, as Django's EmailValidator does.
+// Django's PasswordResetFormTest sends to "mıke@example.org".
+func TestEmailValidatorIgnoreCaseLetters(t *testing.T) {
+	for _, email := range []string{"mıke@example.org", "İa@x.org", "ſam@x.org", "\u212ax@x.org", `"ı"@x.org`, `"\ı"@x.org`} {
+		djangotest.AssertEqual(t, validators.ValidateEmail(email), nil)
+	}
+	assertInvalid(t, validators.ValidateEmail, "é@x.org", "invalid", "Enter a valid email address.")
+}
+
 // Ported from Django: tests/validators/tests.py::TestValidators.test_validators
 func TestSharedValidatorsCore(t *testing.T) {
 	// EmailValidator with custom allowlist.

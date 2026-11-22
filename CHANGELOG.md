@@ -953,6 +953,28 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - Testing: `djangotest.LocmemMail` sends the mail of a test to the outbox of
   the locmem backend, as Django's test runner does; `mail.Outbox` returns the
   messages.
+- Auth: users who forgot their password can reset it, with Django's password
+  reset views. `auth.PasswordResetView` mails a reset link to the active
+  users with the entered address and a usable password,
+  `auth.PasswordResetConfirmView` checks the link and sets the new password,
+  and `auth.PasswordResetDoneView` and `auth.PasswordResetCompleteView` show
+  the pages in between. `auth.URLs` holds them at Django's paths and names
+  (`password_reset`, `password_reset_done`, `password_reset_confirm` and
+  `password_reset_complete`), with Django's templates. The forms are
+  `auth.PasswordResetForm`, `auth.SetPasswordForm` and
+  `auth.PasswordChangeForm`. `auth.PasswordResetTokenGenerator` makes and
+  checks the tokens in Django's format, so a link that Django sent checks out
+  with the same secret key and time zone. `auth.IntToBase36`,
+  `auth.Base36ToInt`, `auth.URLSafeBase64Encode` and
+  `auth.URLSafeBase64Decode` are Django's encoding helpers.
+- Settings: `PasswordResetTimeout` (PASSWORD_RESET_TIMEOUT, default three
+  days) sets how long a password reset link is valid.
+- Admin: the new `AdminSite.PasswordReset` serves the password reset pages
+  under the admin prefix in the admin style, and the login page links to them
+  with "Forgotten your login credentials?", as Django's login page does when
+  the URL name `admin_password_reset` exists.
+- Middleware: `AllowedHosts` logs a rejected host at the error level with
+  Django's message, as Django's `django.security.DisallowedHost` logger does.
 
 ### Changed
 
@@ -1217,6 +1239,14 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   same moment could leave two rows for it, because the `django_content_type`
   table had no unique constraint on (`app_label`, `model`). The table now has
   Django's constraint. Run `makemigrations` and `migrate` after the upgrade.
+- Validators: `EmailValidator` rejected an address with a dotless ı or a
+  dotted İ in the part before the @, such as "mıke@example.org", which Django
+  accepts: Python's case-insensitive match lets `[A-Z]` match these letters.
+  Such addresses now validate, in forms and in model fields.
+- Templates: `{% url 'name' as var %}` failed the render when no URL resolver
+  was configured, for example on an `AdminSite` outside an application. It
+  now sets the variable to an empty string, as for any name that does not
+  reverse.
 
 ### Security
 

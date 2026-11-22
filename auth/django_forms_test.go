@@ -3,10 +3,12 @@ package auth_test
 // Ports of tests/auth_tests/test_forms.py: the user creation and change
 // forms, AdminPasswordChangeForm and the read-only password hash field.
 //
-// FIXME-PORT: AuthenticationFormTest, SetPasswordFormTest,
-// PasswordChangeFormTest and PasswordResetFormTest. The auth views validate
-// these forms without a form type; django_views_test.go covers them through
-// the views.
+// SetPasswordFormTest, PasswordChangeFormTest and PasswordResetFormTest are
+// ported in django_forms_reset_test.go.
+//
+// FIXME-PORT: AuthenticationFormTest. The login view validates the
+// credentials without a form type; django_views_test.go covers them through
+// the view.
 //
 // No Go counterpart: SensitiveVariablesTest, about the sensitive_variables
 // decorator of Django's debug pages.
