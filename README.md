@@ -203,9 +203,8 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   reverse and many-to-many sets only when it embeds `orm.RelCache`, and the
   queryset of an `orm.Prefetch` cannot be sliced. `Raw` leaves the fields missing
   from a result at their zero value, where Django defers and loads them.
-  Transactions have no `savepoint=False` or `set_rollback`, so on PostgreSQL a
-  failed statement inside `Atomic` aborts the transaction until the block ends.
-  `Pow` returns a float.
+  There is no manual transaction management: no `set_autocommit`, and no
+  `commit` or `rollback` outside `Atomic`. `Pow` returns a float.
 - **Migrations:** generated migration files register through `init()`. A
   separate `migrate` process sees them only after each `migrations/<app>` package
   is blank-imported in the main package and the binary is rebuilt;

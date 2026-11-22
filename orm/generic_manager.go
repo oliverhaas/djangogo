@@ -291,7 +291,7 @@ func (m *GenericRelatedManager[Child]) Set(ctx context.Context, objs []*Child, o
 			}
 		}
 		return add(ctx, fresh...)
-	})
+	}, WithoutSavepoint())
 }
 
 // GetOrCreate returns the row of the relation that matches args, or creates

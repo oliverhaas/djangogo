@@ -285,7 +285,7 @@ func (m *ManyManager[T]) Count(ctx context.Context) (int64, error) {
 		w.write(" IS NOT NULL")
 	}
 	var count int64
-	if err := m.core.db.conn(ctx).QueryRowContext(ctx, w.String(), w.args...).Scan(&count); err != nil {
+	if err := scanOne(ctx, m.core.db.conn(ctx), w.String(), w.args, &count); err != nil {
 		return 0, fmt.Errorf("orm: M2M count %s.%s: %w", m.core.ownerModel.Name(), m.core.field.Attr, err)
 	}
 	return count, nil
@@ -322,7 +322,7 @@ func (m *ManyManager[T]) Exists(ctx context.Context) (bool, error) {
 	}
 	w.write(" LIMIT 1)")
 	var exists bool
-	if err := m.core.db.conn(ctx).QueryRowContext(ctx, w.String(), w.args...).Scan(&exists); err != nil {
+	if err := scanOne(ctx, m.core.db.conn(ctx), w.String(), w.args, &exists); err != nil {
 		return false, fmt.Errorf("orm: M2M exists %s.%s: %w", m.core.ownerModel.Name(), m.core.field.Attr, err)
 	}
 	return exists, nil

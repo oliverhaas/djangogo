@@ -179,6 +179,9 @@ func (qs *QuerySet[T]) deleteWithCollector(ctx context.Context) (int64, error) {
 		}
 		n, err := col.execute(txCtx)
 		if err != nil {
+			// Django collects outside the atomic block of the deletion, so
+			// only a failed deletion marks the transaction for rollback.
+			markForRollbackOnError(txCtx, err)
 			return err
 		}
 		total = n
@@ -188,7 +191,7 @@ func (qs *QuerySet[T]) deleteWithCollector(ctx context.Context) (int64, error) {
 	// Mirror Django's transaction.atomic(savepoint=False): start a transaction
 	// when outside one, otherwise reuse the active transaction without adding
 	// savepoint queries.
-	if _, inTx := txFromContext(ctx); inTx {
+	if txStateFrom(ctx) != nil {
 		if err := run(ctx); err != nil {
 			return 0, err
 		}

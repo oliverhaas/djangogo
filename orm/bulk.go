@@ -111,12 +111,12 @@ func (qs *QuerySet[T]) BulkCreate(ctx context.Context, objs []*T, opts ...BulkOp
 		}
 		return nil
 	}
-	// One statement is atomic by itself, and inside a transaction the caller
-	// decides what a failure rolls back, as with Django's atomic(savepoint=False).
-	if _, inTx := txFromContext(ctx); inTx || len(batches) == 1 {
+	// One statement is atomic by itself. Inside a transaction a failure marks
+	// it for rollback, as with Django's atomic(savepoint=False).
+	if txStateFrom(ctx) == nil && len(batches) == 1 {
 		return run(ctx)
 	}
-	return db.Atomic(ctx, run)
+	return db.Atomic(ctx, run, WithoutSavepoint())
 }
 
 // batchRows returns the number of rows per INSERT for rows of ncols columns:

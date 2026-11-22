@@ -499,7 +499,7 @@ func (m *RelatedManager[Child]) Set(ctx context.Context, objs []*Child) error {
 			return m.Add(txCtx, objs...)
 		}
 		return nil
-	})
+	}, WithoutSavepoint())
 	if err != nil {
 		return err
 	}

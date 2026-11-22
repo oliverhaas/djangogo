@@ -394,7 +394,9 @@ func (qs *QuerySet[T]) Update(ctx context.Context, assignments ...any) (int64, e
 	}
 	result, err := qs.q.db.conn(ctx).ExecContext(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("orm: update %s: %w", qs.q.model.Name(), err)
+		err = fmt.Errorf("orm: update %s: %w", qs.q.model.Name(), err)
+		markForRollbackOnError(ctx, err)
+		return 0, err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -427,7 +429,9 @@ func (qs *QuerySet[T]) deleteRows(ctx context.Context) (int64, error) {
 	}
 	result, err := qs.q.db.conn(ctx).ExecContext(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("orm: delete %s: %w", qs.q.model.Name(), err)
+		err = fmt.Errorf("orm: delete %s: %w", qs.q.model.Name(), err)
+		markForRollbackOnError(ctx, err)
+		return 0, err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {

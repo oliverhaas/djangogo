@@ -289,6 +289,138 @@ func trBodyReuseRollbackRollback(ctx context.Context, t *testing.T, db *orm.DB) 
 	trAssertAll(ctx, t, db)
 }
 
+// trBodyMergedCommitCommit is the body of AtomicTests.test_merged_commit_commit.
+func trBodyMergedCommitCommit(ctx context.Context, t *testing.T, db *orm.DB) {
+	var reporter1, reporter2 *trReporter
+	err := db.Atomic(ctx, func(ctx context.Context) error {
+		reporter1 = trCreate(ctx, t, db, trReporter{FirstName: "Tintin"})
+		return db.Atomic(ctx, func(ctx context.Context) error {
+			reporter2 = trCreate(ctx, t, db, trReporter{FirstName: "Archibald", LastName: "Haddock"})
+			return nil
+		}, orm.WithoutSavepoint())
+	})
+	if err != nil {
+		t.Fatalf("Atomic: %v", err)
+	}
+	trAssertAll(ctx, t, db, reporter2, reporter1)
+}
+
+// trBodyMergedCommitRollback is the body of AtomicTests.test_merged_commit_rollback.
+func trBodyMergedCommitRollback(ctx context.Context, t *testing.T, db *orm.DB) {
+	err := db.Atomic(ctx, func(ctx context.Context) error {
+		trCreate(ctx, t, db, trReporter{FirstName: "Tintin"})
+		inner := db.Atomic(ctx, func(ctx context.Context) error {
+			trCreate(ctx, t, db, trReporter{FirstName: "Haddock"})
+			return trOops("that's his last name")
+		}, orm.WithoutSavepoint())
+		trAssertOops(t, inner)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Atomic: %v", err)
+	}
+	// Writes in the outer block are rolled back too.
+	trAssertAll(ctx, t, db)
+}
+
+// trBodyMergedRollbackCommit is the body of AtomicTests.test_merged_rollback_commit.
+func trBodyMergedRollbackCommit(ctx context.Context, t *testing.T, db *orm.DB) {
+	err := db.Atomic(ctx, func(ctx context.Context) error {
+		trCreate(ctx, t, db, trReporter{LastName: "Tintin"})
+		err := db.Atomic(ctx, func(ctx context.Context) error {
+			trCreate(ctx, t, db, trReporter{LastName: "Haddock"})
+			return nil
+		}, orm.WithoutSavepoint())
+		if err != nil {
+			t.Errorf("inner Atomic: %v", err)
+		}
+		return trOops("that's his first name")
+	})
+	trAssertOops(t, err)
+	trAssertAll(ctx, t, db)
+}
+
+// trBodyMergedRollbackRollback is the body of AtomicTests.test_merged_rollback_rollback.
+func trBodyMergedRollbackRollback(ctx context.Context, t *testing.T, db *orm.DB) {
+	err := db.Atomic(ctx, func(ctx context.Context) error {
+		trCreate(ctx, t, db, trReporter{LastName: "Tintin"})
+		inner := db.Atomic(ctx, func(ctx context.Context) error {
+			trCreate(ctx, t, db, trReporter{FirstName: "Haddock"})
+			return trOops("that's his last name")
+		}, orm.WithoutSavepoint())
+		trAssertOops(t, inner)
+		return trOops("that's his first name")
+	})
+	trAssertOops(t, err)
+	trAssertAll(ctx, t, db)
+}
+
+// trAssertRollback checks the rollback flag of the transaction of ctx.
+func trAssertRollback(ctx context.Context, t *testing.T, db *orm.DB, want bool) {
+	t.Helper()
+	got, err := db.GetRollback(ctx)
+	if err != nil {
+		t.Fatalf("GetRollback: %v", err)
+	}
+	if got != want {
+		t.Errorf("GetRollback = %v, want %v", got, want)
+	}
+}
+
+// trSetRollback sets the rollback flag of the transaction of ctx.
+func trSetRollback(ctx context.Context, t *testing.T, db *orm.DB, rollback bool) {
+	t.Helper()
+	if err := db.SetRollback(ctx, rollback); err != nil {
+		t.Fatalf("SetRollback(%v): %v", rollback, err)
+	}
+}
+
+// trBodyForceRollback is the body of AtomicTests.test_force_rollback.
+func trBodyForceRollback(ctx context.Context, t *testing.T, db *orm.DB) {
+	err := db.Atomic(ctx, func(ctx context.Context) error {
+		trCreate(ctx, t, db, trReporter{FirstName: "Tintin"})
+		// The atomic block would not roll back: force it.
+		trAssertRollback(ctx, t, db, false)
+		trSetRollback(ctx, t, db, true)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Atomic: %v", err)
+	}
+	trAssertAll(ctx, t, db)
+}
+
+// trBodyPreventRollback is the body of AtomicTests.test_prevent_rollback.
+func trBodyPreventRollback(ctx context.Context, t *testing.T, db *orm.DB) {
+	m, _ := db.Registry().ModelOf(trReporter{})
+	var reporter *trReporter
+	err := db.Atomic(ctx, func(ctx context.Context) error {
+		reporter = trCreate(ctx, t, db, trReporter{FirstName: "Tintin"})
+		sid, err := db.SavepointCreate(ctx)
+		if err != nil {
+			return err
+		}
+		// Trigger a database error inside an inner atomic block without a
+		// savepoint.
+		inner := db.Atomic(ctx, func(ctx context.Context) error {
+			_, err := db.Exec(ctx, "SELECT no_such_col FROM "+m.Table())
+			return err
+		}, orm.WithoutSavepoint())
+		if inner == nil {
+			t.Error("the query of an unknown column succeeded")
+		}
+		// Prevent the atomic block from rolling back: the code recovers by
+		// hand.
+		trAssertRollback(ctx, t, db, true)
+		trSetRollback(ctx, t, db, false)
+		return db.SavepointRollback(ctx, sid)
+	})
+	if err != nil {
+		t.Fatalf("Atomic: %v", err)
+	}
+	trAssertAll(ctx, t, db, reporter)
+}
+
 // Ported from Django: tests/transactions/tests.py::AtomicTests.test_decorator_syntax_commit
 func TestTransactionsAtomicDecoratorSyntaxCommit(t *testing.T) {
 	trRun(t, trBodyDecoratorSyntaxCommit)
@@ -361,32 +493,32 @@ func TestTransactionsAtomicReuseRollbackRollback(t *testing.T) {
 
 // Ported from Django: tests/transactions/tests.py::AtomicTests.test_merged_commit_commit
 func TestTransactionsAtomicMergedCommitCommit(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRun(t, trBodyMergedCommitCommit)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicTests.test_merged_commit_rollback
 func TestTransactionsAtomicMergedCommitRollback(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRun(t, trBodyMergedCommitRollback)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicTests.test_merged_rollback_commit
 func TestTransactionsAtomicMergedRollbackCommit(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRun(t, trBodyMergedRollbackCommit)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicTests.test_merged_rollback_rollback
 func TestTransactionsAtomicMergedRollbackRollback(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRun(t, trBodyMergedRollbackRollback)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicTests.test_force_rollback
 func TestTransactionsAtomicForceRollback(t *testing.T) {
-	t.Skip("needs set_rollback/get_rollback and the savepoint API, which the ORM does not have")
+	trRun(t, trBodyForceRollback)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicTests.test_prevent_rollback
 func TestTransactionsAtomicPreventRollback(t *testing.T) {
-	t.Skip("needs set_rollback/get_rollback and the savepoint API, which the ORM does not have")
+	trRun(t, trBodyPreventRollback)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicTests.test_failure_on_exit_transaction
@@ -469,32 +601,32 @@ func TestTransactionsInsideTransactionReuseRollbackRollback(t *testing.T) {
 
 // Ported from Django: tests/transactions/tests.py::AtomicInsideTransactionTests.test_merged_commit_commit
 func TestTransactionsInsideTransactionMergedCommitCommit(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRunInside(t, trBodyMergedCommitCommit)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicInsideTransactionTests.test_merged_commit_rollback
 func TestTransactionsInsideTransactionMergedCommitRollback(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRunInside(t, trBodyMergedCommitRollback)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicInsideTransactionTests.test_merged_rollback_commit
 func TestTransactionsInsideTransactionMergedRollbackCommit(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRunInside(t, trBodyMergedRollbackCommit)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicInsideTransactionTests.test_merged_rollback_rollback
 func TestTransactionsInsideTransactionMergedRollbackRollback(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRunInside(t, trBodyMergedRollbackRollback)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicInsideTransactionTests.test_force_rollback
 func TestTransactionsInsideTransactionForceRollback(t *testing.T) {
-	t.Skip("needs set_rollback/get_rollback and the savepoint API, which the ORM does not have")
+	trRunInside(t, trBodyForceRollback)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicInsideTransactionTests.test_prevent_rollback
 func TestTransactionsInsideTransactionPreventRollback(t *testing.T) {
-	t.Skip("needs set_rollback/get_rollback and the savepoint API, which the ORM does not have")
+	trRunInside(t, trBodyPreventRollback)
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicInsideTransactionTests.test_failure_on_exit_transaction
@@ -607,14 +739,89 @@ func TestTransactionsWithoutAutocommitFailureOnExitTransaction(t *testing.T) {
 	t.Skip("needs set_autocommit, which the ORM does not have")
 }
 
+// trAssertCountWhileMarked checks that the table holds want reporters while
+// the transaction of ctx is marked for rollback: it clears the mark for the
+// query and sets it again.
+func trAssertCountWhileMarked(ctx context.Context, t *testing.T, db *orm.DB, want int64) {
+	t.Helper()
+	trAssertRollback(ctx, t, db, true)
+	trSetRollback(ctx, t, db, false)
+	n, err := orm.Query[trReporter](db).Count(ctx)
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if n != want {
+		t.Errorf("Count = %d, want %d", n, want)
+	}
+	trSetRollback(ctx, t, db, true)
+}
+
 // Ported from Django: tests/transactions/tests.py::AtomicMergeTests.test_merged_outer_rollback
 func TestTransactionsMergedOuterRollback(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRun(t, func(ctx context.Context, t *testing.T, db *orm.DB) {
+		err := db.Atomic(ctx, func(ctx context.Context) error {
+			trCreate(ctx, t, db, trReporter{FirstName: "Tintin"})
+			err := db.Atomic(ctx, func(ctx context.Context) error {
+				trCreate(ctx, t, db, trReporter{FirstName: "Archibald", LastName: "Haddock"})
+				inner := db.Atomic(ctx, func(ctx context.Context) error {
+					trCreate(ctx, t, db, trReporter{FirstName: "Calculus"})
+					return trOops("that's his last name")
+				}, orm.WithoutSavepoint())
+				trAssertOops(t, inner)
+				// The third insert could not be rolled back.
+				trAssertCountWhileMarked(ctx, t, db, 3)
+				return nil
+			}, orm.WithoutSavepoint())
+			if err != nil {
+				t.Errorf("middle Atomic: %v", err)
+			}
+			// The second insert could not be rolled back.
+			trAssertCountWhileMarked(ctx, t, db, 3)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Atomic: %v", err)
+		}
+		// The first block has a savepoint and must roll back.
+		trAssertAll(ctx, t, db)
+	})
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicMergeTests.test_merged_inner_savepoint_rollback
 func TestTransactionsMergedInnerSavepointRollback(t *testing.T) {
-	t.Skip("needs atomic(savepoint=False), which the ORM does not have")
+	trRun(t, func(ctx context.Context, t *testing.T, db *orm.DB) {
+		var reporter *trReporter
+		err := db.Atomic(ctx, func(ctx context.Context) error {
+			reporter = trCreate(ctx, t, db, trReporter{FirstName: "Tintin"})
+			err := db.Atomic(ctx, func(ctx context.Context) error {
+				trCreate(ctx, t, db, trReporter{FirstName: "Archibald", LastName: "Haddock"})
+				inner := db.Atomic(ctx, func(ctx context.Context) error {
+					trCreate(ctx, t, db, trReporter{FirstName: "Calculus"})
+					return trOops("that's his last name")
+				}, orm.WithoutSavepoint())
+				trAssertOops(t, inner)
+				// The third insert could not be rolled back.
+				trAssertCountWhileMarked(ctx, t, db, 3)
+				return nil
+			})
+			if err != nil {
+				t.Errorf("middle Atomic: %v", err)
+			}
+			// The second block has a savepoint and must roll back.
+			n, err := orm.Query[trReporter](db).Count(ctx)
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				t.Errorf("Count = %d, want 1", n)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Atomic: %v", err)
+		}
+		trAssertAll(ctx, t, db, reporter)
+	})
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicErrorsTests.test_atomic_prevents_setting_autocommit
@@ -629,7 +836,33 @@ func TestTransactionsAtomicPreventsCallingTransactionMethods(t *testing.T) {
 
 // Ported from Django: tests/transactions/tests.py::AtomicErrorsTests.test_atomic_prevents_queries_in_broken_transaction
 func TestTransactionsAtomicPreventsQueriesInBrokenTransaction(t *testing.T) {
-	t.Skip("needs broken-transaction tracking (TransactionManagementError), which the ORM does not have")
+	trRun(t, func(ctx context.Context, t *testing.T, db *orm.DB) {
+		r1 := trCreate(ctx, t, db, trReporter{FirstName: "Archibald", LastName: "Haddock"})
+		var saveErr error
+		err := db.Atomic(ctx, func(ctx context.Context) error {
+			r2 := trReporter{ID: r1.ID, FirstName: "Cuthbert", LastName: "Calculus"}
+			createErr := orm.Query[trReporter](db).Create(ctx, &r2)
+			djangotest.AssertErrorIs(t, createErr, orm.ErrIntegrity)
+			// The transaction is marked as needing rollback.
+			saveErr = orm.Query[trReporter](db).Save(ctx, &r2)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Atomic: %v", err)
+		}
+		djangotest.AssertErrorIs(t, saveErr, orm.ErrTransactionManagement)
+		assertErrorContains(t, saveErr, "error occurred in the current transaction. You can't "+
+			"execute queries until the end of the 'atomic' block.")
+		// The error of the insert is the cause.
+		djangotest.AssertErrorIs(t, saveErr, orm.ErrIntegrity)
+		got, err := orm.Query[trReporter](db).Get(ctx, "pk", r1.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.LastName != "Haddock" {
+			t.Errorf("last name = %q, want Haddock", got.LastName)
+		}
+	})
 }
 
 // Ported from Django: tests/transactions/tests.py::AtomicErrorsTests.test_atomic_allows_queries_after_fixing_transaction
@@ -700,12 +933,47 @@ func TestTransactionsAtomicDoesNotLeakSavepointsOnFailure(t *testing.T) {
 
 // Ported from Django: tests/transactions/tests.py::AtomicMiscTests.test_mark_for_rollback_on_error_in_transaction
 func TestTransactionsMarkForRollbackOnErrorInTransaction(t *testing.T) {
-	t.Skip("needs mark_for_rollback_on_error, which the ORM does not have")
+	trRun(t, func(ctx context.Context, t *testing.T, db *orm.DB) {
+		err := db.Atomic(ctx, func(ctx context.Context) error {
+			// Swallow the intentional error.
+			marked := db.MarkForRollbackOnError(ctx, func(ctx context.Context) error {
+				// The transaction is still in a good state.
+				trAssertRollback(ctx, t, db, false)
+				return errors.New("Oops")
+			})
+			trAssertOops(t, marked)
+			// MarkForRollbackOnError marked the transaction as broken...
+			trAssertRollback(ctx, t, db, true)
+			// ...and further queries fail.
+			createErr := orm.Query[trReporter](db).Create(ctx, &trReporter{})
+			djangotest.AssertErrorIs(t, createErr, orm.ErrTransactionManagement)
+			assertErrorContains(t, createErr, "You can't execute queries until the end of the 'atomic' block.")
+			return nil
+		}, orm.WithoutSavepoint())
+		if err != nil {
+			t.Fatalf("Atomic: %v", err)
+		}
+		// The end of the transaction resets the mark, so this works.
+		trCreate(ctx, t, db, trReporter{})
+	})
 }
 
+// Django reads connection.needs_rollback outside the atomic block, where
+// GetRollback reports an error: the test checks that error instead.
+//
 // Ported from Django: tests/transactions/tests.py::AtomicMiscTests.test_mark_for_rollback_on_error_in_autocommit
 func TestTransactionsMarkForRollbackOnErrorInAutocommit(t *testing.T) {
-	t.Skip("needs mark_for_rollback_on_error, which the ORM does not have")
+	trRun(t, func(ctx context.Context, t *testing.T, db *orm.DB) {
+		// Swallow the intentional error.
+		err := db.MarkForRollbackOnError(ctx, func(context.Context) error {
+			return errors.New("Oops")
+		})
+		trAssertOops(t, err)
+		_, err = db.GetRollback(ctx)
+		djangotest.AssertErrorIs(t, err, orm.ErrTransactionManagement)
+		// ...and further queries work.
+		trCreate(ctx, t, db, trReporter{})
+	})
 }
 
 // Ported from Django: tests/transactions/tests.py::NonAutocommitTests.test_orm_query_after_error_and_rollback
@@ -855,7 +1123,41 @@ func TestTransactionsDurableSequenceOfDurables(t *testing.T) {
 	trRun(t, trBodyDurableSequenceOfDurables)
 }
 
-// Ported from Django: tests/transactions/tests.py::SavepointTests.test_deprecation_warning
-func TestTransactionsSavepointDeprecationWarning(t *testing.T) {
-	t.Skip("needs savepoint(), which the ORM does not have")
+// No Go counterpart: tests/transactions/tests.py::SavepointTests.test_deprecation_warning
+// (Django 6.1) checks the deprecation warning of the old savepoint() name. The
+// ORM has only the new name, SavepointCreate.
+
+// No Django test exists for the rollback flag outside an atomic block.
+func TestTransactionsRollbackFlagOutsideAtomicBlock(t *testing.T) {
+	trRun(t, func(ctx context.Context, t *testing.T, db *orm.DB) {
+		const msg = "the rollback flag doesn't work outside of an 'atomic' block."
+		_, err := db.GetRollback(ctx)
+		djangotest.AssertErrorIs(t, err, orm.ErrTransactionManagement)
+		assertErrorContains(t, err, msg)
+		err = db.SetRollback(ctx, true)
+		djangotest.AssertErrorIs(t, err, orm.ErrTransactionManagement)
+		assertErrorContains(t, err, msg)
+	})
+}
+
+// No Django test exists for the savepoint functions outside a transaction,
+// where Django's do nothing.
+func TestTransactionsSavepointOutsideTransaction(t *testing.T) {
+	trRun(t, func(ctx context.Context, t *testing.T, db *orm.DB) {
+		qc := djangotest.CaptureQueries(db)
+		defer qc.Stop()
+		sid, err := db.SavepointCreate(ctx)
+		if sid != "" || err != nil {
+			t.Errorf("SavepointCreate = %q, %v; want \"\", nil", sid, err)
+		}
+		if err := db.SavepointRollback(ctx, "sp_1"); err != nil {
+			t.Errorf("SavepointRollback: %v", err)
+		}
+		if err := db.SavepointCommit(ctx, "sp_1"); err != nil {
+			t.Errorf("SavepointCommit: %v", err)
+		}
+		if n := len(qc.Queries()); n != 0 {
+			t.Errorf("ran %d queries, want 0", n)
+		}
+	})
 }

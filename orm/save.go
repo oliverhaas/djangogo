@@ -45,6 +45,7 @@ func (qs *QuerySet[T]) insertOne(ctx context.Context, obj *T) error {
 	applyDefaults(v, m.fields)
 	applyAutoNowOnCreate(v, m.fields, db.now())
 	if err := db.insert(ctx, m, []reflect.Value{v}, false); err != nil {
+		markForRollbackOnError(ctx, err)
 		return err
 	}
 	return firePostSave(context.WithValue(ctx, createdKey{}, true), db, obj)
@@ -111,19 +112,19 @@ func (qs *QuerySet[T]) Save(ctx context.Context, obj *T, opts ...SaveOption) err
 	var updated bool
 	if len(fields) > 0 {
 		updated, err = db.updateRow(ctx, m, v, fields)
-		if err != nil {
-			return err
-		}
 	} else {
 		updated, err = db.rowExists(ctx, m, v)
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		markForRollbackOnError(ctx, err)
+		return err
 	}
 	if !updated {
 		if len(cfg.updateFields) > 0 {
-			return fmt.Errorf("orm: save %s: save with update_fields did not affect any rows: %w",
+			err := fmt.Errorf("orm: save %s: save with update_fields did not affect any rows: %w",
 				m.Name(), ErrDoesNotExist)
+			markForRollbackOnError(ctx, err)
+			return err
 		}
 		return qs.insertOne(ctx, obj)
 	}

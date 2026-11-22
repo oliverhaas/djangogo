@@ -781,6 +781,17 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   year or in the same month of that field. A model formset also rejects such
   a value repeated in two of its forms. `Model.DateChecks` lists the checks.
   The database holds no constraint for them, so no migration is needed.
+- ORM: the rest of Django's transaction API. `orm.WithoutSavepoint()` makes a
+  nested `Atomic` block run without a savepoint, as `atomic(savepoint=False)`
+  does. `SetRollback` and `GetRollback` set and read the rollback flag of the
+  transaction. `SavepointCreate`, `SavepointRollback` and `SavepointCommit`
+  manage savepoints by hand. `OnCommit` runs a callback after the outermost
+  block commits, and drops it when the block that registered it rolls back.
+  `OnCommitRobust` logs the error of its callback instead of returning it.
+  `MarkForRollbackOnError` marks the transaction for rollback when its
+  function fails. `ErrTransactionManagement` matches the error of a query in
+  a transaction marked for rollback, and of the rollback flag functions
+  outside a transaction.
 
 ### Changed
 
@@ -918,6 +929,15 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   read from the database to the error output, where Django's warning goes.
   Scripts that read the warning from the standard output must read the
   error output.
+- A write that fails inside `Atomic` marks the transaction for rollback on
+  both databases. Before, SQLite committed the other writes of the block,
+  and PostgreSQL failed every later statement with "current transaction is
+  aborted". Code that handles the error of a write and keeps using the
+  transaction must wrap the write in its own `Atomic` block. Until the
+  innermost enclosing block with a savepoint ends, queries fail with an
+  error matched by `ErrTransactionManagement`, and that block then rolls
+  back. The writes are `Save`, `Create`, `Update`, `Delete`, `BulkCreate`
+  and the add, remove, clear and set methods of the related managers.
 
 ### Fixed
 

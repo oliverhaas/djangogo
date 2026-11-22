@@ -59,14 +59,22 @@ func (db *DB) notify(ctx context.Context, query string, args []any) {
 
 // hookedQuerier wraps a querier so that every statement is reported to the DB's
 // query hooks before it runs, and a constraint violation comes back as an
-// *IntegrityError.
+// *IntegrityError. In a transaction marked for rollback it runs no statement
+// and returns the error of a broken transaction, as Django does.
 type hookedQuerier struct {
 	db *DB
 	q  querier
+	// st is the transaction q belongs to, or nil outside a transaction.
+	st *txState
 }
 
 // ExecContext reports the statement to the hooks and executes it.
 func (h hookedQuerier) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if h.st != nil {
+		if err := h.st.brokenErr(); err != nil {
+			return nil, err
+		}
+	}
 	h.db.notify(ctx, query, args)
 	result, err := h.q.ExecContext(ctx, query, args...)
 	return result, h.db.classify(err)
@@ -74,13 +82,12 @@ func (h hookedQuerier) ExecContext(ctx context.Context, query string, args ...an
 
 // QueryContext reports the statement to the hooks and runs the query.
 func (h hookedQuerier) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if h.st != nil {
+		if err := h.st.brokenErr(); err != nil {
+			return nil, err
+		}
+	}
 	h.db.notify(ctx, query, args)
 	rows, err := h.q.QueryContext(ctx, query, args...)
 	return rows, h.db.classify(err)
-}
-
-// QueryRowContext reports the statement to the hooks and runs the single-row query.
-func (h hookedQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	h.db.notify(ctx, query, args)
-	return h.q.QueryRowContext(ctx, query, args...)
 }

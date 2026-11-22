@@ -7,9 +7,12 @@ import (
 )
 
 // runInTx runs fn inside the active transaction if one exists, or starts a new
-// transaction via db.Atomic, matching Django's atomic(savepoint=False).
+// transaction via db.Atomic. Unlike an Atomic block without a savepoint, an
+// error of fn does not mark the active transaction for rollback: Django runs
+// the related manager's create(), get_or_create() and update_or_create()
+// outside an atomic block, and only their writes mark it.
 func runInTx(ctx context.Context, db *DB, fn func(context.Context) error) error {
-	if _, inTx := txFromContext(ctx); inTx {
+	if txStateFrom(ctx) != nil {
 		return fn(ctx)
 	}
 	return db.Atomic(ctx, fn)
@@ -111,7 +114,7 @@ func (c *manyCore) addPKs(ctx context.Context, raw []any, opts ...ManyOption) er
 		return nil
 	}
 
-	err = runInTx(ctx, c.db, func(txCtx context.Context) error {
+	err = c.db.Atomic(ctx, func(txCtx context.Context) error {
 		if err := c.addDirection(txCtx, c.sourceFK, c.targetFK, pks, extraFields, extraVals, autoCreated, hasListeners); err != nil {
 			return err
 		}
@@ -122,7 +125,7 @@ func (c *manyCore) addPKs(ctx context.Context, raw []any, opts ...ManyOption) er
 			}
 		}
 		return nil
-	})
+	}, WithoutSavepoint())
 	if err != nil {
 		return err
 	}
@@ -422,7 +425,7 @@ func (c *manyCore) removePKs(ctx context.Context, raw []any) error {
 	if err != nil {
 		return err
 	}
-	err = runInTx(ctx, c.db, func(txCtx context.Context) error {
+	err = c.db.Atomic(ctx, func(txCtx context.Context) error {
 		if err := fireM2MChanged(txCtx, c.declaringModel, c.field, M2MChangedEvent{
 			Sender:   c.through,
 			Instance: c.ownerInstance,
@@ -444,7 +447,7 @@ func (c *manyCore) removePKs(ctx context.Context, raw []any) error {
 			Model:    c.targetModel,
 			PKSet:    pks,
 		})
-	})
+	}, WithoutSavepoint())
 	if err != nil {
 		return err
 	}
@@ -531,7 +534,7 @@ func (c *manyCore) clear(ctx context.Context) error {
 	if c.err != nil {
 		return c.err
 	}
-	err := runInTx(ctx, c.db, func(txCtx context.Context) error {
+	err := c.db.Atomic(ctx, func(txCtx context.Context) error {
 		if err := fireM2MChanged(txCtx, c.declaringModel, c.field, M2MChangedEvent{
 			Sender:   c.through,
 			Instance: c.ownerInstance,
@@ -575,7 +578,7 @@ func (c *manyCore) clear(ctx context.Context) error {
 			Model:    c.targetModel,
 			PKSet:    nil,
 		})
-	})
+	}, WithoutSavepoint())
 	if err != nil {
 		return err
 	}
@@ -594,7 +597,7 @@ func (c *manyCore) setPKs(ctx context.Context, raw []any, opts ...ManyOption) er
 		return err
 	}
 	cfg := parseManyConfig(opts)
-	err = runInTx(ctx, c.db, func(txCtx context.Context) error {
+	err = c.db.Atomic(ctx, func(txCtx context.Context) error {
 		if cfg.clear {
 			if err := c.clear(txCtx); err != nil {
 				return err
@@ -637,7 +640,7 @@ func (c *manyCore) setPKs(ctx context.Context, raw []any, opts ...ManyOption) er
 			}
 		}
 		return nil
-	})
+	}, WithoutSavepoint())
 	if err != nil {
 		return err
 	}
