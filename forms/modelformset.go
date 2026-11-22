@@ -148,14 +148,22 @@ func (s *ModelFormSet[T]) GetQuerySet() *orm.QuerySet[T] {
 	if qs == nil {
 		qs = orm.Query[T](s.db)
 	}
-	if s.inline != nil {
-		if s.inline.parentHasPK() {
-			qs = qs.Filter(s.inline.fk.Attr, s.inline.parentPKValue())
-		} else {
+	if in := s.inline; in != nil {
+		switch {
+		case !in.parentHasPK():
 			// A parent without a primary key has no rows, Django's
 			// queryset.none(); a filter on a null key would match the
 			// rows without a parent.
 			qs = qs.Filter("pk__in", []any{})
+		case in.fk != nil:
+			qs = qs.Filter(in.fk.Attr, in.parentPKValue())
+		default:
+			rows, err := in.genericRows(s.context(), s.db)
+			if err != nil {
+				s.fail(err)
+				rows = orm.Q("pk__in", []any{})
+			}
+			qs = qs.Filter(rows)
 		}
 	}
 	if !qs.TotallyOrdered() {
@@ -283,7 +291,7 @@ func (s *ModelFormSet[T]) formObject(i int) *T {
 // _construct_form up to the formset settings.
 func (s *ModelFormSet[T]) makeForm(i int) *Form {
 	mf := s.NewForm()
-	if s.inline != nil && mf.model != nil {
+	if s.inline.fkAttr() != "" && mf.model != nil {
 		mf.includedFields = maps.Clone(mf.includedFields)
 		mf.includedFields[s.inline.fk.Attr] = true
 	}
@@ -292,7 +300,7 @@ func (s *ModelFormSet[T]) makeForm(i int) *Form {
 			mf = mf.WithInstance(obj)
 		}
 	}
-	if s.inline != nil && i >= 0 && !s.bound {
+	if s.inline.fkAttr() != "" && i >= 0 && !s.bound {
 		s.setParentFK(mf)
 	}
 	s.st.forms[mf.Form] = mf
@@ -303,7 +311,7 @@ func (s *ModelFormSet[T]) makeForm(i int) *Form {
 func (s *ModelFormSet[T]) bindForm(_ int, f *Form) *Form {
 	mf := s.st.forms[f]
 	data := s.data
-	if s.inline != nil && *s.inline.saveAsNew {
+	if s.inline.fkAttr() != "" && *s.inline.saveAsNew {
 		// A parent saved as new gets new rows: the forms lose the primary
 		// key and the foreign key they were rendered with.
 		if s.st.data == nil {
@@ -314,7 +322,7 @@ func (s *ModelFormSet[T]) bindForm(_ int, f *Form) *Form {
 		data[f.AddPrefix(s.inline.fk.Attr)] = []string{""}
 	}
 	b := mf.Bind(data)
-	if s.inline != nil {
+	if s.inline.fkAttr() != "" {
 		s.setParentFK(b)
 	}
 	s.st.forms[b.Form] = b
@@ -339,7 +347,7 @@ func (s *ModelFormSet[T]) addFields(f *Form, i int) {
 		f.AddField(pk.Attr, s.pkField(mf, initial))
 	}
 	s.baseAddFields(f, i)
-	if s.inline != nil {
+	if s.inline.fkAttr() != "" {
 		s.inline.addField(f)
 	}
 	if field := f.fields[pk.Attr]; initial && field != nil && !field.Base().Required {
@@ -503,7 +511,7 @@ func (s *ModelFormSet[T]) uniqueKey(f *Form, check []string) (string, bool) {
 		if !ok {
 			continue
 		}
-		if s.inline != nil && name == s.inline.fk.Attr {
+		if name == s.inline.fkAttr() {
 			parts = append(parts, name)
 			continue
 		}
@@ -526,7 +534,7 @@ func (s *ModelFormSet[T]) uniqueKey(f *Form, check []string) (string, bool) {
 func (s *ModelFormSet[T]) uniqueErrorMessage(check []string) string {
 	var names []string
 	for _, name := range check {
-		if s.inline == nil || name != s.inline.fk.Attr {
+		if name != s.inline.fkAttr() {
 			names = append(names, name)
 		}
 	}
@@ -639,11 +647,16 @@ func (s *ModelFormSet[T]) saveNewObjects(ctx context.Context, commit bool) ([]*T
 }
 
 // saveNew saves the instance of an extra form with SaveNew or the form. An
-// inline formset first points it at the parent as it is now, which may have
+// inline formset first points it at the parent as it is now, which can have
 // been saved since the formset was built.
 func (s *ModelFormSet[T]) saveNew(ctx context.Context, mf *ModelForm[T], commit bool) (*T, error) {
-	if s.inline != nil {
+	switch {
+	case s.inline.fkAttr() != "":
 		s.setParentFK(mf)
+	case s.inline != nil:
+		if err := s.setGenericParent(ctx, mf); err != nil {
+			return nil, err
+		}
 	}
 	if s.SaveNew != nil {
 		return s.SaveNew(ctx, mf, commit)
@@ -718,16 +731,31 @@ func (s *ModelFormSet[T]) setParentFK(mf *ModelForm[T]) {
 }
 
 // inlineSpec is what an inline formset adds to a model formset: the foreign
-// key of the forms' model to the parent and the parent instance.
+// key of the forms' model to the parent, or the fields of a generic relation
+// to it, and the parent instance.
 type inlineSpec struct {
-	fk          *orm.Field
-	parentModel *orm.Model
-	parent      any // a pointer to the parent instance
-	saveAsNew   *bool
+	fk *orm.Field // nil for a generic relation
+	// ctField and idField are the content type field and the object id
+	// field of a generic relation.
+	ctField, idField *orm.Field
+	parentModel      *orm.Model // nil for a generic relation without a parent
+	parent           any        // a pointer to the parent instance
+	saveAsNew        *bool
+}
+
+// fkAttr returns the attribute name of the foreign key to the parent, "" for
+// a generic relation or a formset that is not inline.
+func (in *inlineSpec) fkAttr() string {
+	if in == nil || in.fk == nil {
+		return ""
+	}
+	return in.fk.Attr
 }
 
 // parentHasPK reports whether the parent has a primary key.
-func (in *inlineSpec) parentHasPK() bool { return hasPK(in.parentModel, in.parent) }
+func (in *inlineSpec) parentHasPK() bool {
+	return in.parentModel != nil && hasPK(in.parentModel, in.parent)
+}
 
 // parentPKValue returns the primary key of the parent.
 func (in *inlineSpec) parentPKValue() any {

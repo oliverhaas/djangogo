@@ -714,6 +714,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   does. It lists them and asks first unless `--noinput` is given, and
   `--include-stale-apps` also covers apps that are no longer installed. It
   is available when the contenttypes app is installed.
+- Forms: `forms.NewGenericInlineFormSet` edits the rows that point at one
+  object of any model through a content type field and an object id field,
+  as Django's `generic_inlineformset_factory` does. The forms leave out both
+  fields, and `Save` sets them on the rows it adds. `WithInstance`,
+  `SaveAsNew`, the `QuerySet` of the rows and Django's defaults (three extra
+  forms, `CanDelete` and the prefix `<app>-<model>-<ct field>-<fk field>`)
+  work as for an inline formset.
 
 ### Changed
 

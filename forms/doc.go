@@ -115,8 +115,10 @@
 // # Model formsets
 //
 // A ModelFormSet edits the rows of a model, as Django's modelformset_factory
-// does, and an InlineFormSet edits the rows that point at one parent row, as
-// inlineformset_factory does:
+// does, an InlineFormSet edits the rows that point at one parent row, as
+// inlineformset_factory does, and a GenericInlineFormSet edits the rows that
+// point at one object of any model through a generic foreign key, as
+// generic_inlineformset_factory of django.contrib.contenttypes.forms does:
 //
 //	fs := forms.NewInlineFormSet[Author, Book](db, "", forms.WithFields("title"))
 //	bound := fs.WithInstance(author).Bind(r.PostForm)

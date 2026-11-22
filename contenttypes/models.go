@@ -31,6 +31,7 @@
 //	tag.animal.all() (related_query_name)            orm.Related[Animal](db, &tag, "animal")
 //	prefetch_related("content_object")               PrefetchRelated("content_object")
 //	GenericPrefetch("content_object", [qs1, qs2])    orm.Prefetch{Lookup: "content_object", QuerySets: []any{qs1, qs2}}
+//	generic_inlineformset_factory(TaggedItem)        forms.NewGenericInlineFormSet[TaggedItem](db, "", "")
 //
 // Deleting an instance deletes the rows of its generic relations. GetOrCreate
 // and UpdateOrCreate take a generic foreign key in their defaults.
