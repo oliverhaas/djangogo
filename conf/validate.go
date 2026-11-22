@@ -23,8 +23,8 @@ type Problem struct {
 // and not SecretKey (Check does that). The settings are validated as Configure
 // would complete them and are not changed.
 //
-// A problem is reported for: a SessionEngine other than SessionEngineDB and
-// SessionEngineSignedCookies; a MessageStorage other than
+// A problem is reported for: a SessionEngine other than SessionEngineDB,
+// SessionEngineFile and SessionEngineSignedCookies; a MessageStorage other than
 // MessageStorageFallback, MessageStorageCookie and MessageStorageSession; a
 // SessionCookieSameSite or CSRFCookieSameSite
 // other than "Lax", "Strict", "None" (in any letter case) or the empty string,
@@ -54,9 +54,11 @@ func (s *Settings) Validate() []Problem {
 	if c.StaticURL != "" && !strings.HasSuffix(c.StaticURL, "/") {
 		v.addf("STATIC_URL", "The STATIC_URL setting must end with a slash.")
 	}
-	if c.SessionEngine != SessionEngineDB && c.SessionEngine != SessionEngineSignedCookies {
-		v.addf("SESSION_ENGINE", "The SESSION_ENGINE setting must be %q or %q, but is %q.",
-			SessionEngineDB, SessionEngineSignedCookies, c.SessionEngine)
+	switch c.SessionEngine {
+	case SessionEngineDB, SessionEngineFile, SessionEngineSignedCookies:
+	default:
+		v.addf("SESSION_ENGINE", "The SESSION_ENGINE setting must be %q, %q or %q, but is %q.",
+			SessionEngineDB, SessionEngineFile, SessionEngineSignedCookies, c.SessionEngine)
 	}
 	switch c.MessageStorage {
 	case MessageStorageFallback, MessageStorageCookie, MessageStorageSession:

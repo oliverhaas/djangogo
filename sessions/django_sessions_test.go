@@ -2,6 +2,8 @@ package sessions_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,15 +12,34 @@ import (
 	"github.com/oliverhaas/djangogo/sessions"
 )
 
-// eachStore runs fn for the database store on every dialect and for the
-// signed-cookie store, as Django runs SessionTestsMixin once per backend.
+// eachStore runs fn for the database store on every dialect, for the file
+// store and for the signed-cookie store, as Django runs SessionTestsMixin once
+// per backend.
 func eachStore(t *testing.T, fn func(t *testing.T, store sessions.Store)) {
+	t.Helper()
+	eachKeyStore(t, func(t *testing.T, store keyStore) { fn(t, store) })
+	t.Run("signed_cookies", func(t *testing.T) {
+		fn(t, sessions.NewSignedCookieStore([]byte("session-test-secret")))
+	})
+}
+
+// keyStore is a store that keeps the sessions on the server under their keys:
+// the database store and the file store.
+type keyStore interface {
+	sessions.Store
+	// Exists reports whether a session with the key is stored.
+	Exists(ctx context.Context, key string) (bool, error)
+}
+
+// eachKeyStore runs fn for the database store on every dialect and for the
+// file store.
+func eachKeyStore(t *testing.T, fn func(t *testing.T, store keyStore)) {
 	t.Helper()
 	djangotest.EachDB(t, []any{sessions.App{}}, func(t *testing.T, db *orm.DB) {
 		fn(t, sessions.NewDBStore(db))
 	})
-	t.Run("signed_cookies", func(t *testing.T) {
-		fn(t, sessions.NewSignedCookieStore([]byte("session-test-secret")))
+	t.Run("file", func(t *testing.T) {
+		fn(t, newFileStore(t))
 	})
 }
 
@@ -58,8 +79,8 @@ func reloaded(t *testing.T, store sessions.Store, s *sessions.Session) *sessions
 	return load(t, store, save(t, store, s))
 }
 
-// exists reports whether the database store holds a row for key.
-func exists(t *testing.T, store *sessions.DBStore, key string) bool {
+// exists reports whether the store holds a session with the key.
+func exists(t *testing.T, store keyStore, key string) bool {
 	t.Helper()
 	ok, err := store.Exists(context.Background(), key)
 	if err != nil {
@@ -205,7 +226,7 @@ func TestClear(t *testing.T) {
 
 // Ported from Django: tests/sessions_tests/tests.py::SessionTestsMixin.test_save
 func TestSave(t *testing.T) {
-	eachDBStore(t, func(t *testing.T, store *sessions.DBStore, _ *orm.DB) {
+	eachKeyStore(t, func(t *testing.T, store keyStore) {
 		s := store.New()
 		save(t, store, s)
 		djangotest.AssertEqual(t, exists(t, store, s.Key()), true)
@@ -214,7 +235,7 @@ func TestSave(t *testing.T) {
 
 // Ported from Django: tests/sessions_tests/tests.py::SessionTestsMixin.test_delete
 func TestDelete(t *testing.T) {
-	eachDBStore(t, func(t *testing.T, store *sessions.DBStore, _ *orm.DB) {
+	eachKeyStore(t, func(t *testing.T, store keyStore) {
 		s := store.New()
 		save(t, store, s)
 		if err := store.Delete(context.Background(), s); err != nil {
@@ -224,13 +245,14 @@ func TestDelete(t *testing.T) {
 	})
 }
 
-// Django's flush deletes the row at once. In Go the session does not know its
-// store: Flush queues the key and the middleware removes the row at the end of
-// the request, which the Delete call stands for here.
+// Django's flush deletes the stored session at once. In Go the session does
+// not know its store: Flush queues the key and the middleware removes the
+// stored session at the end of the request, which the Delete call stands for
+// here.
 //
 // Ported from Django: tests/sessions_tests/tests.py::SessionTestsMixin.test_flush
 func TestFlush(t *testing.T) {
-	eachDBStore(t, func(t *testing.T, store *sessions.DBStore, _ *orm.DB) {
+	eachKeyStore(t, func(t *testing.T, store keyStore) {
 		s := store.New()
 		s.Set("foo", "bar")
 		save(t, store, s)
@@ -248,12 +270,12 @@ func TestFlush(t *testing.T) {
 	})
 }
 
-// Django's cycle_key writes the new row at once. In Go the next save writes it
-// and deletes the row of the old key.
+// Django's cycle_key stores the session under the new key at once. In Go the
+// next save does that and deletes what was stored under the old key.
 //
 // Ported from Django: tests/sessions_tests/tests.py::SessionTestsMixin.test_cycle
 func TestCycle(t *testing.T) {
-	eachDBStore(t, func(t *testing.T, store *sessions.DBStore, _ *orm.DB) {
+	eachKeyStore(t, func(t *testing.T, store keyStore) {
 		s := store.New()
 		s.Set("a", "c")
 		s.Set("b", "d")
@@ -272,7 +294,7 @@ func TestCycle(t *testing.T) {
 
 // Ported from Django: tests/sessions_tests/tests.py::SessionTestsMixin.test_cycle_with_no_session_cache
 func TestCycleWithNoSessionCache(t *testing.T) {
-	eachDBStore(t, func(t *testing.T, store *sessions.DBStore, _ *orm.DB) {
+	eachKeyStore(t, func(t *testing.T, store keyStore) {
 		s := store.New()
 		s.Set("a", "c")
 		s.Set("b", "d")
@@ -298,7 +320,7 @@ func TestSaveDoesntClearData(t *testing.T) {
 
 // Ported from Django: tests/sessions_tests/tests.py::SessionTestsMixin.test_invalid_key
 func TestInvalidKey(t *testing.T) {
-	eachDBStore(t, func(t *testing.T, store *sessions.DBStore, _ *orm.DB) {
+	eachKeyStore(t, func(t *testing.T, store keyStore) {
 		s := load(t, store, "1")
 		save(t, store, s)
 		djangotest.AssertNotEqual(t, s.Key(), "1")
@@ -463,6 +485,19 @@ func TestDecodeFailure(t *testing.T) {
 		djangotest.AssertEqual(t, s.Data(), map[string]any{})
 		djangotest.AssertEqual(t, s.Key(), "")
 	})
+	t.Run("file", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := sessions.NewFileStore(dir, "sessionid")
+		if err != nil {
+			t.Fatalf("NewFileStore: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "sessionidcorruptedsessionkey"), []byte("bad:encoded:value"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s := load(t, store, "corruptedsessionkey")
+		djangotest.AssertEqual(t, s.Data(), map[string]any{})
+		djangotest.AssertEqual(t, s.Key(), "")
+	})
 }
 
 // Django marks this test as an expected failure for the signed-cookie backend,
@@ -494,11 +529,27 @@ func TestSessionLoadDoesNotCreateRecord(t *testing.T) {
 		}
 		djangotest.AssertEqual(t, n, int64(0))
 	})
+	t.Run("file", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := sessions.NewFileStore(dir, "sessionid")
+		if err != nil {
+			t.Fatalf("NewFileStore: %v", err)
+		}
+		s := load(t, store, "someunknownkey")
+
+		djangotest.AssertEqual(t, s.Key(), "")
+		djangotest.AssertEqual(t, exists(t, store, "someunknownkey"), false)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		djangotest.AssertEqual(t, len(entries), 0)
+	})
 }
 
 // Ported from Django: tests/sessions_tests/tests.py::SessionTestsMixin.test_session_save_does_not_resurrect_session_logged_out_in_other_context
 func TestSessionSaveDoesNotResurrectSessionLoggedOutInOtherContext(t *testing.T) {
-	eachDBStore(t, func(t *testing.T, store *sessions.DBStore, _ *orm.DB) {
+	eachKeyStore(t, func(t *testing.T, store keyStore) {
 		ctx := context.Background()
 		s1 := store.New()
 		s1.Set("test_data", "value1")

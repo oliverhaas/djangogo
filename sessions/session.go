@@ -1,7 +1,7 @@
 // Package sessions is the port of django.contrib.sessions: a per-request
-// session, a database store on Django's django_session table, a signed-cookie
-// store, and the middleware that loads the session from its cookie and saves
-// it when it changed.
+// session, a database store on Django's django_session table, a file store, a
+// signed-cookie store, and the middleware that loads the session from its
+// cookie and saves it when it changed.
 package sessions
 
 import (
@@ -24,10 +24,10 @@ type Session struct {
 	// modified and accessed are Django's flags of the same name.
 	modified bool
 	accessed bool
-	// persisted reports that the store holds a row under key.
+	// persisted reports that the store holds the session under key.
 	persisted bool
 	// stale holds the keys the session had before CycleKey and Flush. The
-	// store removes their rows at the next save or delete.
+	// store removes what it holds under them at the next save or delete.
 	stale []string
 	// cookieAge and browserClose are the expiry policy of the middleware that
 	// loaded the session. Zero values mean Django's defaults.
@@ -135,8 +135,8 @@ func (s *Session) IsEmpty() bool {
 
 // CycleKey gives the session a new key and keeps its values (Django's
 // cycle_key). Call it when the privileges of the browser change, as login
-// does, so that a key known to an attacker beforehand is worthless. The row of
-// the old key is removed when the session is saved.
+// does, so that a key known to an attacker beforehand is worthless. The store
+// removes what it holds under the old key when the session is saved.
 func (s *Session) CycleKey() {
 	s.retire()
 	s.key = newKey()
@@ -144,8 +144,9 @@ func (s *Session) CycleKey() {
 	s.modified = true
 }
 
-// Flush removes all values and the key (Django's flush). The row of the old
-// key is removed and the cookie deleted at the end of the request. Logout
+// Flush removes all values and the key (Django's flush). The store removes
+// what it holds under the old key, and the cookie is deleted, at the end of
+// the request. Logout
 // calls it so that the next user of the browser cannot read the old data.
 func (s *Session) Flush() {
 	s.retire()

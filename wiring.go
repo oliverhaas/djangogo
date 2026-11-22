@@ -286,13 +286,22 @@ func readPasswordList(path string) (passwords []string, err error) {
 
 // sessionStore returns the store of SESSION_ENGINE. The database engine needs
 // a database and the installed sessions app, whose table holds the sessions;
-// without them the sessions live in signed cookies.
-func (a *Application) sessionStore() sessions.Store {
+// without them the sessions live in signed cookies. The file engine fails when
+// SESSION_FILE_PATH is not an existing directory.
+func (a *Application) sessionStore() (sessions.Store, error) {
 	s := a.Settings
-	if s.SessionEngine == conf.SessionEngineDB && a.DB != nil && a.Apps.IsInstalled(sessions.App{}.Name()) {
-		return sessions.NewDBStore(a.DB)
+	switch {
+	case s.SessionEngine == conf.SessionEngineFile:
+		store, err := sessions.NewFileStore(s.SessionFilePath, s.SessionCookieName)
+		if err != nil {
+			return nil, &conf.ImproperlyConfigured{Msg: err.Error()}
+		}
+		store.MaxAge = s.SessionCookieAge
+		return store, nil
+	case s.SessionEngine == conf.SessionEngineDB && a.DB != nil && a.Apps.IsInstalled(sessions.App{}.Name()):
+		return sessions.NewDBStore(a.DB), nil
 	}
-	return sessions.NewSignedCookieStore([]byte(s.SecretKey))
+	return sessions.NewSignedCookieStore([]byte(s.SecretKey)), nil
 }
 
 // sessionOptions returns the options of the session middleware from the

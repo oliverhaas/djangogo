@@ -94,13 +94,14 @@ func TestValidate(t *testing.T) {
 			},
 		},
 
+		{name: "file sessions", change: func(s *conf.Settings) { s.SessionEngine = conf.SessionEngineFile }},
 		{name: "signed cookie sessions", change: func(s *conf.Settings) { s.SessionEngine = conf.SessionEngineSignedCookies }},
 		{
 			name:   "unknown session engine",
 			change: func(s *conf.Settings) { s.SessionEngine = "cache" },
 			want: []conf.Problem{{
 				Setting: "SESSION_ENGINE",
-				Msg:     `The SESSION_ENGINE setting must be "db" or "signed_cookies", but is "cache".`,
+				Msg:     `The SESSION_ENGINE setting must be "db", "file" or "signed_cookies", but is "cache".`,
 			}},
 		},
 		{
@@ -108,7 +109,7 @@ func TestValidate(t *testing.T) {
 			change: func(s *conf.Settings) { s.SessionEngine = "django.contrib.sessions.backends.db" },
 			want: []conf.Problem{{
 				Setting: "SESSION_ENGINE",
-				Msg: `The SESSION_ENGINE setting must be "db" or "signed_cookies", ` +
+				Msg: `The SESSION_ENGINE setting must be "db", "file" or "signed_cookies", ` +
 					`but is "django.contrib.sessions.backends.db".`,
 			}},
 		},

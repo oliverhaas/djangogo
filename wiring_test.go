@@ -85,7 +85,7 @@ func cookie(rec *httptest.ResponseRecorder, name string) *http.Cookie {
 
 // TestSessionEngineSelectsTheStore keeps sessions in the database when the
 // engine is "db", a database is configured and the sessions app is installed,
-// and in signed cookies otherwise.
+// in files when the engine is "file", and in signed cookies otherwise.
 func TestSessionEngineSelectsTheStore(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -97,6 +97,7 @@ func TestSessionEngineSelectsTheStore(t *testing.T) {
 		{"db engine with the sessions app", "", true, []apps.Config{sessions.App{}}, "*sessions.DBStore"},
 		{"db engine without the sessions app", "", true, nil, "*sessions.SignedCookieStore"},
 		{"db engine without a database", "", false, []apps.Config{sessions.App{}}, "*sessions.SignedCookieStore"},
+		{"file", conf.SessionEngineFile, true, []apps.Config{sessions.App{}}, "*sessions.FileStore"},
 		{"signed cookies", conf.SessionEngineSignedCookies, true, []apps.Config{sessions.App{}}, "*sessions.SignedCookieStore"},
 	}
 	for _, tc := range cases {
@@ -108,6 +109,21 @@ func TestSessionEngineSelectsTheStore(t *testing.T) {
 			app := newWiredApp(t, s, tc.configs...)
 			djangotest.AssertEqual(t, fmt.Sprintf("%T", app.sessions), tc.want)
 		})
+	}
+}
+
+// TestFileSessionEngineNeedsADirectory stops New when SESSION_FILE_PATH is not
+// a directory, with the text of Django's ImproperlyConfigured. No Django test
+// exists: Django raises it when the first session is created, see
+// FileSessionTests.test_configuration_check for the store.
+func TestFileSessionEngineNeedsADirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing")
+	_, err := newWiredAppErr(t, conf.Settings{SessionEngine: conf.SessionEngineFile, SessionFilePath: dir})
+	want := `The session storage path "` + dir + `" doesn't exist. Please set your ` +
+		"SESSION_FILE_PATH setting to an existing directory in which Django can store session data."
+	var ic *conf.ImproperlyConfigured
+	if !errors.As(err, &ic) || ic.Error() != want {
+		t.Errorf("New error = %v, want the ImproperlyConfigured %q", err, want)
 	}
 }
 

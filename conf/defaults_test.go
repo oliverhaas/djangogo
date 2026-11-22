@@ -45,6 +45,7 @@ var djangoDefaults = map[string]any{
 	"USE_X_FORWARDED_PORT": false,
 
 	"SESSION_ENGINE":                  "db", // differs: "django.contrib.sessions.backends.db"
+	"SESSION_FILE_PATH":               "",
 	"SESSION_COOKIE_NAME":             "sessionid",
 	"SESSION_COOKIE_AGE":              1209600 * time.Second,
 	"SESSION_COOKIE_SECURE":           false,

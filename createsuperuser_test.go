@@ -244,6 +244,63 @@ func TestClearsessionsUnsupportedStore(t *testing.T) {
 	}
 }
 
+// Django sets SESSION_COOKIE_AGE to 0. A zero SessionCookieAge means the
+// default of two weeks, so the test uses one nanosecond.
+//
+// Ported from Django: tests/sessions_tests/tests.py::FileSessionTests.test_clearsessions_command
+func TestFileSessionClearsessionsCommand(t *testing.T) {
+	dir := t.TempDir()
+	app := newWiredApp(t, conf.Settings{
+		SessionEngine:    conf.SessionEngineFile,
+		SessionFilePath:  dir,
+		SessionCookieAge: time.Nanosecond,
+	})
+	countSessions := func() int {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "sessionid") {
+				n++
+			}
+		}
+		return n
+	}
+	if n := countSessions(); n != 0 {
+		t.Fatalf("%d sessions at the start, want 0", n)
+	}
+
+	// One session in the future, one in the past, and one without an expiry,
+	// which is deleted because its modification time plus SESSION_COOKIE_AGE
+	// is in the past when clearsessions runs.
+	for _, setExpiry := range []func(*sessions.Session){
+		func(s *sessions.Session) { s.SetExpiry(time.Hour) },
+		func(s *sessions.Session) { s.SetExpiry(-time.Hour) },
+		func(*sessions.Session) {},
+	} {
+		s := app.sessions.New()
+		s.Set("foo", "bar")
+		setExpiry(s)
+		if _, err := app.sessions.Encode(context.Background(), s); err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+	}
+
+	// Three sessions are in the filesystem before clearsessions...
+	if n := countSessions(); n != 3 {
+		t.Fatalf("%d sessions before clearsessions, want 3", n)
+	}
+	if err := app.Execute([]string{"clearsessions"}); err != nil {
+		t.Fatalf("clearsessions: %v", err)
+	}
+	// ... and two are deleted.
+	if n := countSessions(); n != 1 {
+		t.Errorf("%d sessions after clearsessions, want 1", n)
+	}
+}
+
 func TestClearsessionsMetadata(t *testing.T) {
 	c := &clearsessionsCommand{}
 	want := "Can be run as a cronjob or directly to clean out expired sessions when the backend supports it."

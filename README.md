@@ -130,7 +130,7 @@ go run . startproject --template https://example.com/blog_template.tgz blog
 | `orm/backends`    | Dialect implementations: `sqlite` and `postgres`.                          |
 | `migrations`      | Autodetection, generated migration files, the runner, and the recorder.    |
 | `auth`            | Users, groups, permissions, password hashing, and auth middleware.         |
-| `sessions`        | Per-request sessions with signed-cookie and database-backed stores.        |
+| `sessions`        | Per-request sessions with signed-cookie, database and file stores.         |
 | `csrf`            | CSRF token middleware.                                                      |
 | `urls`            | Route declaration, a `ServeMux` router, and named-route reverse.           |
 | `views`           | Request/response helpers, generic `ListView`/`DetailView` and the contenttypes `shortcut` view. |
@@ -238,7 +238,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   handler of the route or through `Unwrap` methods. In templates, `perms` does
   not grant an active superuser the permissions that are missing from the
   database, and `user` has no related objects such as groups.
-- **Sessions and messages:** no cache, cache_db or file session stores. The
+- **Sessions and messages:** no cache or cache_db session stores. The
   database store needs a database and the installed `sessions` app; without
   them, sessions use signed cookies. The middleware loads the session of the
   cookie with each request, also when no view reads it, where Django loads it

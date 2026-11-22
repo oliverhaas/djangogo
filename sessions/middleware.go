@@ -255,7 +255,8 @@ func (w *sessionWriter) deleteCookie() {
 // dropStale removes from the store the keys the session gave up in Flush and
 // CycleKey. It runs even when the client has gone away, because a logout must
 // not depend on the client waiting for the response. An error is not reported:
-// the response is already decided and the rows expire on their own.
+// the response is already decided and the stored sessions expire on their
+// own.
 func (w *sessionWriter) dropStale() {
 	if len(w.sess.stale) == 0 {
 		return

@@ -333,7 +333,9 @@ func (a *Application) defaultMiddleware() ([]func(http.Handler) http.Handler, er
 		return nil, fmt.Errorf("djangogo: security middleware: %w", err)
 	}
 
-	a.sessions = a.sessionStore()
+	if a.sessions, err = a.sessionStore(); err != nil {
+		return nil, err
+	}
 	stack := []func(http.Handler) http.Handler{
 		middleware.Recover(middleware.RecoverOptions{
 			Debug:             s.Debug,

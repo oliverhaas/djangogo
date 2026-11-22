@@ -751,6 +751,14 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   storage outside an application; `messages.Middleware` keeps the session
   storage. `Storage.Update` now takes the response header and returns the
   messages that no storage kept.
+- Sessions: the file store of Django's file backend. `SESSION_ENGINE=file`
+  keeps each session in a file of the directory `SESSION_FILE_PATH` (the
+  temporary directory of the system when empty), named by the session cookie
+  name and the key. A session without a custom expiry expires
+  `SESSION_COOKIE_AGE` after its file was last written, and `clearsessions`
+  deletes the expired files. `New` fails with Django's `ImproperlyConfigured`
+  text when the directory does not exist. `sessions.NewFileStore` creates the
+  store outside an application.
 
 ### Changed
 

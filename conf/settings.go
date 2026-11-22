@@ -7,6 +7,9 @@ const (
 	// SessionEngineDB stores sessions in the database (Django's default,
 	// django.contrib.sessions.backends.db).
 	SessionEngineDB = "db"
+	// SessionEngineFile stores each session in a file of SessionFilePath
+	// (django.contrib.sessions.backends.file).
+	SessionEngineFile = "file"
 	// SessionEngineSignedCookies stores the session data in a signed cookie
 	// (django.contrib.sessions.backends.signed_cookies).
 	SessionEngineSignedCookies = "signed_cookies"
@@ -103,11 +106,16 @@ type Settings struct {
 	// default false).
 	UseXForwardedPort bool `env:"USE_X_FORWARDED_PORT"`
 
-	// SessionEngine selects the session backend: SessionEngineDB (default) or
-	// SessionEngineSignedCookies (SESSION_ENGINE). The database engine needs
-	// a database and the installed sessions app; without them an
-	// Application keeps the sessions in signed cookies.
+	// SessionEngine selects the session backend: SessionEngineDB (default),
+	// SessionEngineFile or SessionEngineSignedCookies (SESSION_ENGINE). The
+	// database engine needs a database and the installed sessions app;
+	// without them an Application keeps the sessions in signed cookies.
 	SessionEngine string `env:"SESSION_ENGINE"`
+	// SessionFilePath is the directory of the session files of
+	// SessionEngineFile (SESSION_FILE_PATH). Empty means the temporary
+	// directory of the system, as Django's None does. The directory must
+	// exist.
+	SessionFilePath string `env:"SESSION_FILE_PATH"`
 	// SessionCookieName is the name of the session cookie (SESSION_COOKIE_NAME,
 	// default "sessionid").
 	SessionCookieName string `env:"SESSION_COOKIE_NAME"`
