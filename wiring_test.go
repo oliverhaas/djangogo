@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/apps"
 	"github.com/oliverhaas/djangogo/auth"
@@ -110,6 +111,38 @@ func TestSessionEngineSelectsTheStore(t *testing.T) {
 			djangotest.AssertEqual(t, fmt.Sprintf("%T", app.sessions), tc.want)
 		})
 	}
+}
+
+// TestSignedCookieSessionsFollowTheSettings reads a session cookie signed with
+// a key of SECRET_KEY_FALLBACKS and accepts a session cookie for
+// SESSION_COOKIE_AGE. No Django test exists: Django's signing reads both
+// settings itself.
+func TestSignedCookieSessionsFollowTheSettings(t *testing.T) {
+	old := sessions.NewSignedCookieStore([]byte("old key"))
+	s := old.New()
+	s.Set("k", "v")
+	value, err := old.Encode(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	show := func(w http.ResponseWriter, r *http.Request) {
+		sess, _ := sessions.FromContext(r.Context())
+		v, _ := sess.Get("k")
+		_, _ = fmt.Fprint(w, v)
+	}
+	app := newWiredApp(t, conf.Settings{
+		SecretKey:          "new key",
+		SecretKeyFallbacks: []string{"old key"},
+		SessionEngine:      conf.SessionEngineSignedCookies,
+		SessionCookieAge:   time.Hour,
+	}, routeApp{[]urls.Route{urls.PathFunc("GET /{$}", show, "show")}})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: "sessionid", Value: value})
+	rec := httptest.NewRecorder()
+	app.Handler.ServeHTTP(rec, req)
+	djangotest.AssertEqual(t, rec.Body.String(), "v")
+	djangotest.AssertEqual(t, app.sessions.(*sessions.SignedCookieStore).MaxAge, time.Hour)
 }
 
 // TestFileSessionEngineNeedsADirectory stops New when SESSION_FILE_PATH is not

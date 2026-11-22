@@ -301,7 +301,10 @@ func (a *Application) sessionStore() (sessions.Store, error) {
 	case s.SessionEngine == conf.SessionEngineDB && a.DB != nil && a.Apps.IsInstalled(sessions.App{}.Name()):
 		return sessions.NewDBStore(a.DB), nil
 	}
-	return sessions.NewSignedCookieStore([]byte(s.SecretKey)), nil
+	store := sessions.NewSignedCookieStore([]byte(s.SecretKey))
+	store.MaxAge = s.SessionCookieAge
+	store.Fallbacks = secretFallbacks(s)
+	return store, nil
 }
 
 // sessionOptions returns the options of the session middleware from the
@@ -333,21 +336,27 @@ func (a *Application) messageOptions() messages.Options {
 	case conf.MessageStorageSession:
 		storage = messages.StorageSession
 	}
-	fallbacks := make([][]byte, len(s.SecretKeyFallbacks))
-	for i, key := range s.SecretKeyFallbacks {
-		fallbacks[i] = []byte(key)
-	}
 	return messages.Options{
 		Storage: storage,
 		Cookie: messages.CookieOptions{
 			Secret:          []byte(s.SecretKey),
-			Fallbacks:       fallbacks,
+			Fallbacks:       secretFallbacks(s),
 			Domain:          s.SessionCookieDomain,
 			Secure:          s.SessionCookieSecure,
 			DisableHTTPOnly: !s.SessionCookieHTTPOnly,
 			SameSite:        sameSite(s.SessionCookieSameSite),
 		},
 	}
+}
+
+// secretFallbacks returns SECRET_KEY_FALLBACKS as the byte keys that the
+// signed cookies still accept.
+func secretFallbacks(s *conf.Settings) [][]byte {
+	fallbacks := make([][]byte, len(s.SecretKeyFallbacks))
+	for i, key := range s.SecretKeyFallbacks {
+		fallbacks[i] = []byte(key)
+	}
+	return fallbacks
 }
 
 // csrfOptions returns the options of the CSRF middleware from the CSRF_*
