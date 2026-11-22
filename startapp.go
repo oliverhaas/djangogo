@@ -8,8 +8,8 @@ import (
 
 // startappCommand creates an app, Django's startapp.
 type startappCommand struct {
-	app       *Application
-	verbosity verbosityValue
+	app   *Application
+	flags templateFlags
 }
 
 // Name returns the command name.
@@ -24,20 +24,19 @@ func (*startappCommand) Help() string {
 // Usage returns the positional arguments.
 func (*startappCommand) Usage() string { return "name [directory]" }
 
-// Flags declares --verbosity.
-func (c *startappCommand) Flags(fs *flag.FlagSet) {
-	c.verbosity = 1
-	c.verbosity.declare(fs)
-}
+// Flags declares the options of TemplateCommand.
+func (c *startappCommand) Flags(fs *flag.FlagSet) { c.flags.declare(fs) }
 
 // Run creates the app named by the first argument in the directory of the
 // second, or in a new directory of that name. The name is the package and
 // the label of the app; install it by passing its App to djangogo.New.
 func (c *startappCommand) Run(args []string) error {
-	t := templateCommand{app: c.app, kind: "app", verbosity: c.verbosity}
+	t := &templateCommand{app: c.app, kind: "app", templateFlags: c.flags}
 	top, err := t.prepare(args, "You must provide an application name.")
 	if err != nil {
 		return err
 	}
-	return t.result(scaffold.App(top, args[0], scaffold.Options{Created: t.created}))
+	return t.generate(top, args[0], func() error {
+		return scaffold.App(top, args[0], scaffold.Options{Created: t.created})
+	})
 }

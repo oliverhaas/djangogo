@@ -17,8 +17,8 @@ import (
 
 // startprojectCommand creates a project, Django's startproject.
 type startprojectCommand struct {
-	app       *Application
-	verbosity verbosityValue
+	app   *Application
+	flags templateFlags
 }
 
 // Name returns the command name.
@@ -33,34 +33,37 @@ func (*startprojectCommand) Help() string {
 // Usage returns the positional arguments.
 func (*startprojectCommand) Usage() string { return "name [directory]" }
 
-// Flags declares --verbosity.
-func (c *startprojectCommand) Flags(fs *flag.FlagSet) {
-	c.verbosity = 1
-	c.verbosity.declare(fs)
-}
+// Flags declares the options of TemplateCommand.
+func (c *startprojectCommand) Flags(fs *flag.FlagSet) { c.flags.declare(fs) }
 
 // Run creates the project named by the first argument in the directory of
-// the second, or in a new directory of that name. The go.mod of the project
-// requires no version of Djan-Go-Go: "go mod tidy" adds the latest release.
+// the second, or in a new directory of that name. The go.mod of the built-in
+// project requires no version of Djan-Go-Go: "go mod tidy" adds the latest
+// release.
 func (c *startprojectCommand) Run(args []string) error {
-	t := templateCommand{app: c.app, kind: "project", verbosity: c.verbosity}
+	t := &templateCommand{app: c.app, kind: "project", templateFlags: c.flags}
 	top, err := t.prepare(args, "You must provide a project name.")
 	if err != nil {
 		return err
 	}
-	return t.result(scaffold.Project(top, args[0], scaffold.Options{Created: t.created}))
+	return t.generate(top, args[0], func() error {
+		return scaffold.Project(top, args[0], scaffold.Options{Created: t.created})
+	})
 }
 
 // templateCommand is the part startproject and startapp share, Django's
 // TemplateCommand.
 type templateCommand struct {
-	app       *Application
-	kind      string // "project" or "app"
-	verbosity verbosityValue
+	templateFlags
+	app  *Application
+	kind string // "project" or "app"
+	// pathsToRemove lists the temporary directories of a downloaded or
+	// extracted template.
+	pathsToRemove []string
 }
 
 // article returns the indefinite article of the kind.
-func (t templateCommand) article() string {
+func (t *templateCommand) article() string {
 	if t.kind == "app" {
 		return "an"
 	}
@@ -72,7 +75,7 @@ func (t templateCommand) article() string {
 // TemplateCommand.handle does: the given directory, created when missing,
 // or a new directory named after the project or app in the working
 // directory.
-func (t templateCommand) prepare(args []string, missing string) (string, error) {
+func (t *templateCommand) prepare(args []string, missing string) (string, error) {
 	switch {
 	case len(args) == 0:
 		return "", &manage.UsageError{Msg: missing}
@@ -114,7 +117,7 @@ func (t templateCommand) prepare(args []string, missing string) (string, error) 
 // TemplateCommand.validate_name does: it must be an identifier and must not
 // be the name of a standard library package, the counterpart of an existing
 // Python module. Go also reserves main, init and _ for packages.
-func (t templateCommand) validateName(name, typ string) error {
+func (t *templateCommand) validateName(name, typ string) error {
 	if !token.IsIdentifier(name) {
 		return manage.Errorf("'%s' is not a valid %s %s. Please make sure the %s is a valid identifier.",
 			name, t.kind, typ, typ)
@@ -131,7 +134,7 @@ func (t templateCommand) validateName(name, typ string) error {
 }
 
 // created prints a generated file at verbosity 2.
-func (t templateCommand) created(path string) {
+func (t *templateCommand) created(path string) {
 	if t.verbosity >= 2 {
 		_, _ = fmt.Fprintf(t.app.out(), "Creating %s\n", path)
 	}
@@ -139,7 +142,7 @@ func (t templateCommand) created(path string) {
 
 // result turns the error of a generation into a CommandError, an existing
 // file into Django's overlay message.
-func (t templateCommand) result(err error) error {
+func (t *templateCommand) result(err error) error {
 	var exists *scaffold.ExistsError
 	switch {
 	case err == nil:

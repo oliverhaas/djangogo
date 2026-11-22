@@ -100,6 +100,25 @@ router := urls.NewRouter(site.Routes()...)
 See [`examples/blog`](examples/blog) for a full application that wires the public
 list and detail pages and the admin together; run it with `go run ./examples/blog`.
 
+`startproject` and `startapp` create a project or an app from a built-in
+template, or with `--template` from a directory, a tar or zip archive or an
+http(s) URL of an archive. As in Django, a directory or file name that contains
+`project_name` (or `app_name`) gets the given name. The files with an extension
+from `-e` (default `go`) or a name from `-n` (default `go.mod`) are rendered
+with Go's `text/template` between `[[` and `]]`. The context has `project_name`
+or `app_name`, `project_directory` or `app_directory`,
+`camel_case_project_name` or `camel_case_app_name`, `secret_key` for a
+project, `djangogo_version`, `go_version`, `template`, `extensions`, `files`,
+`verbosity` and, with `-x`, `exclude`. A file name ending in `-tpl` loses that
+suffix, so a template's `.go` files can be stored as `main.go-tpl` and stay
+out of the build. Rendered `.go` files are formatted with gofmt. Directories
+that start with a dot are skipped; with `-x`, only `.git`, `__pycache__` and
+the named directories are.
+
+```console
+go run . startproject --template https://example.com/blog_template.tgz blog
+```
+
 ## Package map
 
 | Package           | Responsibility                                                              |
@@ -231,10 +250,10 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
 - **contenttypes:** no `GenericForeignKey` and no removal of stale content types.
 - **Commands:** `runserver` has no autoreload, and `shell` is a query shell over
   the models, not a Go REPL. `collectstatic` has no `--link` and no
-  post-processing (manifest or hashed names). `startproject` and `startapp` have
-  no `--template`, `--extension`, `--name` or `--exclude`. `createsuperuser`
-  does not suggest the system user name as the default, and it reads answers line
-  by line when stdin is not a terminal.
+  post-processing (manifest or hashed names). A `startproject` or `startapp`
+  template is a Go `text/template` with the delimiters `[[` and `]]`, not a
+  Django template, and it cannot be an lzma or xz archive or an ftp URL.
+  `createsuperuser` reads answers line by line when stdin is not a terminal.
 
 ## Testing
 

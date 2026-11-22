@@ -1,0 +1,2 @@
+// Package [[ .project_name ]] holds the Djan-Go-Go settings of the [[ .project_name ]] test project.
+package [[ .project_name ]]

@@ -1,0 +1,7 @@
+// The main.go of the [[ .project_name ]] test project.
+package main
+
+// template context:
+var projectName = "[[ .project_name ]]"
+var projectDirectory = "[[ .project_directory ]]"
+var secretKey = "[[ .secret_key ]]"

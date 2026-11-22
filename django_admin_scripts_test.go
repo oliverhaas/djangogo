@@ -2,7 +2,10 @@ package djangogo_test
 
 import (
 	"bytes"
+	"errors"
 	"go/build"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +13,7 @@ import (
 
 	"github.com/oliverhaas/djangogo"
 	"github.com/oliverhaas/djangogo/conf"
+	"github.com/oliverhaas/djangogo/scaffold"
 )
 
 // adminScript runs the command line args in a new working directory, the
@@ -53,6 +57,36 @@ func (s *adminScript) path(rel string) string { return filepath.Join(s.dir, file
 func (s *adminScript) exists(rel string) bool {
 	_, err := os.Stat(s.path(rel))
 	return err == nil
+}
+
+// customTemplatesDir holds the template trees of the --template tests,
+// Django's tests/admin_scripts/custom_templates. The path is absolute, since
+// the tests run in a temporary working directory.
+var customTemplatesDir = func() string {
+	dir, err := filepath.Abs(filepath.Join("testdata", "custom_templates"))
+	if err != nil {
+		panic(err)
+	}
+	return dir
+}()
+
+// customTemplate returns the path of name in the custom templates.
+func customTemplate(name string) string { return filepath.Join(customTemplatesDir, name) }
+
+// read returns the content of rel in the working directory.
+func (s *adminScript) read(rel string) string {
+	s.t.Helper()
+	return readFile(s.t, s.path(rel))
+}
+
+// readFile returns the content of the file at path.
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }
 
 // assertNoOutput fails when out is not empty.
@@ -158,19 +192,289 @@ func TestStartProjectSimpleProjectDifferentDirectory(t *testing.T) {
 		"won't replace conflicting files.", true)
 }
 
-// TestStartProjectCustomProjectDestinationMissing creates a missing
-// destination directory. Djan-Go-Go has no --template option, so the port
-// uses the built-in template.
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template
+func TestStartProjectCustomProjectTemplate(t *testing.T) {
+	s := newAdminScript(t)
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template"), "customtestproject")
+	assertNoOutput(t, errOut)
+	if !s.exists("customtestproject/additional_dir") {
+		t.Error("customtestproject/additional_dir was not created")
+	}
+}
+
+// TestStartProjectCustomProjectTemplateNonGoFilesNotFormatted copies a file
+// that is not rendered as it is. Django checks that black leaves it alone;
+// gofmt touches Go files only.
 //
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_non_python_files_not_formatted
+func TestStartProjectCustomProjectTemplateNonGoFilesNotFormatted(t *testing.T) {
+	s := newAdminScript(t)
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template"), "customtestproject")
+	assertNoOutput(t, errOut)
+	want := readFile(t, filepath.Join(customTemplate("project_template"), "additional_dir", "requirements.in"))
+	if got := s.read("customtestproject/additional_dir/requirements.in"); got != want {
+		t.Errorf("requirements.in = %q, want %q", got, want)
+	}
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_template_dir_with_trailing_slash
+func TestStartProjectTemplateDirWithTrailingSlash(t *testing.T) {
+	s := newAdminScript(t)
+	template := customTemplate("project_template") + string(filepath.Separator)
+	_, errOut := s.run("startproject", "--template", template, "customtestproject")
+	assertNoOutput(t, errOut)
+	if !s.exists("customtestproject/additional_dir") {
+		t.Error("customtestproject/additional_dir was not created")
+	}
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_from_tarball_by_path
+func TestStartProjectCustomProjectTemplateFromTarballByPath(t *testing.T) {
+	s := newAdminScript(t)
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template.tgz"), "tarballtestproject")
+	assertNoOutput(t, errOut)
+	if !s.exists("tarballtestproject/run.go") {
+		t.Error("tarballtestproject/run.go was not created")
+	}
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_from_tarball_to_alternative_location
+func TestStartProjectCustomProjectTemplateFromTarballToAlternativeLocation(t *testing.T) {
+	s := newAdminScript(t)
+	if err := os.Mkdir(s.path("altlocation"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template.tgz"),
+		"tarballtestproject", "altlocation")
+	assertNoOutput(t, errOut)
+	if !s.exists("altlocation/run.go") {
+		t.Error("altlocation/run.go was not created")
+	}
+}
+
+// templateServer serves the custom templates over HTTP, the live server of
+// Django's StartProject tests, and records the User-Agent header of the last
+// request.
+type templateServer struct {
+	url       string
+	userAgent string
+}
+
+// newTemplateServer serves the files of the custom templates under
+// /custom_templates/ and /user_agent_check/. A trailing slash after the name
+// of a file is ignored.
+func newTemplateServer(t *testing.T) *templateServer {
+	t.Helper()
+	ts := &templateServer{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts.userAgent = r.Header.Get("User-Agent")
+		rel := strings.TrimSuffix(r.URL.Path, "/")
+		for _, prefix := range []string{"/custom_templates/", "/user_agent_check/"} {
+			if name, ok := strings.CutPrefix(rel, prefix); ok {
+				http.ServeFile(w, r, customTemplate(name))
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	ts.url = srv.URL
+	return ts
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_from_tarball_by_url
+func TestStartProjectCustomProjectTemplateFromTarballByURL(t *testing.T) {
+	ts := newTemplateServer(t)
+	s := newAdminScript(t)
+	_, errOut := s.run("startproject", "--template", ts.url+"/custom_templates/project_template.tgz", "urltestproject")
+	assertNoOutput(t, errOut)
+	if !s.exists("urltestproject/run.go") {
+		t.Error("urltestproject/run.go was not created")
+	}
+}
+
+// TestStartProjectCustomProjectTemplateFromTarballByURLUserAgent names
+// Djan-Go-Go and its version as the user agent, as Django names itself.
+//
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_from_tarball_by_url_django_user_agent
+func TestStartProjectCustomProjectTemplateFromTarballByURLUserAgent(t *testing.T) {
+	ts := newTemplateServer(t)
+	s := newAdminScript(t)
+	_, errOut := s.run("startproject", "--template", ts.url+"/user_agent_check/project_template.tgz", "urltestproject")
+	assertNoOutput(t, errOut)
+	assertOutput(t, ts.userAgent, "Djan-Go-Go/"+djangogo.Version, true)
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_project_template_tarball_url
+func TestStartProjectProjectTemplateTarballURL(t *testing.T) {
+	ts := newTemplateServer(t)
+	s := newAdminScript(t)
+	_, errOut := s.run("startproject", "--template", ts.url+"/custom_templates/project_template.tgz/", "urltestproject")
+	assertNoOutput(t, errOut)
+	if !s.exists("urltestproject/run.go") {
+		t.Error("urltestproject/run.go was not created")
+	}
+}
+
+// TestStartProjectFileWithoutExtension renders the files -e and -n select
+// besides the Go files. The Go file of the fixture holds a Go comment where
+// the others hold a shell comment.
+//
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_file_without_extension
+func TestStartProjectFileWithoutExtension(t *testing.T) {
+	s := newAdminScript(t)
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template"), "customtestproject",
+		"-e", "txt", "-n", "Procfile")
+	assertNoOutput(t, errOut)
+	for name, comment := range map[string]string{"Procfile": "#", "additional_file.go": "//", "requirements.txt": "#"} {
+		got := strings.TrimSpace(s.read("customtestproject/additional_dir/" + name))
+		if want := comment + " some file for customtestproject test project"; got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_context_variables
+func TestStartProjectCustomProjectTemplateContextVariables(t *testing.T) {
+	s := newAdminScript(t)
+	if err := os.Mkdir(s.path("project_dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template"), "another_project", "project_dir")
+	assertNoOutput(t, errOut)
+	content := s.read("project_dir/main.go")
+	assertOutput(t, content, `projectName = "another_project"`, true)
+	assertOutput(t, content, `projectDirectory = "`+s.path("project_dir")+`"`, true)
+}
+
+// TestStartProjectNoEscapingOfProjectVariables renders the values without
+// HTML escaping. Django passes "<&>" through the --extra option of a custom
+// command; Djan-Go-Go has no way to extend startproject, so the port puts
+// the characters into the directory name.
+//
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_no_escaping_of_project_variables
+func TestStartProjectNoEscapingOfProjectVariables(t *testing.T) {
+	s := newAdminScript(t)
+	if err := os.Mkdir(s.path("project_dir<&>"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template"), "another_project", "project_dir<&>")
+	assertNoOutput(t, errOut)
+	assertOutput(t, s.read("project_dir<&>/main.go"), "<&>", true)
+}
+
 // Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_destination_missing
 func TestStartProjectCustomProjectDestinationMissing(t *testing.T) {
 	s := newAdminScript(t)
-	out, errOut := s.run("startproject", "yet_another_project", "project_dir2")
+	out, errOut := s.run("startproject", "--template", customTemplate("project_template"),
+		"yet_another_project", "project_dir2")
 	assertNoOutput(t, out)
 	assertNoOutput(t, errOut)
 	if !s.exists("project_dir2") {
 		t.Error("project_dir2 was not created")
 	}
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_with_non_ascii_templates
+func TestStartProjectCustomProjectTemplateWithNonASCIITemplates(t *testing.T) {
+	s := newAdminScript(t)
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template"), "--extension=txt",
+		"customtestproject")
+	assertNoOutput(t, errOut)
+	got := s.read("customtestproject/ticket-18091-non-ascii-template.txt")
+	if want := "Some non-ASCII text for testing ticket #18091:\nüäö €\n"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_hidden_directory_default_excluded
+func TestStartProjectCustomProjectTemplateHiddenDirectoryDefaultExcluded(t *testing.T) {
+	s := newAdminScript(t)
+	if err := os.Mkdir(s.path("project_dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template"),
+		"custom_project_template_hidden_directories", "project_dir")
+	assertNoOutput(t, errOut)
+	if s.exists("project_dir/.hidden") {
+		t.Error("project_dir/.hidden was created")
+	}
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_hidden_directory_included
+func TestStartProjectCustomProjectTemplateHiddenDirectoryIncluded(t *testing.T) {
+	s := newAdminScript(t)
+	if err := os.Mkdir(s.path("project_dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const projectName = "custom_project_template_hidden_directories_included"
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template"), projectName,
+		"project_dir", "--exclude")
+	assertNoOutput(t, errOut)
+	assertOutput(t, s.read("project_dir/.hidden/render.go"), "// The "+projectName+" should be rendered.", true)
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::StartProject.test_custom_project_template_exclude_directory
+func TestStartProjectCustomProjectTemplateExcludeDirectory(t *testing.T) {
+	s := newAdminScript(t)
+	if err := os.Mkdir(s.path("project_dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const projectName = "custom_project_with_excluded_directories"
+	_, errOut := s.run("startproject", "--template", customTemplate("project_template"), projectName,
+		"project_dir", "--exclude", "additional_dir", "-x", ".hidden")
+	assertNoOutput(t, errOut)
+	for _, dir := range []string{".hidden", "additional_dir", ".git", "__pycache__"} {
+		if s.exists("project_dir/" + dir) {
+			t.Errorf("project_dir/%s was created", dir)
+		}
+	}
+	if !s.exists("project_dir/" + projectName) {
+		t.Errorf("project_dir/%s was not created", projectName)
+	}
+}
+
+// No Go counterpart: StartProject.test_command_does_not_import. The name
+// check looks for a directory of the standard library and imports nothing.
+
+// No Go counterpart: StartProject.test_failure_to_format_code. The command
+// formats the Go files itself and runs no formatter command.
+
+// TestStartAppSetupEnviron names the app configuration after the app.
+// Settings live in a Go value, so the settings directory of the Django test
+// class has no counterpart; the startapp part is ported.
+//
+// Ported from Django: tests/admin_scripts/tests.py::DjangoAdminSettingsDirectory.test_setup_environ
+func TestStartAppSetupEnviron(t *testing.T) {
+	s := newAdminScript(t)
+	_, errOut := s.run("startapp", "settings_test")
+	assertNoOutput(t, errOut)
+	content := s.read("settings_test/app.go")
+	assertOutput(t, content, "type App struct {", true)
+	assertOutput(t, content, `func (*App) Name() string { return "settings_test" }`, true)
+}
+
+// Ported from Django: tests/admin_scripts/tests.py::DjangoAdminSettingsDirectory.test_setup_environ_custom_template
+func TestStartAppSetupEnvironCustomTemplate(t *testing.T) {
+	s := newAdminScript(t)
+	_, errOut := s.run("startapp", "--template", customTemplate("app_template"), "custom_settings_test")
+	assertNoOutput(t, errOut)
+	if !s.exists("custom_settings_test/api.go") {
+		t.Error("custom_settings_test/api.go was not created")
+	}
+}
+
+// TestStartAppUnicodeName accepts a name of letters outside ASCII, which Go
+// identifiers allow as Python's do.
+//
+// Ported from Django: tests/admin_scripts/tests.py::DjangoAdminSettingsDirectory.test_startapp_unicode_name
+func TestStartAppUnicodeName(t *testing.T) {
+	s := newAdminScript(t)
+	_, errOut := s.run("startapp", "こんにちは")
+	assertNoOutput(t, errOut)
+	content := s.read("こんにちは/app.go")
+	assertOutput(t, content, "package こんにちは\n", true)
+	assertOutput(t, content, `func (*App) Name() string { return "こんにちは" }`, true)
 }
 
 // TestStartAppInvalidName refuses an app name that is not an identifier.
@@ -379,4 +683,102 @@ func TestTemplateCommandTooManyArguments(t *testing.T) {
 	assertOutput(t, errOut, "error: unrecognized arguments: c", true)
 	_, errOut = s.run("startapp")
 	assertOutput(t, errOut, "You must provide an application name.", true)
+}
+
+// TestTemplateCommandVerbosityOfCustomTemplate prints the files to render,
+// the download, the extraction and the cleanup at verbosity 2, as
+// TemplateCommand.handle does, and removes the temporary files.
+func TestTemplateCommandVerbosityOfCustomTemplate(t *testing.T) {
+	ts := newTemplateServer(t)
+	s := newAdminScript(t)
+	url := ts.url + "/custom_templates/project_template.tgz"
+	out, errOut := s.run("startproject", "--template", url, "urltestproject", "-v", "2",
+		"-e", "txt, html", "-e", ".txt", "-n", "Procfile,settings.go")
+	assertNoOutput(t, errOut)
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if len(lines) != 6 {
+		t.Fatalf("output:\n%s", out)
+	}
+	for i, want := range []string{
+		"Rendering project template files with extensions: .go, .html, .txt",
+		"Rendering project template files with filenames: go.mod, Procfile, settings.go",
+		"Downloading " + url,
+		"Extracting ",
+		"Creating " + s.path("urltestproject/run.go"),
+		"Cleaning up temporary files.",
+	} {
+		if !strings.HasPrefix(lines[i], want) {
+			t.Errorf("line %d = %q, want %q", i+1, lines[i], want)
+		}
+	}
+	archive := strings.TrimPrefix(lines[3], "Extracting ")
+	if _, err := os.Stat(filepath.Dir(archive)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the download directory %s was not removed: %v", filepath.Dir(archive), err)
+	}
+}
+
+// TestTemplateCommandTemplateErrors reports a template that is neither a
+// directory nor an archive, a failed download and an archive of an unknown
+// format with Django's messages.
+func TestTemplateCommandTemplateErrors(t *testing.T) {
+	ts := newTemplateServer(t)
+	s := newAdminScript(t)
+
+	_, errOut := s.run("startproject", "--template", "missing", "one")
+	assertOutput(t, errOut, "CommandError: couldn't handle project template missing.", true)
+
+	url := ts.url + "/custom_templates/missing.tgz"
+	_, errOut = s.run("startproject", "--template", url, "two")
+	assertOutput(t, errOut, "CommandError: couldn't download URL "+url+" to missing.tgz: HTTP Error 404: Not Found", true)
+
+	_, errOut = s.run("startapp", "--template", customTemplate("project_template/additional_dir/Procfile"), "three")
+	assertOutput(t, errOut, "CommandError: couldn't extract file "+customTemplate("project_template/additional_dir/Procfile")+
+		" to ", true)
+	assertOutput(t, errOut, ": Path not a recognized archive format: ", true)
+}
+
+// TestTemplateCommandTemplatePathForms accepts a file:// URL and a path in
+// the home directory.
+func TestTemplateCommandTemplatePathForms(t *testing.T) {
+	home := filepath.Dir(customTemplatesDir)
+	t.Setenv("HOME", home)
+	s := newAdminScript(t)
+	for name, template := range map[string]string{
+		"fileurl": "file://" + customTemplate("app_template"),
+		"home":    "~/" + filepath.Base(customTemplatesDir) + "/app_template",
+	} {
+		_, errOut := s.run("startapp", "--template", template, name)
+		assertNoOutput(t, errOut)
+		if !s.exists(name + "/api.go") {
+			t.Errorf("%s/api.go was not created", name)
+		}
+	}
+}
+
+// TestTemplateCommandContext renders Django's context names in a custom
+// tree, and refuses a name the context lacks.
+func TestTemplateCommandContext(t *testing.T) {
+	tree := t.TempDir()
+	const context = "[[ .app_name ]] [[ .camel_case_app_name ]] [[ .app_directory ]] [[ .djangogo_version ]] " +
+		"[[ .go_version ]] [[ .extensions ]] [[ .files ]] [[ .verbosity ]] [[ .exclude ]]\n"
+	if err := os.WriteFile(filepath.Join(tree, "context.txt"), []byte(context), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newAdminScript(t)
+	_, errOut := s.run("startapp", "--template", tree, "my_blog2go", "-n", "context.txt", "-x", "vendor")
+	assertNoOutput(t, errOut)
+	want := "my_blog2go MyBlog2Go " + s.path("my_blog2go") + " " + djangogo.Version + " " + scaffold.GoVersion +
+		" [.go] [go.mod context.txt] 1 [vendor]\n"
+	if got := s.read("my_blog2go/context.txt"); got != want {
+		t.Errorf("context.txt = %q, want %q", got, want)
+	}
+
+	if err := os.WriteFile(filepath.Join(tree, "context.txt"), []byte("[[ .secret_key ]]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut = s.run("startapp", "--template", tree, "other", "-n", "context.txt")
+	assertOutput(t, errOut, `map has no entry for key "secret_key"`, true)
+	_, errOut = s.run("startproject", "--template", tree, "proj", "-n", "context.txt")
+	assertNoOutput(t, errOut)
+	assertOutput(t, s.read("proj/context.txt"), "django-insecure-", true)
 }

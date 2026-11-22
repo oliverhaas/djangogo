@@ -26,6 +26,16 @@ type Command interface {
 // takes no positional arguments.
 type Flagger interface{ Flags(fs *flag.FlagSet) }
 
+// OptionalValue is implemented by a flag value that the command line may give
+// without a value, argparse's nargs="?". The flag takes the next argument as
+// its value unless that argument is a flag or the terminator "--"; otherwise
+// the flag is set to NoValue. The help shows the value name in brackets.
+type OptionalValue interface {
+	flag.Value
+	// NoValue returns the value of the flag given alone, argparse's const.
+	NoValue() string
+}
+
 // Usager is implemented by a command with positional arguments; Usage returns
 // their synopsis, for example "[addrport]" or "app_label [app_label ...]".
 type Usager interface{ Usage() string }

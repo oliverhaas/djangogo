@@ -132,10 +132,16 @@ func helpNames(fs *flag.FlagSet) []string {
 }
 
 // invocation returns the option as the option list shows it: the names, and
-// for an option that takes a value its metavariable ("-t, --tag TAG").
+// for an option that takes a value its metavariable ("-t, --tag TAG"), in
+// brackets when the value is optional ("-x, --exclude [EXCLUDE]").
 func (o option) invocation() string {
 	s := strings.Join(dashed(o.names), ", ")
-	if metavar, _ := o.metavar(); metavar != "" {
+	metavar, _ := o.metavar()
+	switch {
+	case metavar == "":
+	case isOptional(o.flag):
+		s += " [" + metavar + "]"
+	default:
 		s += " " + metavar
 	}
 	return s

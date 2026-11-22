@@ -667,6 +667,17 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   output) and `--no-header`, and `--dry-run -v 3` prints the files it would
   write. The Go API adds `Loader.MergeBranches`, `NewMergeMigration`,
   `InteractiveQuestioner.AskMerge` and `Registry.Remove`.
+- Commands: `startproject` and `startapp` take Django's `--template`, which
+  reads a template from a directory, a `file://` path, a path with `~`, a tar
+  archive (plain, gzip or bzip2), a zip archive or an http(s) URL of one.
+  `-e`/`--extension` and `-n`/`--name` select the files rendered with Go's
+  `text/template` between `[[` and `]]` (default: `.go` files and `go.mod`),
+  and `-x`/`--exclude` names the directories to skip in place of the hidden
+  ones. A `project_name` or `app_name` in a path becomes the given name, a
+  `-tpl` suffix is dropped, and rendered `.go` files are formatted with gofmt.
+  The new files honor the umask. `-v 2` reports the rendering, the download
+  and the cleanup. `scaffold.Tree` renders such a template from Go, and
+  `manage.OptionalValue` gives a flag whose value can be left out.
 
 ### Changed
 

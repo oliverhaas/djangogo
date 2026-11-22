@@ -8,6 +8,10 @@
 // path component "app_name" becomes the name of the app, and the suffix
 // "-tpl" is dropped: it keeps the Go tool away from the .go files and the
 // go.mod of the trees, as ".py-tpl" does for Django.
+//
+// Tree generates from a template tree on disk instead, the --template option
+// of the commands. It renders the files Django's TemplateCommand renders and
+// copies the others.
 package scaffold
 
 import (
@@ -31,9 +35,10 @@ import (
 //go:embed project_template app_template
 var trees embed.FS
 
+// GoVersion is the Go version written into the go.mod of a project.
+const GoVersion = "1.26"
+
 const (
-	// goVersion is the Go version written into the go.mod of a project.
-	goVersion = "1.26"
 	// appNamePart is the path component that becomes the name of the app.
 	appNamePart = "app_name"
 	// templateSuffix ends the names of the files the Go tool must not see.
@@ -84,10 +89,12 @@ type data struct {
 	SecretKey string
 }
 
-// output is one rendered file.
+// output is one rendered file, or a directory of a tree on disk.
 type output struct {
 	path    string
 	content []byte
+	mode    fs.FileMode
+	dir     bool
 }
 
 // ProjectAppName returns the name of the sample app of a project named name.
@@ -99,7 +106,7 @@ func ProjectAppName(name string) string { return name + "app" }
 // sample app and the sample app itself, named ProjectAppName(name). Nothing
 // is written when one of the files exists.
 func Project(dir, name string, opts Options) error {
-	key, err := secretKey()
+	key, err := SecretKey()
 	if err != nil {
 		return err
 	}
@@ -108,7 +115,7 @@ func Project(dir, name string, opts Options) error {
 		AppName:     ProjectAppName(name),
 		Module:      name,
 		ReplacePath: opts.ReplacePath,
-		GoVersion:   goVersion,
+		GoVersion:   GoVersion,
 		SecretKey:   key,
 	}
 	project, err := render(dir, "project_template", d)
@@ -126,7 +133,7 @@ func Project(dir, name string, opts Options) error {
 // with its admin, views, URLs and tests, and its templates and static files.
 // Nothing is written when one of the files exists.
 func App(dir, name string, opts Options) error {
-	files, err := render(dir, "app_template", data{Name: name, AppName: name, GoVersion: goVersion})
+	files, err := render(dir, "app_template", data{Name: name, AppName: name, GoVersion: GoVersion})
 	if err != nil {
 		return err
 	}
@@ -145,28 +152,37 @@ func render(dir, root string, d data) ([]output, error) {
 		if err != nil {
 			return err
 		}
-		t, err := template.New(name).Delims("[[", "]]").Option("missingkey=error").Parse(string(src))
+		content, err := execute(name, src, d)
 		if err != nil {
-			return fmt.Errorf("scaffold: parse %s: %w", name, err)
-		}
-		var buf bytes.Buffer
-		if err := t.Execute(&buf, d); err != nil {
-			return fmt.Errorf("scaffold: render %s: %w", name, err)
+			return err
 		}
 		rel := targetPath(strings.TrimPrefix(name, root+"/"), d.AppName)
-		content := buf.Bytes()
 		if path.Ext(rel) == ".go" {
 			if content, err = format.Source(content); err != nil {
 				return fmt.Errorf("scaffold: format %s: %w", name, err)
 			}
 		}
-		files = append(files, output{path: filepath.Join(dir, filepath.FromSlash(rel)), content: content})
+		files = append(files, output{path: filepath.Join(dir, filepath.FromSlash(rel)), content: content, mode: 0o644})
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("scaffold: %w", err)
 	}
 	return files, nil
+}
+
+// execute renders the template src, the file name, with the delimiters [[
+// and ]]; a missing value is an error.
+func execute(name string, src []byte, data any) ([]byte, error) {
+	t, err := template.New(name).Delims("[[", "]]").Option("missingkey=error").Parse(string(src))
+	if err != nil {
+		return nil, fmt.Errorf("scaffold: parse %s: %w", name, err)
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("scaffold: render %s: %w", name, err)
+	}
+	return buf.Bytes(), nil
 }
 
 // targetPath returns the path a file of a tree is written to: rel with every
@@ -182,9 +198,12 @@ func targetPath(rel, appName string) string {
 }
 
 // write writes files after checking that none of them exists, and calls
-// created with each path written.
+// created with each path written. A directory is created when missing.
 func write(files []output, created func(string)) error {
 	for _, f := range files {
+		if f.dir {
+			continue
+		}
 		_, err := os.Lstat(f.path)
 		if err == nil {
 			return &ExistsError{Path: f.path}
@@ -194,10 +213,16 @@ func write(files []output, created func(string)) error {
 		}
 	}
 	for _, f := range files {
+		if f.dir {
+			if err := os.MkdirAll(f.path, 0o755); err != nil {
+				return fmt.Errorf("scaffold: %w", err)
+			}
+			continue
+		}
 		if err := os.MkdirAll(filepath.Dir(f.path), 0o755); err != nil {
 			return fmt.Errorf("scaffold: %w", err)
 		}
-		if err := os.WriteFile(f.path, f.content, 0o644); err != nil {
+		if err := os.WriteFile(f.path, f.content, f.mode); err != nil {
 			return fmt.Errorf("scaffold: %w", err)
 		}
 		if created != nil {
@@ -207,9 +232,9 @@ func write(files []output, created func(string)) error {
 	return nil
 }
 
-// secretKey returns a new random secret key with the insecure prefix, as
+// SecretKey returns a new random secret key with the insecure prefix, as
 // Django's startproject writes into settings.py.
-func secretKey() (string, error) {
+func SecretKey() (string, error) {
 	var b strings.Builder
 	b.WriteString(secretKeyPrefix)
 	limit := big.NewInt(int64(len(secretKeyChars)))

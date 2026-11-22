@@ -50,7 +50,8 @@ func (r *Registry) newCommandFlags(e entry) *commandFlags {
 //
 // The flag package stops at the first positional argument, so the arguments
 // are split here with its rules (one or two dashes, "-name=value", a boolean
-// flag takes no separate value) and every flag is set through FlagSet.Set.
+// flag takes no separate value) and every flag is set through FlagSet.Set. An
+// OptionalValue takes the next argument only when that is no flag.
 func (cf *commandFlags) parse(args []string, takesArgs bool) (positional []string, help bool, err error) {
 	// unrecognized collects the unknown flags and, for a command without
 	// positional arguments, those as well, in the order given: argparse
@@ -87,6 +88,14 @@ func (cf *commandFlags) parse(args []string, takesArgs bool) (positional []strin
 		case isBoolFlag(f):
 			if !hasValue {
 				value = "true"
+			}
+		case !hasValue && isOptional(f):
+			value = f.Value.(OptionalValue).NoValue()
+			if i+1 < len(args) && args[i+1] != "--" {
+				if _, _, _, nextIsFlag := splitFlag(args[i+1]); !nextIsFlag {
+					i++
+					value = args[i]
+				}
 			}
 		case !hasValue:
 			if i+1 == len(args) {
@@ -127,6 +136,12 @@ func splitFlag(arg string) (name, value string, hasValue, isFlag bool) {
 func isBoolFlag(f *flag.Flag) bool {
 	b, ok := f.Value.(interface{ IsBoolFlag() bool })
 	return ok && b.IsBoolFlag()
+}
+
+// isOptional reports whether f may be given without a value.
+func isOptional(f *flag.Flag) bool {
+	_, ok := f.Value.(OptionalValue)
+	return ok
 }
 
 // valueProblem words the error of setting f to value. For the value types of

@@ -109,7 +109,7 @@ func TestProjectGoMod(t *testing.T) {
 		t.Fatalf("Project: %v", err)
 	}
 	// Without a replace path "go mod tidy" adds the latest release.
-	if got, want := readFile(t, dir, "go.mod"), "module myproj\n\ngo "+goVersion+"\n"; got != want {
+	if got, want := readFile(t, dir, "go.mod"), "module myproj\n\ngo "+GoVersion+"\n"; got != want {
 		t.Errorf("go.mod = %q, want %q", got, want)
 	}
 

@@ -3,6 +3,7 @@ package manage_test
 import (
 	"flag"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/oliverhaas/djangogo/manage"
@@ -283,4 +284,78 @@ func TestHelpRequestOfCommandWithoutFlags(t *testing.T) {
 
 	assertNoOutput(t, run(r, "legacy", "x", "-h").out)
 	assertStrings(t, cmd.args, []string{"x", "-h"})
+}
+
+// optionalList collects the values of a flag that may be given without one,
+// argparse's action="append" with nargs="?" and const="".
+type optionalList struct{ items *[]string }
+
+func (v optionalList) String() string {
+	if v.items == nil {
+		return ""
+	}
+	return strings.Join(*v.items, ",")
+}
+
+func (v optionalList) Set(s string) error {
+	*v.items = append(*v.items, s)
+	return nil
+}
+
+func (optionalList) NoValue() string { return "" }
+
+// excludingCommand has an option with an optional value.
+type excludingCommand struct{ exclude, args []string }
+
+func (*excludingCommand) Name() string  { return "excluding" }
+func (*excludingCommand) Help() string  { return "" }
+func (*excludingCommand) Usage() string { return "[arg ...]" }
+
+func (c *excludingCommand) Flags(fs *flag.FlagSet) {
+	c.exclude = nil
+	// One value for both names makes them aliases.
+	v := &optionalList{&c.exclude}
+	fs.Var(v, "exclude", "A directory to exclude.")
+	fs.Var(v, "x", "")
+}
+
+func (c *excludingCommand) Run(args []string) error {
+	c.args = args
+	return nil
+}
+
+// TestOptionalFlagValue: an OptionalValue takes the next argument unless it
+// is a flag or the terminator, and is set to its NoValue otherwise, as
+// argparse treats nargs="?". The help shows the value name in brackets.
+//
+// No Django test exists: argparse's own tests cover nargs="?".
+func TestOptionalFlagValue(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		exclude, rest []string
+	}{
+		{"alone", []string{"--exclude"}, []string{""}, nil},
+		{"with a value", []string{"--exclude", "a"}, []string{"a"}, nil},
+		{"with equals", []string{"-x=a"}, []string{"a"}, nil},
+		{"before a flag", []string{"--exclude", "-x", "b"}, []string{"", "b"}, nil},
+		{"before the terminator", []string{"-x", "--", "a"}, []string{""}, []string{"a"}},
+		{"after an argument", []string{"a", "--exclude"}, []string{""}, []string{"a"}},
+		{"single dash is a value", []string{"-x", "-"}, []string{"-"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newRegistry()
+			cmd := &excludingCommand{}
+			mustRegister(t, r, cmd)
+			got := run(r, append([]string{"excluding"}, tt.args...)...)
+			assertEqual(t, got, result{})
+			assertStrings(t, cmd.exclude, tt.exclude)
+			assertStrings(t, cmd.args, tt.rest)
+		})
+	}
+
+	r := newRegistry()
+	mustRegister(t, r, &excludingCommand{})
+	assertOutput(t, run(r, "excluding", "--help").out, "  -x, --exclude [EXCLUDE]\n")
 }
