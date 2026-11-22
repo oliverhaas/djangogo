@@ -337,6 +337,8 @@ func prefetchReverseO2O(
 		if base == nil {
 			base = newQuery(db, targetModel)
 		}
+		// The foreign key matches a row to its parent.
+		base = base.loading(step.rev.Field)
 		bs := prefetchBatchSize(db)
 		fkFilterKey := step.rev.Field.Column + "__in"
 		for start := 0; start < len(pks); start += bs {
@@ -412,6 +414,8 @@ func prefetchReverseFK(
 		if base == nil {
 			base = newQuery(db, targetModel)
 		}
+		// The foreign key matches a row to its parent.
+		base = base.loading(step.rev.Field)
 		bs := prefetchBatchSize(db)
 		fkFilterKey := step.rev.Field.Column + "__in"
 		for start := 0; start < len(pks); start += bs {
@@ -547,6 +551,8 @@ func prefetchGenericRows(ctx context.Context, db *DB, jobs []genericJob, customQ
 	if base == nil {
 		base = newQuery(db, targetModel)
 	}
+	// The generic foreign key matches a row to its parent.
+	base = base.loading(gr.ContentType, gr.ObjectID)
 	var convErr error
 	collect := func(row reflect.Value, _ *rowPlan, _ []any) {
 		job := 0

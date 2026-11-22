@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 )
 
@@ -42,12 +43,17 @@ func (qs *QuerySet[T]) insertOne(ctx context.Context, obj *T) error {
 	if err := syncLoadedRelations(db.Registry(), m, v, "save"); err != nil {
 		return err
 	}
+	if err := checkInsertDeferred(m, v); err != nil {
+		return err
+	}
 	applyDefaults(v, m.fields)
 	applyAutoNowOnCreate(v, m.fields, db.now())
 	if err := db.insert(ctx, m, []reflect.Value{v}, false); err != nil {
 		markForRollbackOnError(ctx, err)
 		return err
 	}
+	// The row holds every field of obj now.
+	setDeferred(m, v, nil)
 	return firePostSave(context.WithValue(ctx, createdKey{}, true), db, obj)
 }
 
@@ -73,6 +79,11 @@ func UpdateFields(keys ...string) SaveOption {
 // key is written. When no row has that primary key, the object is inserted
 // with it. PreSave and PostSave handlers are fired either way; Created tells a
 // PostSave handler which of the two happened.
+//
+// An object loaded with Defer or Only is saved as with UpdateFields of its
+// loaded fields, as Django does. A deferred field is written as well when it
+// no longer holds its zero value, which marks it as assigned; a deferred field
+// assigned its zero value keeps the stored value.
 //
 // Save is the per-object path. Update on a queryset writes only the fields it
 // is given, to every matching row, without stamps or signals.
@@ -100,6 +111,13 @@ func (qs *QuerySet[T]) Save(ctx context.Context, obj *T, opts ...SaveOption) err
 	if err != nil {
 		return err
 	}
+	forced := len(cfg.updateFields) > 0
+	if deferred := deferredOf(m, v); !forced && len(deferred) > 0 {
+		fields = slices.DeleteFunc(fields, func(f *Field) bool {
+			return slices.Contains(deferred, attname(f)) && v.Field(f.Index).IsZero()
+		})
+		forced = true
+	}
 	if err := firePreSave(ctx, db, obj); err != nil {
 		return err
 	}
@@ -120,7 +138,7 @@ func (qs *QuerySet[T]) Save(ctx context.Context, obj *T, opts ...SaveOption) err
 		return err
 	}
 	if !updated {
-		if len(cfg.updateFields) > 0 {
+		if forced {
 			err := fmt.Errorf("orm: save %s: save with update_fields did not affect any rows: %w",
 				m.Name(), ErrDoesNotExist)
 			markForRollbackOnError(ctx, err)
@@ -128,6 +146,7 @@ func (qs *QuerySet[T]) Save(ctx context.Context, obj *T, opts ...SaveOption) err
 		}
 		return qs.insertOne(ctx, obj)
 	}
+	markLoaded(m, v, fields)
 	return firePostSave(context.WithValue(ctx, createdKey{}, false), db, obj)
 }
 

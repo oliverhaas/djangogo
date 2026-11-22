@@ -37,6 +37,15 @@ type query struct {
 	// against replaces the columns of the model's own table with the values
 	// of one instance, for checking a constraint against it.
 	against map[*Field]*instanceValue
+	// deferred holds the keys of Defer and Only, Django's deferred_loading:
+	// the fields not to load, or the only fields to load when only is set.
+	deferred []string
+	only     bool
+	// keep holds fields that are loaded whatever Defer and Only say.
+	keep []*Field
+	// refresh reports the query of RefreshFromDB, which copies the loaded
+	// fields itself, so the model needs no orm.RelCache to load some of them.
+	refresh bool
 	err     error
 }
 
@@ -95,6 +104,8 @@ func (q *query) clone() *query {
 	cp.prefetchRelated = append([]Prefetch(nil), q.prefetchRelated...)
 	cp.prefetchedList = nil
 	cp.annotations = append([]annotation(nil), q.annotations...)
+	cp.deferred = slices.Clone(q.deferred)
+	cp.keep = slices.Clone(q.keep)
 	if q.values != nil {
 		v := *q.values
 		v.keys = append([]string(nil), q.values.keys...)
@@ -287,6 +298,9 @@ func (q *query) hasAggregates() bool {
 // rows.
 func (q *query) withValues(keys []string) *query {
 	cp := q.clone()
+	// Values loads the keys it names, as Django's set_values clears the
+	// deferred loading.
+	cp.deferred, cp.only = nil, false
 	cp.values = &valuesSpec{
 		keys:      append([]string(nil), keys...),
 		annotated: len(cp.annotationNames()),

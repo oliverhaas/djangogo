@@ -30,8 +30,10 @@ type agPublisher struct {
 	Duration  *time.Duration `orm:"blank;null"`
 }
 
-// agBook is tests/aggregation/models.py::Book.
+// agBook is tests/aggregation/models.py::Book. It embeds orm.RelCache for the
+// defer tests.
 type agBook struct {
+	orm.RelCache
 	ID        int64
 	Isbn      string `orm:"max_length=9"`
 	Name      string `orm:"max_length=255"`
@@ -419,14 +421,55 @@ func TestAggregationAnnotateBasic(t *testing.T) {
 	})
 }
 
+// agDeferredRows runs qs, whose rows defer the name of the book, loads the
+// name with RefreshFromDB, where Django loads it when read, and returns
+// row(b, annotations) for each row.
+func agDeferredRows(t *testing.T, db *orm.DB, qs *orm.QuerySet[agBook], row func(*agBook, map[string]any) []any) [][]any {
+	t.Helper()
+	rows := agAnnotated(t, qs)
+	out := make([][]any, len(rows))
+	for i := range rows {
+		b := &rows[i].Object
+		djangotest.AssertEqual(t, orm.DeferredFields(b), []string{"name"})
+		if err := orm.Query[agBook](db).RefreshFromDB(context.Background(), b, "name"); err != nil {
+			t.Fatalf("RefreshFromDB: %v", err)
+		}
+		out[i] = row(b, rows[i].Annotations)
+	}
+	return out
+}
+
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_annotate_defer
 func TestAggregationAnnotateDefer(t *testing.T) {
-	t.Skip("needs defer(), which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		f := agSetUp(t, db)
+		qs := orm.Query[agBook](db).Annotate("page_sum", orm.Sum("pages")).Defer("name").Filter("pk", f.b1.ID)
+		got := agDeferredRows(t, db, qs.OrderBy("pk"), func(b *agBook, ann map[string]any) []any {
+			return []any{b.ID, b.Isbn, ann["page_sum"], b.Name}
+		})
+		agAssertRows(t, got, [][]any{
+			{f.b1.ID, "159059725", int64(447), "The Definitive Guide to Django: Web Development Done Right"},
+		})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_annotate_defer_select_related
 func TestAggregationAnnotateDeferSelectRelated(t *testing.T) {
-	t.Skip("needs defer(), which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		f := agSetUp(t, db)
+		qs := orm.Query[agBook](db).SelectRelated("contact").Annotate("page_sum", orm.Sum("pages")).
+			Defer("name").Filter("pk", f.b1.ID)
+		got := agDeferredRows(t, db, qs.OrderBy("pk"), func(b *agBook, ann map[string]any) []any {
+			contact, ok := b.Contact.Object()
+			if !ok {
+				t.Fatal("the contact is not loaded")
+			}
+			return []any{b.ID, b.Isbn, ann["page_sum"], contact.Name, b.Name}
+		})
+		agAssertRows(t, got, [][]any{
+			{f.b1.ID, "159059725", int64(447), "Adrian Holovaty", "The Definitive Guide to Django: Web Development Done Right"},
+		})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_annotate_m2m

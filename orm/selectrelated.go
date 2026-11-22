@@ -9,12 +9,14 @@ import (
 // relations to load, parents before the relations below them. It follows
 // forward FK, forward O2O, and reverse O2O relations. The joins are shared
 // with the filters and the ordering: a relation that a filter already joins is
-// not joined again.
-func (c *compiler) resolveSelectRelated() ([]relPlan, error) {
+// not joined again. mask is the select mask of Defer and Only, which must
+// load each relation, as Django's select_related_descend requires.
+func (c *compiler) resolveSelectRelated(mask selectMask) ([]relPlan, error) {
 	var plans []relPlan
 	for _, name := range c.q.selectRelated {
 		model := c.q.model
 		parent := -1
+		cur := mask
 		var hops []hop
 		for _, part := range strings.Split(name, lookupSep) {
 			f, rev, rel := selectRelatedStep(model, part)
@@ -31,6 +33,25 @@ func (c *compiler) resolveSelectRelated() ([]relPlan, error) {
 						"'. Choices are: " + relationChoices(model),
 				}
 			}
+			var (
+				key     any = f
+				relName string
+				keep    *Field
+			)
+			if rev != nil {
+				key, relName, keep = rev, rev.Name, rev.Field
+			} else {
+				relName = f.Attr
+			}
+			sub, ok := cur[key]
+			if len(cur) > 0 && !ok {
+				return nil, &FieldError{
+					Model: c.q.model.Name(),
+					Message: "Field " + model.Name() + "." + relName +
+						" cannot be both deferred and traversed using select_related at the same time.",
+				}
+			}
+			cur = sub
 			hops = append(hops, rel.hops...)
 			joins := c.joins.setup(hops, nil)
 			j := joins[len(joins)-1]
@@ -42,7 +63,15 @@ func (c *compiler) resolveSelectRelated() ([]relPlan, error) {
 				}
 			}
 			if idx < 0 {
-				plans = append(plans, relPlan{field: f, rev: rev, join: j, parent: parent})
+				// The object of a reverse one-to-one relation gets the owner
+				// on its foreign key, which is loaded then.
+				fields, deferred := loadedFields(rel.target, sub, keep)
+				if err := checkDeferrable(rel.target, deferred); err != nil {
+					return nil, err
+				}
+				plans = append(plans, relPlan{
+					field: f, rev: rev, join: j, parent: parent, fields: fields, deferred: deferred,
+				})
 				idx = len(plans) - 1
 			}
 			parent = idx
@@ -135,15 +164,25 @@ func (q *query) rowsStmt() (*selectStmt, *rowPlan, error) {
 		})
 		plan.prefetchParentField = q.m2mPrefetch.parentPKField
 	}
-	for _, f := range q.model.fields {
+	mask, err := q.selectMask()
+	if err != nil {
+		return nil, nil, err
+	}
+	plan.fields, plan.deferred = loadedFields(q.model, mask, q.keep...)
+	if !q.refresh {
+		if err := checkDeferrable(q.model, plan.deferred); err != nil {
+			return nil, nil, err
+		}
+	}
+	for _, f := range plan.loaded() {
 		items = append(items, selectItem{node: c.baseColumn(f)})
 	}
-	plan.rels, err = c.resolveSelectRelated()
+	plan.rels, err = c.resolveSelectRelated(mask)
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, r := range plan.rels {
-		for _, f := range r.join.model.fields {
+		for _, f := range r.loaded() {
 			items = append(items, selectItem{node: colNode{join: r.join, field: f}})
 		}
 	}

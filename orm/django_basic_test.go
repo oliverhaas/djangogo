@@ -11,16 +11,33 @@ import (
 	"github.com/oliverhaas/djangogo/orm"
 )
 
-// basArticle is Django's basic.Article, without its Meta.ordering.
+// basArticle is Django's basic.Article, without its Meta.ordering. It embeds
+// orm.RelCache for the cached relations of the refresh tests.
 type basArticle struct {
+	orm.RelCache
 	ID       int64
 	Headline string `orm:"max_length=100;default=Default headline"`
 	PubDate  time.Time
 }
 
+// basFeaturedArticle is Django's basic.FeaturedArticle.
+type basFeaturedArticle struct {
+	ID      int64
+	Article orm.O2O[basArticle] `orm:"on_delete=cascade;related_name=featured"`
+}
+
+// basSelfRef is Django's basic.SelfRef, without the __str__ that the refresh
+// tests do not use.
+type basSelfRef struct {
+	ID           int64
+	Selfref      orm.FK[basSelfRef] `orm:"null;blank;on_delete=set_null;related_name=+"`
+	Article      orm.FK[basArticle] `orm:"null;blank;on_delete=set_null"`
+	ArticleCited orm.FK[basArticle] `orm:"null;blank;on_delete=set_null;related_name=cited"`
+}
+
 // basModels returns the models of Django's basic test app.
 func basModels() []any {
-	return []any{djangotest.App("basic", &basArticle{})}
+	return []any{djangotest.App("basic", &basArticle{}, &basFeaturedArticle{}, &basSelfRef{})}
 }
 
 // basSave saves an article and fails the test on an error.

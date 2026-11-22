@@ -81,6 +81,9 @@ func (qs *QuerySet[T]) BulkCreate(ctx context.Context, objs []*T, opts ...BulkOp
 		if err := syncLoadedRelations(db.Registry(), m, v, "bulk_create"); err != nil {
 			return err
 		}
+		if err := checkInsertDeferred(m, v); err != nil {
+			return err
+		}
 		applyDefaults(v, m.fields)
 		applyAutoNowOnCreate(v, m.fields, now)
 		if auto && v.Field(pk.Index).IsZero() {

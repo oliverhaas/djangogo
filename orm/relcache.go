@@ -37,6 +37,9 @@ func (r RelCache) relCachePtr() *relCache { return r.cache }
 type relCache struct {
 	ones  map[string]relOneEntry
 	lists map[string]relListEntry
+	// deferred holds the attnames of the fields that Defer or Only left
+	// unloaded. ClearRelCache keeps it.
+	deferred []string
 }
 
 // relOneEntry records one cached single-object lookup: either a pointer to the
@@ -54,7 +57,8 @@ type relListEntry struct {
 	model *Model
 }
 
-// ClearRelCache removes all cached relation entries from this instance.
+// ClearRelCache removes all cached relation entries from this instance. The
+// deferred fields that Defer and Only recorded stay.
 func (r *RelCache) ClearRelCache() {
 	if r == nil || r.cache == nil {
 		return

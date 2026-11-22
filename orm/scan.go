@@ -229,6 +229,18 @@ type relPlan struct {
 	rev    *ReverseRelation
 	join   *join
 	parent int // index of the owning plan, or -1 for the row itself
+	// fields are the fields of the related model to load, nil for all of
+	// them, and deferred the attnames of the others.
+	fields   []*Field
+	deferred []string
+}
+
+// loaded returns the fields of the related model that the plan loads.
+func (r *relPlan) loaded() []*Field {
+	if r.fields != nil {
+		return r.fields
+	}
+	return r.join.model.fields
 }
 
 // rowPlan describes the columns of a SELECT of model rows, in order: the
@@ -238,10 +250,22 @@ type rowPlan struct {
 	dialect             Dialect
 	model               *Model
 	prefetchParentField *Field
-	rels                []relPlan
-	annots              []string
-	annotTypes          []valueType
-	ncols               int
+	// fields are the fields of the model to load, nil for all of them, and
+	// deferred the attnames of the others, which each object records.
+	fields     []*Field
+	deferred   []string
+	rels       []relPlan
+	annots     []string
+	annotTypes []valueType
+	ncols      int
+}
+
+// loaded returns the fields of the model that the plan loads.
+func (p *rowPlan) loaded() []*Field {
+	if p.fields != nil {
+		return p.fields
+	}
+	return p.model.fields
 }
 
 // scan reads the current row. It returns the model struct, addressable, and
@@ -260,12 +284,12 @@ func (p *rowPlan) scanWithParent(rows *sql.Rows) (reflect.Value, any, []any, err
 	if p.prefetchParentField != nil {
 		targets = append(targets, &rawParentKey)
 	}
-	for _, f := range p.model.fields {
+	for _, f := range p.loaded() {
 		targets = append(targets, fieldTarget(p.dialect, elem, f))
 	}
 	holders := make([][]any, len(p.rels))
-	for i, r := range p.rels {
-		holders[i] = make([]any, len(r.join.model.fields))
+	for i := range p.rels {
+		holders[i] = make([]any, len(p.rels[i].loaded()))
 		for k := range holders[i] {
 			targets = append(targets, &holders[i][k])
 		}
@@ -282,6 +306,9 @@ func (p *rowPlan) scanWithParent(rows *sql.Rows) (reflect.Value, any, []any, err
 	}
 	if err := p.attach(elem, holders); err != nil {
 		return elem, nil, nil, err
+	}
+	if p.deferred != nil {
+		setDeferred(p.model, elem, p.deferred)
 	}
 	for i, t := range p.annotTypes {
 		v, err := convertValue(annots[i], t)
@@ -309,7 +336,8 @@ func (p *rowPlan) scanWithParent(rows *sql.Rows) (reflect.Value, any, []any, err
 // skipped.
 func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 	objs := make([]reflect.Value, len(p.rels))
-	for i, r := range p.rels {
+	for i := range p.rels {
+		r := &p.rels[i]
 		owner := elem
 		ownerModel := p.model
 		if r.parent >= 0 {
@@ -320,8 +348,9 @@ func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 			ownerModel = p.rels[r.parent].join.model
 		}
 		target := r.join.model
+		fields := r.loaded()
 		var pk any
-		for k, f := range target.fields {
+		for k, f := range fields {
 			if f == target.pk {
 				pk = holders[i][k]
 			}
@@ -337,10 +366,13 @@ func (p *rowPlan) attach(elem reflect.Value, holders [][]any) error {
 			return err
 		}
 		obj := reflect.New(target.goType)
-		for k, f := range target.fields {
+		for k, f := range fields {
 			if err := assignFieldScanned(p.dialect, f, obj.Elem().Field(f.Index), holders[i][k]); err != nil {
 				return fmt.Errorf("field %s.%s: %w", target.Name(), f.Name, err)
 			}
+		}
+		if r.deferred != nil {
+			setDeferred(target, obj.Elem(), r.deferred)
 		}
 		if r.rev != nil {
 			setReverseOneCacheModel(ownerModel, owner, r.rev.Name, obj.Interface(), target, false)

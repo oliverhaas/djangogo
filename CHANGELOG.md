@@ -877,6 +877,14 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   the name, as in Django:
   `Annotate("later", orm.F("start").Add(time.Hour)).Annotate("later",
   orm.F("later").Add(time.Minute))`.
+- ORM: `QuerySet.Defer` and `QuerySet.Only`, Django's `defer()` and `only()`,
+  also across `SelectRelated`, such as `Only("name", "author__name")`. A
+  deferred field holds its zero value and is not loaded when read. The model
+  must embed `orm.RelCache`, where `orm.DeferredFields(obj)` reads them from.
+  `Save` writes the loaded fields and the deferred fields that are not zero.
+- ORM: `QuerySet.RefreshFromDB(ctx, &obj, keys...)`, Django's
+  `refresh_from_db()` with the queryset as `from_queryset`, such as
+  `orm.Query[Article](db).SelectForUpdate().RefreshFromDB(ctx, &a)`.
 
 ### Changed
 
