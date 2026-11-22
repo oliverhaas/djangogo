@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -371,6 +372,38 @@ func (m *RelatedManager[Child]) Create(ctx context.Context, obj *Child) error {
 	}
 	m.clearPrefetch()
 	return nil
+}
+
+// GetOrCreate returns the related Child row matching args, or creates it with
+// its foreign key set to the owner, like Django's get_or_create() on a
+// related manager. It works as QuerySet.GetOrCreate.
+func (m *RelatedManager[Child]) GetOrCreate(ctx context.Context, defaults Defaults, args ...any) (Child, bool, error) {
+	if m.err != nil {
+		var zero Child
+		return zero, false, m.err
+	}
+	m.clearPrefetch()
+	return Query[Child](m.db).GetOrCreate(ctx, defaults, m.ownerArgs(args)...)
+}
+
+// UpdateOrCreate updates the related Child row matching args with defaults,
+// or creates it with its foreign key set to the owner, like Django's
+// update_or_create() on a related manager. It works as
+// QuerySet.UpdateOrCreate, CreateDefaults included.
+func (m *RelatedManager[Child]) UpdateOrCreate(ctx context.Context, defaults Defaults, args ...any) (Child, bool, error) {
+	if m.err != nil {
+		var zero Child
+		return zero, false, m.err
+	}
+	m.clearPrefetch()
+	return Query[Child](m.db).UpdateOrCreate(ctx, defaults, m.ownerArgs(args)...)
+}
+
+// ownerArgs returns the conditions args followed by the condition on the
+// foreign key to the owner, which also sets the key of a created row. The
+// caller's slice is left unchanged.
+func (m *RelatedManager[Child]) ownerArgs(args []any) []any {
+	return append(slices.Clip(args), m.rev.Field.Attr, m.ownerPK)
 }
 
 // Add associates saved Child objects with the owner in a single UPDATE, like

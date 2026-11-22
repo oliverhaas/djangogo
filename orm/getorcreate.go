@@ -15,6 +15,18 @@ import (
 // A value of type func() any is called when it is needed.
 type Defaults map[string]any
 
+// CreateDefaults holds the field values that UpdateOrCreate uses instead of
+// its defaults when it creates the row, like Django's create_defaults
+// argument. Pass it among the conditions:
+//
+//	orm.Query[Person](db).UpdateOrCreate(ctx, orm.Defaults{"seen": now},
+//		orm.CreateDefaults{"seen": now, "first_seen": now}, "name", "Ada")
+//
+// Without a CreateDefaults, or with a nil one, a created row takes the
+// defaults, as in Django. A value of type func() any is called when it is
+// needed.
+type CreateDefaults map[string]any
+
 // GetOrCreate returns the row matching the conditions, or creates it when
 // there is none, like Django's get_or_create(). It reports whether the row
 // was created. The conditions take the form of Filter; a new row is built
@@ -59,19 +71,21 @@ func (qs *QuerySet[T]) GetOrCreate(ctx context.Context, defaults Defaults, args 
 
 // UpdateOrCreate updates the row matching the conditions with defaults, or
 // creates it from the conditions and defaults when there is none, like
-// Django's update_or_create(). It reports whether the row was created. The
-// whole operation runs in one Atomic block, with the row locked where the
-// dialect supports it. An update goes through Save, restricted to the fields
-// in defaults and the auto_now fields, and fires the save signals. When
-// defaults name a private field, such as a generic foreign key, the update
-// writes every field, as in Django.
+// Django's update_or_create(). A CreateDefaults among the conditions replaces
+// defaults for the create. It reports whether the row was created. The whole
+// operation runs in one Atomic block, with the row locked where the dialect
+// supports it. An update goes through Save, restricted to the fields in
+// defaults and the auto_now fields, and fires the save signals. When defaults
+// name a private field, such as a generic foreign key, the update writes
+// every field, as in Django.
 func (qs *QuerySet[T]) UpdateOrCreate(ctx context.Context, defaults Defaults, args ...any) (T, bool, error) {
 	var (
 		out     T
 		created bool
 	)
+	args, createDefaults := splitCreateDefaults(defaults, args)
 	err := qs.q.db.Atomic(ctx, func(ctx context.Context) error {
-		obj, isNew, err := qs.SelectForUpdate().GetOrCreate(ctx, defaults, args...)
+		obj, isNew, err := qs.SelectForUpdate().GetOrCreate(ctx, createDefaults, args...)
 		if err != nil {
 			return err
 		}
@@ -90,6 +104,32 @@ func (qs *QuerySet[T]) UpdateOrCreate(ctx context.Context, defaults Defaults, ar
 		return zero, false, err
 	}
 	return out, created, nil
+}
+
+// splitCreateDefaults removes a CreateDefaults from the conditions args and
+// returns the defaults of a create: the CreateDefaults when args hold a
+// non-nil one, defaults otherwise.
+func splitCreateDefaults(defaults Defaults, args []any) ([]any, Defaults) {
+	conditions := make([]any, 0, len(args))
+	createDefaults := defaults
+	for i := 0; i < len(args); i++ {
+		switch a := args[i].(type) {
+		case string:
+			// A key and its value, which may be of any type.
+			conditions = append(conditions, a)
+			if i+1 < len(args) {
+				i++
+				conditions = append(conditions, args[i])
+			}
+		case CreateDefaults:
+			if a != nil {
+				createDefaults = Defaults(a)
+			}
+		default:
+			conditions = append(conditions, a)
+		}
+	}
+	return conditions, createDefaults
 }
 
 // applyUpdateDefaults sets the fields of obj, an instance of m, named in

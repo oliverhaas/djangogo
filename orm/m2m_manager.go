@@ -458,20 +458,23 @@ func (m *ManyManager[T]) GetOrCreate(ctx context.Context, defaults Defaults, arg
 }
 
 // UpdateOrCreate updates the related T row matching args with defaults, or
-// creates and associates one if none exists. Any ManyOption values in args
-// (such as ThroughDefaults) are applied when creating the association.
+// creates and associates one if none exists. A CreateDefaults in args
+// replaces defaults for the create, as in QuerySet.UpdateOrCreate. Any
+// ManyOption values in args (such as ThroughDefaults) are applied when
+// creating the association.
 func (m *ManyManager[T]) UpdateOrCreate(ctx context.Context, defaults Defaults, args ...any) (T, bool, error) {
 	var zero T
 	if m.core.err != nil {
 		return zero, false, m.core.err
 	}
 	filterArgs, opts := splitManyOptions(args)
+	filterArgs, createDefaults := splitCreateDefaults(defaults, filterArgs)
 	var (
 		obj     T
 		created bool
 	)
 	err := runInTx(ctx, m.core.db, func(txCtx context.Context) error {
-		got, isNew, err := m.GetOrCreate(txCtx, defaults, append(filterArgs, toAnyOptions(opts)...)...)
+		got, isNew, err := m.GetOrCreate(txCtx, createDefaults, append(filterArgs, toAnyOptions(opts)...)...)
 		if err != nil {
 			return err
 		}

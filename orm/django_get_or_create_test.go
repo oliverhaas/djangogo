@@ -3,6 +3,7 @@ package orm_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -18,7 +19,8 @@ import (
 //     as well.
 //   - Profile has its own primary key; Django makes the foreign key the
 //     primary key.
-//   - The many-to-many relations (Thing.tags, Book.authors) are left out.
+//   - Journalist, a child of Author through multi-table inheritance, is left
+//     out.
 
 type gocPerson struct {
 	ID             int64
@@ -52,6 +54,7 @@ type gocTag struct {
 type gocThing struct {
 	ID   int64
 	Name string `orm:"max_length=255"`
+	Tags orm.M2M[gocTag]
 }
 
 type gocPublisher struct {
@@ -59,10 +62,16 @@ type gocPublisher struct {
 	Name string `orm:"max_length=100"`
 }
 
+type gocAuthor struct {
+	ID   int64
+	Name string `orm:"max_length=100"`
+}
+
 type gocBook struct {
 	ID        int64
 	Name      string               `orm:"max_length=100"`
-	Publisher orm.FK[gocPublisher] `orm:"column=publisher_id_column"`
+	Authors   orm.M2M[gocAuthor]   `orm:"related_name=books"`
+	Publisher orm.FK[gocPublisher] `orm:"column=publisher_id_column;related_name=books"`
 	Updated   time.Time            `orm:"auto_now"`
 }
 
@@ -70,7 +79,7 @@ type gocBook struct {
 func gocModels() []any {
 	return []any{djangotest.App("get_or_create",
 		&gocPerson{}, &gocDefaultPerson{}, &gocManualPrimaryKeyTest{}, &gocProfile{},
-		&gocTag{}, &gocThing{}, &gocPublisher{}, &gocBook{})}
+		&gocTag{}, &gocThing{}, &gocPublisher{}, &gocAuthor{}, &gocBook{})}
 }
 
 // gocLennon creates the row of GetOrCreateTests.setUpTestData.
@@ -156,9 +165,71 @@ func TestGetOrCreateWithPKProperty(t *testing.T) {
 	})
 }
 
+// No Go counterpart: tests/get_or_create/tests.py::GetOrCreateTests.test_get_or_create_with_model_property_defaults
+// sets a Python property with a setter through defaults. A Go struct has no
+// properties.
+
 // Ported from Django: tests/get_or_create/tests.py::GetOrCreateTests.test_get_or_create_on_related_manager
 func TestGetOrCreateOnRelatedManager(t *testing.T) {
-	t.Skip("needs reverse related managers (publisher.books), which another work package adds")
+	djangotest.EachDB(t, gocModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		p := create(t, db, &gocPublisher{Name: "Acme Publishing"})
+		books := orm.RelatedSet[gocBook](db, p, "books")
+
+		// Create a book through the publisher.
+		book, created, err := books.GetOrCreate(ctx, nil, "name", "The Book of Ed & Fred")
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, true)
+		djangotest.AssertEqual(t, mustCount(t, books.QuerySet()), 1)
+
+		// The same call again creates nothing.
+		_, created, err = books.GetOrCreate(ctx, nil, "name", "The Book of Ed & Fred")
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, false)
+		djangotest.AssertEqual(t, mustCount(t, books.QuerySet()), 1)
+
+		// Add an author to the book.
+		authors := orm.Many[gocAuthor](db, &book, "authors")
+		ed, created, err := authors.GetOrCreate(ctx, nil, "name", "Ed")
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, true)
+		djangotest.AssertEqual(t, mustCount(t, authors.QuerySet()), 1)
+
+		// The same call again creates nothing.
+		_, created, err = authors.GetOrCreate(ctx, nil, "name", "Ed")
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, false)
+		djangotest.AssertEqual(t, mustCount(t, authors.QuerySet()), 1)
+
+		// Add a second author to the book.
+		fred, created, err := authors.GetOrCreate(ctx, nil, "name", "Fred")
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, true)
+		djangotest.AssertEqual(t, mustCount(t, authors.QuerySet()), 2)
+
+		// An author without books counts among all authors, not among those
+		// of the book.
+		create(t, db, &gocAuthor{Name: "Ted"})
+		djangotest.AssertEqual(t, mustCount(t, orm.Query[gocAuthor](db)), 3)
+		djangotest.AssertEqual(t, mustCount(t, authors.QuerySet()), 2)
+
+		// Create a book through an author.
+		edBooks := orm.Many[gocBook](db, &ed, "books")
+		_, created, err = edBooks.GetOrCreate(ctx, nil, "name", "Ed's Recipes", "publisher", p)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, true)
+		djangotest.AssertEqual(t, mustCount(t, edBooks.QuerySet()), 2)
+		djangotest.AssertEqual(t, mustCount(t, orm.Many[gocBook](db, &fred, "books").QuerySet()), 1)
+
+		// The primary key of the publisher instead of the instance.
+		_, created, err = edBooks.GetOrCreate(ctx, nil, "name", "The Great Book of Ed", "publisher_id", p.ID)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, true)
+		_, created, err = edBooks.GetOrCreate(ctx, nil, "name", "The Great Book of Ed", "publisher_id", p.ID)
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, false)
+		djangotest.AssertEqual(t, mustCount(t, books.QuerySet()), 3)
+	})
 }
 
 // Ported from Django: tests/get_or_create/tests.py::GetOrCreateTests.test_defaults_exact
@@ -212,6 +283,12 @@ func TestGetOrCreateCallableDefaultsNotCalled(t *testing.T) {
 		djangotest.AssertEqual(t, created, false)
 	})
 }
+
+// No Go counterpart: tests/get_or_create/tests.py::GetOrCreateTests.test_defaults_not_evaluated_unless_needed
+// passes a lazy object as defaults, which Python evaluates only when it reads
+// it. Go builds the Defaults map before the call; its func() any values are
+// called only when they are needed, which
+// TestGetOrCreateCallableDefaultsNotCalled checks.
 
 // Ported from Django: tests/get_or_create/tests.py::GetOrCreateTestsWithManualPKs.test_create_with_duplicate_primary_key
 func TestGetOrCreateWithDuplicatePrimaryKey(t *testing.T) {
@@ -281,17 +358,43 @@ func TestGetOrCreateIntegrityError(t *testing.T) {
 
 // Ported from Django: tests/get_or_create/tests.py::GetOrCreateThroughManyToMany.test_get_get_or_create
 func TestGetOrCreateThroughManyToManyGet(t *testing.T) {
-	t.Skip("needs many-to-many relations (thing.tags), which another work package adds")
+	djangotest.EachDB(t, gocModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		tag := create(t, db, &gocTag{Text: "foo"})
+		thing := create(t, db, &gocThing{Name: "a"})
+		tags := orm.Many[gocTag](db, thing, "tags")
+		djangotest.AssertEqual(t, tags.Add(ctx, tag), nil)
+		obj, created, err := tags.GetOrCreate(ctx, nil, "text", "foo")
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, false)
+		djangotest.AssertEqual(t, obj.ID, tag.ID)
+	})
 }
 
 // Ported from Django: tests/get_or_create/tests.py::GetOrCreateThroughManyToMany.test_create_get_or_create
 func TestGetOrCreateThroughManyToManyCreate(t *testing.T) {
-	t.Skip("needs many-to-many relations (thing.tags), which another work package adds")
+	djangotest.EachDB(t, gocModels(), func(t *testing.T, db *orm.DB) {
+		thing := create(t, db, &gocThing{Name: "a"})
+		tags := orm.Many[gocTag](db, thing, "tags")
+		obj, created, err := tags.GetOrCreate(context.Background(), nil, "text", "foo")
+		djangotest.AssertEqual(t, err, nil)
+		djangotest.AssertEqual(t, created, true)
+		djangotest.AssertEqual(t, obj.Text, "foo")
+		in := slices.ContainsFunc(mustAll(t, tags.QuerySet()), func(tag gocTag) bool { return tag.ID == obj.ID })
+		djangotest.AssertEqual(t, in, true)
+	})
 }
 
 // Ported from Django: tests/get_or_create/tests.py::GetOrCreateThroughManyToMany.test_something
 func TestGetOrCreateThroughManyToManySomething(t *testing.T) {
-	t.Skip("needs many-to-many relations (thing.tags), which another work package adds")
+	djangotest.EachDB(t, gocModels(), func(t *testing.T, db *orm.DB) {
+		create(t, db, &gocTag{Text: "foo"})
+		thing := create(t, db, &gocThing{Name: "a"})
+		_, _, err := orm.Many[gocTag](db, thing, "tags").GetOrCreate(context.Background(), nil, "text", "foo")
+		if !errors.Is(err, orm.ErrIntegrity) {
+			t.Fatalf("err = %v, want an integrity error", err)
+		}
+	})
 }
 
 // Ported from Django: tests/get_or_create/tests.py::InvalidCreateArgumentsTests.test_get_or_create_with_invalid_defaults
@@ -307,6 +410,6 @@ func TestGetOrCreateWithInvalidDefaults(t *testing.T) {
 func TestGetOrCreateWithInvalidKwargs(t *testing.T) {
 	djangotest.EachDB(t, gocModels(), func(t *testing.T, db *orm.DB) {
 		_, _, err := orm.Query[gocThing](db).GetOrCreate(context.Background(), nil, "name", "a", "nonexistent", "b")
-		assertFieldError(t, err, "annot resolve keyword 'nonexistent' into field. Choices are: id, name")
+		assertFieldError(t, err, "annot resolve keyword 'nonexistent' into field. Choices are: id, name, tags")
 	})
 }

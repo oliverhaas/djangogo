@@ -794,6 +794,11 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   outside a transaction.
 - ORM: `SelectRelated()` without names clears the relations of earlier
   calls, as Django's `select_related(None)` does. Before, it did nothing.
+- ORM: `UpdateOrCreate` takes an `orm.CreateDefaults` among its conditions,
+  Django's `create_defaults`: the values a created row takes instead of the
+  defaults. The many-to-many and generic relation managers take it too.
+- ORM: the reverse foreign key manager of `RelatedSet` has `GetOrCreate` and
+  `UpdateOrCreate`, which set the foreign key of a created row to the owner.
 
 ### Changed
 
