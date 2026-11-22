@@ -173,6 +173,50 @@ func cleanName(name string) (string, bool) {
 	return clean, true
 }
 
+// relativeName returns the template name that relative stands for, Django's
+// construct_relative_path. relative is the name as a tag has it, with the
+// quotes of a string literal. A name that does not start with "./" or "../"
+// comes back unchanged. current is the template of the tag, "" for a
+// template given as a string. allowSelf lets the result be current, as for a
+// literal in {% include %}.
+func relativeName(current, relative string, allowSelf bool) (string, error) {
+	name := strings.Trim(relative, `'"`)
+	if !strings.HasPrefix(name, "./") && !strings.HasPrefix(name, "../") {
+		return relative, nil
+	}
+	if current == "" {
+		msg := fmt.Sprintf("The relative path %s cannot be evaluated due to an unknown template origin.", relative)
+		return "", errors.New(msg)
+	}
+	self := strings.TrimLeft(current, "/")
+	name = path.Join(path.Dir(self), name)
+	if strings.HasPrefix(name, "../") {
+		msg := fmt.Sprintf("The relative path '%s' points outside the file hierarchy that template '%s' is in.",
+			relative, current)
+		return "", errors.New(msg)
+	}
+	if !allowSelf && name == self {
+		msg := fmt.Sprintf("The relative path '%s' was translated to template name '%s', the same template in which the tag appears.",
+			relative, current)
+		return "", errors.New(msg)
+	}
+	if len(relative) > 1 && (relative[0] == '"' || relative[0] == '\'') && relative[0] == relative[len(relative)-1] {
+		return quoteName(name), nil
+	}
+	return name, nil
+}
+
+// originName returns the template name of a pongo2 template name: "" for a
+// template given as a string, the template of a partial or of a variant.
+func originName(filename string) string {
+	if filename == stringName {
+		return ""
+	}
+	base, _ := parseVariant(filename)
+	base, _, _ = cutPartial(base)
+	return base
+}
+
 // find reads the first source that has name. When none has it, tried lists the
 // candidates and err is nil; err reports a source that has the template but
 // failed to deliver it (permissions, a directory in place of a file).

@@ -216,6 +216,15 @@ func (r *rewriter) block(tag []byte) []byte {
 		return nil
 	case "partialdef", "endpartialdef", "partial":
 		return partialSyntax(tag)
+	case "include":
+		if bits := splitBits(args); len(bits) > 0 {
+			arg, err := relativeName(r.name, bits[0], true)
+			if err != nil {
+				return syntaxError(err.Error())
+			}
+			head, _, _, tail := tagParts(tag)
+			tag = []byte(head + strings.Replace(args, bits[0], arg, 1) + tail)
+		}
 	case "block":
 		if bits := splitBits(args); len(bits) == 1 {
 			if r.blocks[bits[0]] {
@@ -289,7 +298,11 @@ func (r *rewriter) extendsSyntax(tag []byte) []byte {
 		return syntaxError("'extends' cannot appear more than once in the same template")
 	}
 	r.extended = true
-	parent, literal := bits[0], isLiteral(bits[0])
+	arg, err := relativeName(r.name, bits[0], false)
+	if err != nil {
+		return syntaxError(err.Error())
+	}
+	parent, literal := arg, isLiteral(arg)
 	if literal {
 		parent = parent[1 : len(parent)-1]
 	}
@@ -302,7 +315,7 @@ func (r *rewriter) extendsSyntax(tag []byte) []byte {
 		}
 	}
 	if literal {
-		r.extendsTag = r.expression(tag)
+		r.extendsTag = r.expression([]byte(head + " " + arg + " " + tail))
 		return nil
 	}
 	r.extendsVar = true

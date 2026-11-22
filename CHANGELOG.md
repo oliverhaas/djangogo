@@ -546,6 +546,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   Django: `{% extends layout %}` extends the template that `layout` names.
   This also works in a parent template, in an included template and in
   `RenderString`.
+- Templates: `{% extends %}` and `{% include %}` take a name relative to the
+  template of the tag, as in Django: in `blog/post.html`,
+  `{% extends "./base.html" %}` extends `blog/base.html` and
+  `{% include "../card.html" %}` includes `card.html`. A relative name that
+  leaves the template directory, or that names the template itself in
+  `{% extends %}`, fails with Django's message.
 
 ### Changed
 

@@ -50,7 +50,16 @@ func (n *includeTagNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.Template
 	if perr != nil {
 		return perr
 	}
-	name, tpl, err := st.engine.loadFirst(includeNames(nameVal))
+	names := includeNames(nameVal)
+	if nameVal.IsString() {
+		// A name from a variable may be relative to this template too.
+		rel, err := relativeName(originName(n.start.Filename), names[0], false)
+		if err != nil {
+			return ctx.OrigError(err, n.start)
+		}
+		names[0] = rel
+	}
+	name, tpl, err := st.engine.loadFirst(names)
 	if err != nil {
 		return ctx.OrigError(err, n.start)
 	}
