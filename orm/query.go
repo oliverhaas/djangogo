@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -71,8 +72,8 @@ type annotation struct {
 type valuesSpec struct {
 	// keys are the requested keys; empty means every field of the model.
 	keys []string
-	// annotated is the number of annotations that existed when Values was
-	// called. Annotations added later are appended to the output.
+	// annotated is the number of annotation names that existed when Values
+	// was called. Annotations added later are appended to the output.
 	annotated int
 	// groups reports that Values was called before any aggregate annotation, so
 	// the keys form the GROUP BY (Django's values().annotate() idiom).
@@ -253,16 +254,22 @@ func (q *query) annotate(args []any) *query {
 				return cp
 			}
 		}
-		for _, existing := range cp.annotations {
-			if existing.name == a.name {
-				cp.setErr(fmt.Errorf("orm: the annotation %q is already defined", a.name))
-				return cp
-			}
-		}
 		a.filters = len(cp.filters)
 		cp.annotations = append(cp.annotations, a)
 	}
 	return cp
+}
+
+// annotationNames returns the names of the annotations in the order they
+// were first annotated. A name annotated again keeps its place.
+func (q *query) annotationNames() []string {
+	var names []string
+	for _, a := range q.annotations {
+		if !slices.Contains(names, a.name) {
+			names = append(names, a.name)
+		}
+	}
+	return names
 }
 
 // hasAggregates reports whether any annotation holds an aggregate, which makes
@@ -282,7 +289,7 @@ func (q *query) withValues(keys []string) *query {
 	cp := q.clone()
 	cp.values = &valuesSpec{
 		keys:      append([]string(nil), keys...),
-		annotated: len(cp.annotations),
+		annotated: len(cp.annotationNames()),
 		groups:    !cp.hasAggregates(),
 	}
 	return cp

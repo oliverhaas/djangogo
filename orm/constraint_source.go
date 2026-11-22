@@ -247,6 +247,12 @@ func (g sourceWriter) expr(e Expr) (string, error) {
 			return "", err
 		}
 		return "orm.Cast(" + arg + ", " + castFieldSource(e.castTo) + ")", nil
+	case exprWrap:
+		arg, err := g.expr(*e.arg)
+		if err != nil {
+			return "", err
+		}
+		return "orm.ExpressionWrapper(" + arg + ", " + castFieldSource(e.castTo) + ")", nil
 	case exprCase:
 		return g.caseExpr(e)
 	case exprNot:

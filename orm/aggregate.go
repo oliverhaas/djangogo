@@ -211,7 +211,7 @@ func outerExpr(e Expr, named map[string]sqlNode, agg func(Expr) (sqlNode, error)
 		}
 		e.left, e.right = &left, &right
 		return e, nil
-	case exprFunc, exprCast:
+	case exprFunc, exprCast, exprWrap:
 		arg, err := outerExpr(*e.arg, named, agg)
 		if err != nil {
 			return Expr{}, err

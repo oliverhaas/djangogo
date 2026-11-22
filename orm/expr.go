@@ -35,15 +35,18 @@ const (
 	exprCase
 	// exprNot negates a boolean expression.
 	exprNot
+	// exprWrap reads its argument as a value of another type, Django's
+	// ExpressionWrapper.
+	exprWrap
 )
 
 // Expr is an SQL value expression: a field reference (F), a literal (Value),
 // an arithmetic or bitwise combination of expressions, an aggregate (Count,
 // Sum, Avg, Min, Max, StdDev, Variance, AnyValue, StringAgg), a text function
 // (Lower, Upper, Length, Trim, LTrim, RTrim, Concat), Abs, Coalesce,
-// Greatest, Least, Cast, a conditional expression (Case) or the negation of a
-// boolean expression (Not). It is immutable; every method
-// returns a new Expr.
+// Greatest, Least, Cast, a conditional expression (Case), the negation of a
+// boolean expression (Not) or an expression of a given type
+// (ExpressionWrapper). It is immutable; every method returns a new Expr.
 //
 // An Expr can be the value of a filter, so a column is compared with another
 // column or with a computed value:
@@ -80,7 +83,8 @@ type Expr struct {
 	// args are the arguments of an exprCall, and of an exprAggregate the
 	// arguments after the first, such as the delimiter of StringAgg.
 	args []Expr
-	// castTo is the field whose type an exprCast converts to.
+	// castTo is the field whose type an exprCast converts to, and the field
+	// whose type an exprWrap reads its argument as.
 	castTo *Field
 	// whens are the branches of an exprCase, and def its Default, nil
 	// without one. def is also the Default of an aggregate.
@@ -343,7 +347,7 @@ func (e Expr) containsAggregate() bool {
 		return true
 	case exprBinary:
 		return e.left.containsAggregate() || e.right.containsAggregate()
-	case exprFunc, exprCast, exprNot:
+	case exprFunc, exprCast, exprNot, exprWrap:
 		return e.arg.containsAggregate()
 	case exprNode:
 		return e.node.aggregate()

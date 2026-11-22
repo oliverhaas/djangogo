@@ -150,6 +150,21 @@ func Cast(arg any, to Field) Expr {
 	return Expr{kind: exprCast, arg: &a, castTo: &f}
 }
 
+// ExpressionWrapper returns expr read as a value of the field output, Django's
+// ExpressionWrapper. It gives the type of a combination that the ORM does not
+// infer, such as a duration times a number, and of a NULL, which has no type
+// of its own. Of output only Kind counts:
+//
+//	Annotate("doubled", orm.ExpressionWrapper(orm.F("duration").Mul(2), orm.Field{Kind: orm.KindDuration}))
+//	orm.ExpressionWrapper(orm.Value(nil), orm.Field{Kind: orm.KindDate})
+//
+// The second is Django's Value(None, output_field=DateField()). Unlike Cast,
+// the wrapper converts nothing: the SQL is that of expr.
+func ExpressionWrapper(expr Expr, output Field) Expr {
+	f := Field{Kind: output.Kind}
+	return Expr{kind: exprWrap, arg: &expr, castTo: &f}
+}
+
 // CastDialect is an optional capability of a Dialect whose CAST does not
 // convert every value as Django's Cast does, such as SQLite's, which has no
 // date and time types. CastSQL returns the SQL that converts a value of kind
@@ -170,7 +185,7 @@ func (e Expr) outputKind(input Kind) Kind {
 			return e.output
 		}
 		return e.arg.outputKind(input)
-	case exprCast:
+	case exprCast, exprWrap:
 		return e.castTo.Kind
 	case exprNot:
 		return KindBool

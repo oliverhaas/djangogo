@@ -18,9 +18,11 @@ type compiler struct {
 	d     Dialect
 	joins *joinSet
 	// annots holds the resolved annotations by name; annotNames keeps their
-	// order.
+	// order. resolved is the number of the query's annotations resolved so
+	// far.
 	annots     map[string]sqlNode
 	annotNames []string
+	resolved   int
 	// used collects the joins touched while one filter condition is resolved.
 	used []*join
 	// reuse tracks multi-valued joins reusable within the current Filter call;
@@ -64,9 +66,11 @@ func (q *query) compile() (*compiler, error) {
 }
 
 // resolveAnnotations resolves the annotations that were added before the
-// given number of Filter and Exclude calls and are not resolved yet.
+// given number of Filter and Exclude calls and are not resolved yet. An
+// annotation of a name that is annotated already replaces the earlier one in
+// its place, and reads it by that name, as Django's annotate does.
 func (c *compiler) resolveAnnotations(filters int) error {
-	for _, a := range c.q.annotations[len(c.annotNames):] {
+	for _, a := range c.q.annotations[c.resolved:] {
 		if a.filters > filters {
 			return nil
 		}
@@ -74,8 +78,11 @@ func (c *compiler) resolveAnnotations(filters int) error {
 		if err != nil {
 			return err
 		}
+		if _, ok := c.annots[a.name]; !ok {
+			c.annotNames = append(c.annotNames, a.name)
+		}
 		c.annots[a.name] = n
-		c.annotNames = append(c.annotNames, a.name)
+		c.resolved++
 	}
 	return nil
 }
@@ -151,7 +158,11 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		if err := c.checkCombinedTypes(e.op, left.vtype(), right.vtype()); err != nil {
 			return nil, err
 		}
-		return binaryNode{op: e.op, left: left, right: right}, nil
+		n := binaryNode{op: e.op, left: left, right: right}
+		if err := c.setTemporalTemplate(&n); err != nil {
+			return nil, err
+		}
+		return n, nil
 	case exprAggregate:
 		return c.resolveAggregate(e)
 	case exprFunc:
@@ -174,6 +185,12 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 			return nil, err
 		}
 		return convertNode{inner: arg, to: e.castTo, input: valueKind(arg.vtype())}, nil
+	case exprWrap:
+		arg, err := c.resolveExpr(*e.arg)
+		if err != nil {
+			return nil, err
+		}
+		return typedNode{node: arg, typ: fieldValueType(e.castTo)}, nil
 	case exprCase:
 		return c.resolveCase(e)
 	case exprNot:
@@ -195,6 +212,39 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 // errNegateNonConditional refuses the negation of an expression that is not
 // boolean, as Django's NegatedExpression does.
 var errNegateNonConditional = errors.New("orm: cannot negate non-conditional expressions")
+
+// setTemporalTemplate gives n the SQL of the dialect for the combination of a
+// duration with a value of another type, or for the difference of two dates,
+// two datetimes or two times of day, as Django's CombinedExpression becomes a
+// DurationExpression or a TemporalSubtraction. A side of unknown type counts
+// as another type than a duration. On a dialect whose duration arithmetic is
+// a function, a product or a quotient of a duration with a value that is not
+// a number is an error, as in Django's DurationExpression.as_sqlite.
+func (c *compiler) setTemporalTemplate(n *binaryNode) error {
+	td, ok := c.d.(TemporalDialect)
+	if !ok {
+		return nil
+	}
+	left, right := n.left.vtype(), n.right.vtype()
+	switch {
+	case (left == typeDuration || right == typeDuration) && left != right:
+		tmpl, err := td.DurationSQL(n.op)
+		if err != nil || tmpl == "" {
+			return err
+		}
+		numeric := func(t valueType) bool {
+			return t == typeInt || t == typeFloat || t == typeDecimal || t == typeDuration
+		}
+		if (n.op == "*" || n.op == "/") && left != typeUnknown && right != typeUnknown &&
+			(!numeric(left) || !numeric(right)) {
+			return fmt.Errorf("orm: invalid arguments for operator %s", n.op)
+		}
+		n.tmpl = tmpl
+	case n.op == "-" && left == right && (left == typeDate || left == typeTime || left == typeTimeOfDay):
+		n.tmpl = td.SubtractTemporalSQL(valueKind(left))
+	}
+	return nil
+}
 
 // checkCombinedTypes refuses arithmetic between a float and a decimal, whose
 // result type Django cannot infer either.

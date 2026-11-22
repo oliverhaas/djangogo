@@ -87,6 +87,20 @@ func (Dialect) LiteralSQL(placeholder string, v any) string {
 	}
 }
 
+// DurationSQL leaves the arithmetic of durations to the operators of
+// PostgreSQL, which has an interval type.
+func (Dialect) DurationSQL(string) (string, error) { return "", nil }
+
+// SubtractTemporalSQL returns the difference of two dates as an interval,
+// Django's subtract_temporals: PostgreSQL gives the difference of two dates
+// as a number of days.
+func (Dialect) SubtractTemporalSQL(kind orm.Kind) string {
+	if kind == orm.KindDate {
+		return "(interval '1 day' * ({} - {}))"
+	}
+	return ""
+}
+
 // ClassifyError maps a constraint violation reported by the server to its
 // kind, by its SQLSTATE.
 func (Dialect) ClassifyError(err error) orm.IntegrityKind {

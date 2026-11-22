@@ -228,9 +228,10 @@ func (q *query) totallyOrdered() bool {
 	return false
 }
 
-// annotation returns the expression of the annotation name.
+// annotation returns the expression of the annotation name, the latest one
+// when the name is annotated more than once.
 func (q *query) annotation(name string) (Expr, bool) {
-	for _, a := range q.annotations {
+	for _, a := range slices.Backward(q.annotations) {
 		if a.name == name {
 			return a.expr, true
 		}
@@ -301,6 +302,12 @@ func (qs *QuerySet[T]) SelectForUpdate() *QuerySet[T] {
 // values().annotate() idiom for GROUP BY:
 //
 //	Query[Book](db).Values("author").Annotate("n", orm.Count("id"))
+//
+// Annotating a name again replaces the earlier annotation in its place, and
+// the new expression reads the earlier value by that name:
+//
+//	Annotate("later", orm.F("start").Add(time.Hour)).
+//		Annotate("later", orm.F("later").Add(time.Minute))
 //
 // The model struct has no place for an annotation value; read it with Values,
 // ValuesList, or AllAnnotated.

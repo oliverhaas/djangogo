@@ -190,7 +190,8 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `NullsNotDistinct`, which PostgreSQL 15 needs. A migration writes the
   condition and expressions of a constraint as Go code, which covers `Q`,
   `F`, `Value`, arithmetic, the text functions, `Abs`, `Coalesce`, `Concat`,
-  `Greatest`, `Least`, `Cast`, `Case` and `Not` but no aggregate.
+  `Greatest`, `Least`, `Cast`, `ExpressionWrapper`, `Case` and `Not` but no
+  aggregate.
 - **Database:** one database per application.
 - **Querying:** the date and time transforms (`__year`, `__date`, `__hour`
   and the others) read a datetime in UTC. Besides the aggregates, the

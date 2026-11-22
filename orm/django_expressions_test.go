@@ -42,20 +42,22 @@ type expNumber struct {
 	Integer int64 `orm:"column=the_integer"`
 }
 
-// expExperiment is Django's expressions.Experiment without estimated_time
-// (DurationField has no kind). Its date fields are time.Time.
+// expExperiment is Django's expressions.Experiment.
 type expExperiment struct {
-	ID        int64
-	Name      string `orm:"max_length=24"`
-	Assigned  time.Time
-	Completed time.Time
-	Start     time.Time
-	End       time.Time
-	Scalar    int64 `orm:"null"`
+	ID            int64
+	Name          string `orm:"max_length=24"`
+	Assigned      orm.Date
+	Completed     orm.Date
+	EstimatedTime time.Duration
+	Start         time.Time
+	End           time.Time
+	Scalar        int64 `orm:"null"`
 }
 
-// Meta gives the table Django's mixed-case name.
-func (expExperiment) Meta() orm.Meta { return orm.Meta{Table: "expressions_ExPeRiMeNt"} }
+// Meta gives the table Django's mixed-case name and orders by name.
+func (expExperiment) Meta() orm.Meta {
+	return orm.Meta{Table: "expressions_ExPeRiMeNt", Ordering: []string{"name"}}
+}
 
 // expResult is Django's expressions.Result.
 type expResult struct {
@@ -64,10 +66,10 @@ type expResult struct {
 	ResultTime time.Time
 }
 
-// expTime is Django's expressions.Time, its TimeField held as a time.Time.
+// expTime is Django's expressions.Time.
 type expTime struct {
 	ID   int64
-	Time time.Time `orm:"null"`
+	Time *orm.Time `orm:"null"`
 }
 
 // expSimulationRun is Django's expressions.SimulationRun.
@@ -75,7 +77,7 @@ type expSimulationRun struct {
 	ID       int64
 	Start    orm.FK[expTime] `orm:"null"`
 	End      orm.FK[expTime] `orm:"null"`
-	Midpoint time.Time
+	Midpoint orm.Time
 }
 
 // expModels returns the models of Django's expressions test app that the
@@ -601,16 +603,15 @@ func TestExpressionsInLookupAllowsFExpressionsForIntegers(t *testing.T) {
 	})
 }
 
-// Django's TimeField is a time.Time here, and the join type is read from the
-// SQL text: the filter joins with INNER JOIN, and the exclude with LEFT OUTER
-// JOIN.
+// The join type is read from the SQL text: the filter joins with INNER JOIN,
+// and the exclude with LEFT OUTER JOIN.
 //
 // Ported from Django: tests/expressions/tests.py::IterableLookupInnerExpressionsTests.test_expressions_range_lookups_join_choice
 func TestExpressionsRangeLookupsJoinChoice(t *testing.T) {
 	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
-		midpoint := time.Date(1, 1, 1, 13, 0, 0, 0, time.UTC)
-		t1 := create(t, db, &expTime{Time: time.Date(1, 1, 1, 12, 0, 0, 0, time.UTC)})
-		t2 := create(t, db, &expTime{Time: time.Date(1, 1, 1, 14, 0, 0, 0, time.UTC)})
+		midpoint := orm.NewTime(13, 0, 0, 0)
+		t1 := create(t, db, &expTime{Time: new(orm.NewTime(12, 0, 0, 0))})
+		t2 := create(t, db, &expTime{Time: new(orm.NewTime(14, 0, 0, 0))})
 		s1 := create(t, db, &expSimulationRun{
 			Start: fkTo[expTime](t1.ID), End: fkTo[expTime](t2.ID), Midpoint: midpoint,
 		})
@@ -690,7 +691,7 @@ func TestExpressionsRangeLookupAllowsFExpressionsForDates(t *testing.T) {
 		end := time.Date(2016, 2, 5, 15, 0, 0, 0, time.UTC)
 		experiment := func(name string) *expExperiment {
 			return create(t, db, &expExperiment{
-				Name: name, Assigned: day(2016, 2, 3), Start: start, End: end, Completed: day(2016, 2, 5),
+				Name: name, Assigned: orm.NewDate(2016, 2, 3), Start: start, End: end, Completed: orm.NewDate(2016, 2, 5),
 			})
 		}
 		experiment1 := experiment("Integrity testing")
@@ -830,10 +831,10 @@ func TestExpressionsInsensitivePatternsEscape(t *testing.T) {
 // FieldTransformTests.setUpTestData.
 func expFieldTransformSetUp(t *testing.T, db *orm.DB) {
 	t.Helper()
-	sday := day(2010, 6, 25)
+	sday := orm.NewDate(2010, 6, 25)
 	stime := time.Date(2010, 6, 25, 12, 15, 30, 747000000, time.UTC)
 	create(t, db, &expExperiment{
-		Name: "Experiment 1", Assigned: sday, Completed: sday.AddDate(0, 0, 2),
+		Name: "Experiment 1", Assigned: sday, Completed: orm.NewDate(2010, 6, 27),
 		Start: stime, End: stime.AddDate(0, 0, 2),
 	})
 }

@@ -854,6 +854,29 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `GROUP BY`. Model formsets and inline formsets of the admin use `None` for a
   parent without a primary key and an inline without the view or change
   permission.
+- ORM: arithmetic of dates, datetimes, times of day and durations, typed as
+  in Django: a date or a datetime plus or minus a duration is a datetime, a
+  time of day plus or minus a duration is a time of day, and the difference
+  of two dates, two datetimes or two times of day is a duration, such as
+  `Annotate("duration", orm.F("end").Sub(orm.F("start")))` or
+  `Filter("end__lt", orm.F("start").Add(orm.F("estimated_time")))`. A
+  duration multiplies and divides by a number. A filter on such an
+  annotation binds its value as the database stores the type, such as
+  `Filter("duration__gte", 5*24*time.Hour)`. The SQLite backend registers
+  Django's `django_format_dtdelta`, `django_timestamp_diff` and
+  `django_time_diff` functions for this, and refuses `*` and `/` of a
+  duration and a value that is not a number, as Django does. On SQLite a
+  time of day plus a duration wraps around midnight as on PostgreSQL, where
+  Django returns NULL.
+- ORM: `orm.ExpressionWrapper`, Django's `ExpressionWrapper`, gives an
+  expression a type without a cast, such as a date NULL:
+  `orm.ExpressionWrapper(orm.Value(nil), orm.Field{Kind: orm.KindDate})`. A
+  migration writes it in the expressions of a constraint.
+- ORM: `Annotate` with a name that an earlier `Annotate` used replaces that
+  annotation in its place, and the new expression reads the earlier value by
+  the name, as in Django:
+  `Annotate("later", orm.F("start").Add(time.Hour)).Annotate("later",
+  orm.F("later").Add(time.Minute))`.
 
 ### Changed
 

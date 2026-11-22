@@ -310,16 +310,45 @@ func (n rawNode) vtype() valueType { return n.typ }
 // aggregate is false: fixed text is never an aggregate here.
 func (rawNode) aggregate() bool { return false }
 
-// binaryNode combines two expressions with an arithmetic operator.
+// binaryNode combines two expressions with an arithmetic operator. tmpl, when
+// set, is the SQL of the dialect for a combination of dates, times and
+// durations (TemporalDialect).
 type binaryNode struct {
 	op          string
 	left, right sqlNode
+	tmpl        string
 }
 
-// render writes "(left op right)". The parentheses keep the precedence of
-// nested combinations as it was written in Go. The operators without a common
-// infix form are written as functions or identities that both dialects run.
+// TemporalDialect is an optional capability of a Dialect whose arithmetic on
+// dates, datetimes, times of day and durations is not that of the SQL
+// operators, Django's combine_duration_expression and subtract_temporals.
+// Each method returns a template in which the first "{}" stands for the left
+// side and the second "{}" for the right side, or "" for "(left op right)".
+//
+// DurationSQL is the SQL of left op right where one side is a duration and
+// the other is not. An error refuses the operator. SubtractTemporalSQL is
+// the SQL of left - right where both sides have kind KindDate, KindDateTime
+// or KindTime; the result is a duration.
+type TemporalDialect interface {
+	DurationSQL(op string) (template string, err error)
+	SubtractTemporalSQL(kind Kind) (template string)
+}
+
+// render writes "(left op right)", or tmpl with the sides in its "{}". The
+// parentheses keep the precedence of nested combinations as it was written in
+// Go. The operators without a common infix form are written as functions or
+// identities that both dialects run.
 func (n binaryNode) render(w *sqlWriter) {
+	if n.tmpl != "" {
+		before, rest, _ := strings.Cut(n.tmpl, "{}")
+		middle, after, _ := strings.Cut(rest, "{}")
+		w.write(before)
+		n.left.render(w)
+		w.write(middle)
+		n.right.render(w)
+		w.write(after)
+		return
+	}
 	switch n.op {
 	case opPow:
 		w.write("POWER(")
@@ -357,15 +386,47 @@ func (n binaryNode) render(w *sqlWriter) {
 	w.write(")")
 }
 
-// vtype is float when either side is float, decimal when either side is
-// decimal, and otherwise the type of the first side that has a known type, as
-// Django combines an integer with a float or a decimal.
+// vtype is the type of Django's table of temporal combinations, and
+// otherwise float when either side is float, decimal when either side is
+// decimal, and the type of the first side that has a known type, as Django
+// combines an integer with a float or a decimal.
 func (n binaryNode) vtype() valueType {
+	if t, ok := temporalResult(n.op, n.left.vtype(), n.right.vtype()); ok {
+		return t
+	}
 	t := commonType([]sqlNode{n.left, n.right})
 	if t != typeFloat && (n.left.vtype() == typeDecimal || n.right.vtype() == typeDecimal) {
 		return typeDecimal
 	}
 	return t
+}
+
+// temporalResult returns the type of left op right by Django's table of
+// combinations of dates, datetimes, times of day and durations: a date or a
+// datetime shifted by a duration is a datetime, a time of day shifted by a
+// duration is a time of day, and the difference of two dates or datetimes, or
+// of two times of day, is a duration. ok is false for the other combinations.
+func temporalResult(op string, left, right valueType) (valueType, bool) {
+	dated := func(t valueType) bool { return t == typeDate || t == typeTime }
+	switch op {
+	case "+":
+		switch {
+		case dated(left) && right == typeDuration, left == typeDuration && dated(right):
+			return typeTime, true
+		case left == typeTimeOfDay && right == typeDuration, left == typeDuration && right == typeTimeOfDay:
+			return typeTimeOfDay, true
+		}
+	case "-":
+		switch {
+		case dated(left) && right == typeDuration:
+			return typeTime, true
+		case left == typeTimeOfDay && right == typeDuration:
+			return typeTimeOfDay, true
+		case dated(left) && dated(right), left == typeTimeOfDay && right == typeTimeOfDay:
+			return typeDuration, true
+		}
+	}
+	return typeUnknown, false
 }
 
 // commonType is the type that the values of nodes are read as together: float

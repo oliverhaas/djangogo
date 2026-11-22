@@ -328,6 +328,18 @@ func (c *compiler) addQ(cond Cond, currentNegated bool) (*whereNode, []*join, er
 	return node, promoter.update(c.joins), nil
 }
 
+// annotationField returns the field that a value compared with the
+// annotation n binds as: a date, a datetime, a time of day or a duration binds
+// as the dialect stores that type, such as a duration in microseconds on
+// SQLite. It is nil for other types, whose values bind as they are.
+func annotationField(n sqlNode) *Field {
+	switch t := n.vtype(); t {
+	case typeDate, typeTime, typeTimeOfDay, typeDuration:
+		return &Field{Kind: valueKind(t)}
+	}
+	return nil
+}
+
 // buildFilter resolves one key/value condition. It returns the condition and
 // the joins it needs to be INNER. It ports Django's Query.build_filter.
 //
@@ -353,7 +365,7 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 		if err != nil {
 			return nil, nil, err
 		}
-		pred, err := c.buildPredicate(lookup, n, nil, value, nil)
+		pred, err := c.buildPredicate(lookup, n, annotationField(n), value, nil)
 		if err != nil {
 			return nil, nil, err
 		}
