@@ -25,9 +25,7 @@ type Parent struct {
 	Name string `orm:"max_length=100"`
 }
 
-// Child is the Child model of Django's tests/inline_formsets/models.py. The
-// Go ORM has no Meta.constraints, so its UniqueConstraint unique_parents on
-// (mother, father) is a unique_together.
+// Child is the Child model of Django's tests/inline_formsets/models.py.
 type Child struct {
 	ID     int64
 	Mother orm.FK[Parent] `orm:"related_name=mothers_children"`
@@ -36,8 +34,12 @@ type Child struct {
 	Name   string `orm:"max_length=100"`
 }
 
-// Meta declares unique_together on (mother, father).
-func (Child) Meta() orm.Meta { return orm.Meta{UniqueTogether: [][]string{{"Mother", "Father"}}} }
+// Meta declares the unique constraint on the expressions mother and father.
+func (Child) Meta() orm.Meta {
+	return orm.Meta{Constraints: []orm.Constraint{
+		orm.UniqueConstraint{Expressions: []orm.Expr{orm.F("mother"), orm.F("father")}, Name: "unique_parents"},
+	}}
+}
 
 // Poet is the Poet model of Django's tests/inline_formsets/models.py.
 type Poet struct {

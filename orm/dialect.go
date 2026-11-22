@@ -23,6 +23,9 @@ type Features struct {
 	// SelectForUpdate reports that SELECT ... FOR UPDATE is supported. On a
 	// dialect without it SelectForUpdate is a no-op.
 	SelectForUpdate bool
+	// UniqueNullsNotDistinct reports that a unique index can treat NULL
+	// values as equal (NULLS NOT DISTINCT, PostgreSQL 15).
+	UniqueNullsNotDistinct bool
 }
 
 // FeatureDialect is an optional capability of a Dialect: it reports the

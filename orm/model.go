@@ -29,6 +29,7 @@ type Model struct {
 	ordering              []string
 	uniqueTogether        [][]string
 	indexes               []Index
+	constraints           []Constraint
 	verboseName           string
 	verboseNamePlural     string
 }

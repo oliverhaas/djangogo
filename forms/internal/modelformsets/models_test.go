@@ -266,6 +266,21 @@ type Host struct {
 // String returns the hostname.
 func (h Host) String() string { return h.Hostname }
 
+// ConstraintPrice is Price with a unique constraint in place of
+// unique_together.
+type ConstraintPrice struct {
+	ID       int64
+	Price    orm.Decimal `orm:"max_digits=10;decimal_places=2"`
+	Quantity int         `orm:"type=positive_int"`
+}
+
+// Meta declares the unique constraint on (price, quantity).
+func (ConstraintPrice) Meta() orm.Meta {
+	return orm.Meta{Constraints: []orm.Constraint{
+		orm.UniqueConstraint{Fields: []string{"price", "quantity"}, Name: "price_quantity_uniq"},
+	}}
+}
+
 // models returns the models of the ported tests.
 func models() []any {
 	return []any{
@@ -273,7 +288,7 @@ func models() []any {
 			&Author{}, &Book{}, &BookWithCustomPK{}, &Editor{}, &BookWithOptionalAltEditor{},
 			&AuthorMeeting{}, &CustomPrimaryKey{}, &Place{}, &Owner{}, &Location{}, &OwnerProfile{},
 			&Product{}, &Price{}, &Repository{}, &Revision{}, &Person{}, &Team{}, &Player{},
-			&Poet{}, &Poem{}, &Post{}, &AutoPKParent{}, &UUIDPKChildOfAutoPKParent{},
+			&Poet{}, &Poem{}, &Post{}, &AutoPKParent{}, &UUIDPKChildOfAutoPKParent{}, &ConstraintPrice{},
 		),
 		djangotest.App("model_formsets_regress", &User{}, &UserSite{}, &Network{}, &Host{}),
 	}

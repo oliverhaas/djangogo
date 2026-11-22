@@ -287,11 +287,8 @@ func TestConstraintRefsInlineForeignkeyField(t *testing.T) {
 		for _, e := range formset.Errors() {
 			errs = append(errs, e.Messages())
 		}
-		// FIXME-PORT: Go: the ORM has no Meta.constraints, so the check is
-		// the unique_together of Child; Django: "Constraint “unique_parents”
-		// is violated." from the UniqueConstraint.
 		djangotest.AssertEqual(t, errs, []map[string][]string{
-			{"__all__": {"Child with this Mother and Father already exists."}},
+			{"__all__": {"Constraint “unique_parents” is violated."}},
 		})
 	})
 }

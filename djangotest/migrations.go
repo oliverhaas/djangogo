@@ -3,6 +3,7 @@ package djangotest
 import (
 	"context"
 	"database/sql"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -304,6 +305,65 @@ func AssertUniqueConstraintNotExists(t TB, db *orm.DB, table string, columns ...
 	t.Helper()
 	if hasIndexOn(t, db, table, columns, true) {
 		t.Errorf("table %q has a unique constraint on (%s)", table, strings.Join(columns, ", "))
+	}
+}
+
+// constraintNamePattern finds the named table constraints in the CREATE TABLE
+// statement that SQLite keeps.
+var constraintNamePattern = regexp.MustCompile(`CONSTRAINT\s+"((?:[^"]|"")+)"`)
+
+// hasConstraintNamed reports whether the table has a constraint or an index of
+// that name. SQLite keeps no name for a table constraint other than the one in
+// its CREATE TABLE statement, which Django's introspection parses too.
+func hasConstraintNamed(t TB, db *orm.DB, table, name string) bool {
+	t.Helper()
+	if hasIndexNamed(t, db, table, name) {
+		return true
+	}
+	found := false
+	if isPostgres(db) {
+		query := `SELECT c.conname FROM pg_constraint c ` +
+			`JOIN pg_class t ON t.oid = c.conrelid ` +
+			`JOIN pg_namespace n ON n.oid = t.relnamespace ` +
+			`WHERE n.nspname = current_schema() AND t.relname = $1`
+		schemaRows(t, db, query, []any{table}, func(rows *sql.Rows) error {
+			var conname string
+			if err := rows.Scan(&conname); err != nil {
+				return err
+			}
+			found = found || conname == name
+			return nil
+		})
+		return found
+	}
+	schemaRows(t, db, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, []any{table}, func(rows *sql.Rows) error {
+		var ddl string
+		if err := rows.Scan(&ddl); err != nil {
+			return err
+		}
+		for _, m := range constraintNamePattern.FindAllStringSubmatch(ddl, -1) {
+			found = found || strings.ReplaceAll(m[1], `""`, `"`) == name
+		}
+		return nil
+	})
+	return found
+}
+
+// AssertConstraintExists asserts that the table has a constraint, or an index
+// that enforces one, of that name (Django's assertConstraintExists).
+func AssertConstraintExists(t TB, db *orm.DB, table, name string) {
+	t.Helper()
+	if !hasConstraintNamed(t, db, table, name) {
+		t.Errorf("table %q has no constraint named %q", table, name)
+	}
+}
+
+// AssertConstraintNotExists asserts that the table has no constraint or index
+// of that name (Django's assertConstraintNotExists).
+func AssertConstraintNotExists(t TB, db *orm.DB, table, name string) {
+	t.Helper()
+	if hasConstraintNamed(t, db, table, name) {
+		t.Errorf("table %q has a constraint named %q", table, name)
 	}
 }
 

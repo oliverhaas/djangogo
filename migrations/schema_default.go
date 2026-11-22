@@ -3,14 +3,8 @@ package migrations
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -56,77 +50,23 @@ func effectiveDefault(f FieldState, oneOff any) any {
 	}
 }
 
-// quoteValue renders a default value as an SQL literal. Strings are escaped by
-// doubling the single quote, which is safe on both dialects with standard
-// conforming strings; a NUL byte is rejected because neither accepts it.
+// quoteValue renders a default value as an SQL literal: the markers of the
+// current date and time as their SQL functions, and any other value as
+// orm.QuoteValue renders it.
 func quoteValue(d orm.Dialect, v any) (string, error) {
-	switch x := v.(type) {
-	case nil:
-		return "NULL", nil
+	switch v.(type) {
 	case nowDefault:
 		return "CURRENT_TIMESTAMP", nil
 	case dateNowDefault:
 		return "CURRENT_DATE", nil
 	case timeNowDefault:
 		return "CURRENT_TIME", nil
-	case bool:
-		if d.Name() == "sqlite" {
-			if x {
-				return "1", nil
-			}
-			return "0", nil
-		}
-		return strconv.FormatBool(x), nil
-	case int:
-		return strconv.Itoa(x), nil
-	case int64:
-		return strconv.FormatInt(x, 10), nil
-	case float64:
-		if math.IsNaN(x) || math.IsInf(x, 0) {
-			return "", fmt.Errorf("migrations: non-finite float default %v", x)
-		}
-		return strconv.FormatFloat(x, 'g', -1, 64), nil
-	case orm.Decimal:
-		return x.FixedString(), nil
-	case orm.Date:
-		if x.IsZero() {
-			return "NULL", nil
-		}
-		return "'" + x.String() + "'", nil
-	case orm.Time:
-		return "'" + x.String() + "'", nil
-	case time.Duration:
-		if d.Name() == "sqlite" {
-			return strconv.FormatInt(int64(x/time.Microsecond), 10), nil
-		}
-		return "'" + orm.FormatPGInterval(x) + "'", nil
-	case orm.UUID:
-		if d.Name() == "sqlite" {
-			return "'" + x.Hex() + "'", nil
-		}
-		return "'" + x.String() + "'", nil
-	case json.RawMessage:
-		s := string(x)
-		if strings.ContainsRune(s, 0) {
-			return "", errors.New("migrations: a default value must not contain a NUL byte")
-		}
-		return "'" + strings.ReplaceAll(s, "'", "''") + "'", nil
-	case []byte:
-		encoded := hex.EncodeToString(x)
-		if d.Name() == "sqlite" {
-			return "X'" + encoded + "'", nil
-		}
-		return "'\\x" + encoded + "'::bytea", nil
-	case string:
-		if strings.ContainsRune(x, 0) {
-			return "", errors.New("migrations: a default value must not contain a NUL byte")
-		}
-		return "'" + strings.ReplaceAll(x, "'", "''") + "'", nil
-	case time.Time:
-		return "'" + x.UTC().Format("2006-01-02 15:04:05.999999-07:00") + "'", nil
-	default:
-		return "", fmt.Errorf("migrations: unsupported default value of type %T", v)
 	}
+	s, err := orm.QuoteValue(d, v)
+	if err != nil {
+		return "", fmt.Errorf("migrations: default value: %w", err)
+	}
+	return s, nil
 }
 
 // tableHasRows reports whether table holds at least one row.

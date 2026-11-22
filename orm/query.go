@@ -29,7 +29,10 @@ type query struct {
 	offset          int // 0 means no offset
 	distinct        bool
 	forUpdate       bool
-	err             error
+	// against replaces the columns of the model's own table with the values
+	// of one instance, for checking a constraint against it.
+	against map[*Field]*instanceValue
+	err     error
 }
 
 // orderTerm is one ORDER BY term: a field key or annotation name, descending

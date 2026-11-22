@@ -120,6 +120,11 @@ type sqlWriter struct {
 	d    Dialect
 	b    *strings.Builder
 	args []any
+	// ddl writes for a schema statement: columns without their table alias,
+	// and values as SQL literals instead of bound parameters, which DDL does
+	// not take. err records the first value that has no literal form.
+	ddl bool
+	err error
 }
 
 // newSQLWriter returns an empty writer for dialect d.
@@ -132,6 +137,10 @@ func (w *sqlWriter) write(s string) { w.b.WriteString(s) }
 
 // param binds v and appends its placeholder.
 func (w *sqlWriter) param(v any) {
+	if w.ddl {
+		w.b.WriteString(w.quoteValue(v))
+		return
+	}
 	w.args = append(w.args, v)
 	w.b.WriteString(w.d.Placeholder(len(w.args)))
 }
@@ -139,12 +148,27 @@ func (w *sqlWriter) param(v any) {
 // literal binds v, the literal of an expression, and appends its placeholder,
 // typed by a dialect that needs that.
 func (w *sqlWriter) literal(v any) {
-	w.args = append(w.args, v)
-	placeholder := w.d.Placeholder(len(w.args))
+	var placeholder string
+	if w.ddl {
+		placeholder = w.quoteValue(v)
+	} else {
+		w.args = append(w.args, v)
+		placeholder = w.d.Placeholder(len(w.args))
+	}
 	if ld, ok := w.d.(LiteralDialect); ok {
 		placeholder = ld.LiteralSQL(placeholder, v)
 	}
 	w.b.WriteString(placeholder)
+}
+
+// quoteValue returns v as an SQL literal and records the error of a value
+// that has none.
+func (w *sqlWriter) quoteValue(v any) string {
+	s, err := QuoteValue(w.d, v)
+	if err != nil && w.err == nil {
+		w.err = err
+	}
+	return s
 }
 
 // ident appends a quoted identifier.
@@ -152,6 +176,10 @@ func (w *sqlWriter) ident(name string) { w.b.WriteString(w.d.Quote(name)) }
 
 // column appends a column qualified by its table alias.
 func (w *sqlWriter) column(alias, column string) {
+	if w.ddl {
+		w.b.WriteString(w.d.Quote(column))
+		return
+	}
 	w.b.WriteString(w.d.Quote(alias))
 	w.b.WriteByte('.')
 	w.b.WriteString(w.d.Quote(column))
@@ -183,14 +211,23 @@ type sqlNode interface {
 	aggregate() bool
 }
 
-// colNode is a column of a joined table.
+// colNode is a column of a joined table. value is set when a constraint is
+// checked against an instance: the instance's value of the field then takes
+// the place of the column.
 type colNode struct {
 	join  *join
 	field *Field
+	value *instanceValue
 }
 
-// render writes the qualified column.
-func (n colNode) render(w *sqlWriter) { w.column(n.join.alias, n.field.Column) }
+// render writes the qualified column, or the instance value that replaces it.
+func (n colNode) render(w *sqlWriter) {
+	if n.value != nil {
+		n.value.render(w)
+		return
+	}
+	w.column(n.join.alias, n.field.Column)
+}
 
 // vtype is the type of the column's field.
 func (n colNode) vtype() valueType { return fieldValueType(n.field) }

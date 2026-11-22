@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net/netip"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -69,16 +71,17 @@ type CleanOption func(*cleanConfig)
 
 // cleanConfig stores parsed options for model validation.
 type cleanConfig struct {
-	exclude        []string
-	validateUnique bool
-	hasAdding      bool
-	adding         bool
+	exclude             []string
+	validateUnique      bool
+	validateConstraints bool
+	hasAdding           bool
+	adding              bool
 }
 
 // defaultCleanConfig returns cleanConfig with Django's defaults
-// (validate_unique=True, no exclusions).
+// (validate_unique=True, validate_constraints=True, no exclusions).
 func defaultCleanConfig(opts []CleanOption) cleanConfig {
-	cfg := cleanConfig{validateUnique: true}
+	cfg := cleanConfig{validateUnique: true, validateConstraints: true}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&cfg)
@@ -102,6 +105,15 @@ func WithExclude(fields ...string) CleanOption {
 func WithValidateUnique(enabled bool) CleanOption {
 	return func(c *cleanConfig) {
 		c.validateUnique = enabled
+	}
+}
+
+// WithValidateConstraints enables or disables the checks of Meta.Constraints
+// during FullClean, matching Django's validate_constraints= argument (default
+// true).
+func WithValidateConstraints(enabled bool) CleanOption {
+	return func(c *cleanConfig) {
+		c.validateConstraints = enabled
 	}
 }
 
@@ -431,9 +443,10 @@ func ValidateUnique(ctx context.Context, db *DB, instance any, opts ...CleanOpti
 	return validateUniqueInternal(ctx, db, m, instance, exclude, cfg)
 }
 
-// FullClean runs CleanFields, the model's optional Clean() method, and
-// ValidateUnique (when enabled and db is non-nil), aggregating all errors into
-// a dictionary *ValidationError. It mirrors Django's Model.full_clean().
+// FullClean runs CleanFields, the model's optional Clean() method,
+// ValidateUnique and ValidateConstraints (when enabled and db is non-nil),
+// aggregating all errors into a dictionary *ValidationError. It mirrors
+// Django's Model.full_clean().
 func FullClean(ctx context.Context, db *DB, instance any, opts ...CleanOption) error {
 	if db == nil {
 		return errors.New("orm: FullClean requires a non-nil *DB (or call Model.FullClean with WithValidateUnique(false))")
@@ -445,8 +458,9 @@ func FullClean(ctx context.Context, db *DB, instance any, opts ...CleanOption) e
 	return m.FullClean(ctx, db, instance, opts...)
 }
 
-// FullClean runs CleanFields, the model's optional Clean() method, and (when
-// WithValidateUnique is true and db is non-nil) ValidateUnique on instance.
+// FullClean runs CleanFields, the model's optional Clean() method, and, when db
+// is non-nil, ValidateUnique and ValidateConstraints on instance. The database
+// checks skip the fields that already failed validation.
 func (m *Model) FullClean(ctx context.Context, db *DB, instance any, opts ...CleanOption) error {
 	cfg := defaultCleanConfig(opts)
 	exclude := m.normalizeExclude(cfg.exclude)
@@ -468,17 +482,29 @@ func (m *Model) FullClean(ctx context.Context, db *DB, instance any, opts ...Cle
 		}
 	}
 
-	if cfg.validateUnique && db != nil {
-		uniqueExclude := make(map[string]bool, len(exclude)+len(errMap))
-		for k, v := range exclude {
-			uniqueExclude[k] = v
-		}
+	// Each database check also excludes the fields that failed so far, as
+	// Django adds them to the same exclude set.
+	dbExclude := maps.Clone(exclude)
+	excludeFailed := func() {
 		for name := range errMap {
 			if name != NonFieldErrors {
-				uniqueExclude[name] = true
+				dbExclude[name] = true
 			}
 		}
-		if err := validateUniqueInternal(ctx, db, m, instance, uniqueExclude, cfg); err != nil {
+	}
+	if cfg.validateUnique && db != nil {
+		excludeFailed()
+		if err := validateUniqueInternal(ctx, db, m, instance, dbExclude, cfg); err != nil {
+			var ve *ValidationError
+			if !errors.As(err, &ve) {
+				return err
+			}
+			errMap = ve.UpdateErrorDict(errMap)
+		}
+	}
+	if cfg.validateConstraints && db != nil {
+		excludeFailed()
+		if err := validateConstraintsInternal(ctx, db, m, instance, dbExclude, cfg); err != nil {
 			var ve *ValidationError
 			if !errors.As(err, &ve) {
 				return err
@@ -498,14 +524,34 @@ func (m *Model) FullClean(ctx context.Context, db *DB, instance any, opts ...Cle
 // Model._get_unique_checks().
 func (m *Model) UniqueChecks(exclude ...string) [][]string {
 	excl := m.normalizeExclude(exclude)
-	return m.uniqueChecks(excl)
+	return m.uniqueChecks(excl, false)
 }
 
-// uniqueChecks collects unique_together checks followed by single-field
-// primary-key and unique checks, matching Django's _get_unique_checks order.
-func (m *Model) uniqueChecks(exclude map[string]bool) [][]string {
+// UniqueChecksWithConstraints returns the checks of UniqueChecks and, after
+// the unique_together sets, the fields of each UniqueConstraint of
+// Meta.Constraints that holds for every row: one on fields, without a
+// condition. It matches Django's _get_unique_checks(include_meta_constraints=True),
+// which a model formset uses to find duplicates among its forms.
+func (m *Model) UniqueChecksWithConstraints(exclude ...string) [][]string {
+	excl := m.normalizeExclude(exclude)
+	return m.uniqueChecks(excl, true)
+}
+
+// uniqueChecks collects unique_together checks, the total unique constraints
+// when withConstraints is set, and the single-field primary-key and unique
+// checks, matching Django's _get_unique_checks order.
+func (m *Model) uniqueChecks(exclude map[string]bool, withConstraints bool) [][]string {
+	sets := m.uniqueTogether
+	if withConstraints {
+		sets = slices.Clone(sets)
+		for _, c := range m.constraints {
+			if u, ok := c.(UniqueConstraint); ok && len(u.Fields) > 0 && u.Condition.empty() {
+				sets = append(sets, u.Fields)
+			}
+		}
+	}
 	var checks [][]string
-	for _, set := range m.uniqueTogether {
+	for _, set := range sets {
 		attrs := make([]string, 0, len(set))
 		skip := false
 		for _, name := range set {
@@ -674,12 +720,9 @@ func validateUniqueInternal(ctx context.Context, db *DB, m *Model, instance any,
 		return err
 	}
 	pk := m.PrimaryKey()
-	adding := pk == nil || rv.Field(pk.Index).IsZero()
-	if cfg.hasAdding {
-		adding = cfg.adding
-	}
+	adding := instanceAdding(m, rv, cfg)
 
-	checks := m.uniqueChecks(exclude)
+	checks := m.uniqueChecks(exclude, false)
 	errs := map[string][]*ValidationError{}
 
 	for _, check := range checks {

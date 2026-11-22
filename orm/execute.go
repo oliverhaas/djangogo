@@ -5,18 +5,32 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 // CreateTable creates the table for m using the dialect's DDL, along with its
-// field indexes, Meta.Indexes, Meta.UniqueTogether constraints, and any
+// field indexes, Meta.Indexes, Meta.UniqueTogether, Meta.Constraints, and any
 // auto-created M2M join tables declared on m.
 func (db *DB) CreateTable(ctx context.Context, m *Model) error {
+	defs, stmts, err := db.constraintsDDL(m)
+	if err != nil {
+		return err
+	}
 	ddl := db.dialect.CreateTableSQL(m)
+	if len(defs) > 0 {
+		// Add the table constraints to the column definitions.
+		ddl = strings.TrimSuffix(ddl, ")") + ", " + strings.Join(defs, ", ") + ")"
+	}
 	if _, err := db.conn(ctx).ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("orm: create table %s: %w", m.Table(), err)
 	}
 	if err := db.createTableExtras(ctx, m); err != nil {
 		return err
+	}
+	for _, stmt := range stmts {
+		if _, err := db.conn(ctx).ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("orm: create table %s: %w", m.Table(), err)
+		}
 	}
 	for _, f := range m.m2mFields {
 		if f.Rel != nil && f.Rel.AutoCreated && f.Rel.Through != nil {

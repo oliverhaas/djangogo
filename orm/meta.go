@@ -23,6 +23,10 @@ type Meta struct {
 	UniqueTogether [][]string
 	// Indexes declares model-level database indexes (Django's Meta.indexes).
 	Indexes []Index
+	// Constraints declares check and unique constraints (Django's
+	// Meta.constraints). The database enforces them, and FullClean reports a
+	// violation as a validation error.
+	Constraints []Constraint
 	// VerboseName overrides the human-readable singular name (Django's
 	// Meta.verbose_name).
 	VerboseName string

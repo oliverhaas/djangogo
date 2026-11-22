@@ -243,13 +243,57 @@ type NullableUniqueCharFieldModel struct {
 	URL      *string `orm:"type=url;blank;null"`
 }
 
+// ConstraintsModel is the ConstraintsModel of Django's
+// tests/model_forms/models.py.
+type ConstraintsModel struct {
+	ID       int64
+	Name     string      `orm:"max_length=100"`
+	Category string      `orm:"max_length=50;default=uncategorized"`
+	Price    orm.Decimal `orm:"max_digits=10;decimal_places=2;default=0"`
+}
+
+// Meta declares the constraints of Django's ConstraintsModel.
+func (ConstraintsModel) Meta() orm.Meta {
+	return orm.Meta{Constraints: []orm.Constraint{
+		orm.UniqueConstraint{
+			Expressions:           []orm.Expr{orm.F("name"), orm.F("category")},
+			Name:                  "unique_name_category",
+			ViolationErrorMessage: "This product already exists.",
+		},
+		orm.CheckConstraint{
+			Condition:             orm.Q("price__gt", 0),
+			Name:                  "price_gte_zero",
+			ViolationErrorMessage: "Price must be greater than zero.",
+		},
+	}}
+}
+
+// AttnameConstraintsModel is the AttnameConstraintsModel of Django's
+// tests/model_forms/models.py.
+type AttnameConstraintsModel struct {
+	ID    int64
+	Left  orm.FK[AttnameConstraintsModel] `orm:"null;on_delete=set_null;related_name=+"`
+	Right orm.FK[AttnameConstraintsModel] `orm:"null;on_delete=set_null;related_name=+"`
+}
+
+// Meta declares the check constraint of Django's AttnameConstraintsModel,
+// which names the column of the right foreign key.
+func (AttnameConstraintsModel) Meta() orm.Meta {
+	return orm.Meta{Constraints: []orm.Constraint{
+		orm.CheckConstraint{
+			Name:      "%(app_label)s_%(class)s_left_not_right",
+			Condition: orm.Not(orm.Q("left", orm.F("right_id"))),
+		},
+	}}
+}
+
 // mfModels returns the models of the ported tests/model_forms tests.
 func mfModels() []any {
 	return []any{
 		&Person{}, &Category{}, &Writer{}, &Article{}, &Product{}, &Price{}, &Book{},
 		&DerivedBook{}, &Triple{}, &ExplicitPK{}, &Post{}, &Character{}, &Student{},
 		&Award{}, &PublicationDefaults{}, &ArticleStatus{}, &CustomErrorMessage{},
-		&NullableUniqueCharFieldModel{},
+		&NullableUniqueCharFieldModel{}, &ConstraintsModel{}, &AttnameConstraintsModel{},
 	}
 }
 

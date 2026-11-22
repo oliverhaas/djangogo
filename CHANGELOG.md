@@ -609,6 +609,26 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   the condition, `orm.LabeledRowsWhere` loads the labeled rows that match a
   condition, and `Cond.Pairs` returns the keys and values of a condition
   built from them.
+- ORM: `Meta.Constraints`, Django's `Meta.constraints`, declares
+  `orm.CheckConstraint` and `orm.UniqueConstraint` values. `CreateTable`
+  creates them: a check as a table constraint, a unique constraint on fields
+  as a table constraint, and one with expressions, a condition or
+  `NullsNotDistinct` as a unique index. `FullClean` checks them after the
+  unique checks and reports Django's messages, or `ViolationErrorMessage` and
+  `ViolationErrorCode`. `orm.WithValidateConstraints(false)` skips them,
+  `orm.ValidateConstraints` and `Constraint.Validate` run them alone, and
+  `Model.UniqueChecksWithConstraints` adds the fields of the unique
+  constraints without a condition to the unique checks.
+  `%(app_label)s` and `%(class)s` in a name are replaced.
+- Forms: a model form checks the constraints of its model after the unique
+  checks and skips a constraint that refers to a field outside the form. A
+  model formset reports duplicate rows of a unique constraint as it does
+  for `unique_together`.
+- ORM: `orm.QuoteValue` renders a Go value as an SQL literal of a dialect,
+  for statements that cannot bind parameters.
+- Testing: `djangotest.AssertConstraintExists` and
+  `djangotest.AssertConstraintNotExists` check a named constraint or index
+  of a table.
 
 ### Changed
 

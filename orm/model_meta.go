@@ -178,6 +178,10 @@ func applyModelMeta(m *Model, model any) error {
 		}
 	}
 
+	if err := applyConstraints(m, meta.Constraints); err != nil {
+		return err
+	}
+
 	if err := applyMetaFieldHooks(m, meta); err != nil {
 		return err
 	}

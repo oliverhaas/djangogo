@@ -461,7 +461,7 @@ func (s *ModelFormSet[T]) validateUnique() error {
 		}
 		valid = append(valid, f)
 		mf := s.st.forms[f]
-		for _, check := range s.model.UniqueChecks(mf.validationExclusions(f)...) {
+		for _, check := range s.model.UniqueChecksWithConstraints(mf.validationExclusions(f)...) {
 			if key := strings.Join(check, "\x00"); !seenCheck[key] {
 				seenCheck[key] = true
 				checks = append(checks, check)

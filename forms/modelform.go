@@ -323,10 +323,10 @@ func relatedPK(mf *orm.Field, val any) (int64, error) {
 //	}
 //
 // Validation fills the instance from the cleaned data, runs model validation
-// (orm.Model.FullClean with WithValidateUnique(false)), and validates unique
-// and unique_together constraints against the database (orm.ValidateUnique),
-// attaching errors to form fields or non-field errors just as Django's
-// BaseModelForm._post_clean does.
+// (orm.Model.FullClean without the database checks), and validates unique
+// and unique_together constraints (orm.ValidateUnique) and Meta.Constraints
+// (orm.ValidateConstraints) against the database, attaching errors to form
+// fields or non-field errors just as Django's BaseModelForm._post_clean does.
 type ModelForm[T any] struct {
 	*Form
 	modelSide
@@ -617,8 +617,9 @@ func (mf *ModelForm[T]) postClean(f *Form) {
 
 // postClean is the model part of validation, Django's BaseModelForm._post_clean:
 // it fills instance, a pointer to an instance of the model, from the cleaned
-// data, runs instance.FullClean with validate_unique disabled, and then runs
-// orm.ValidateUnique with recomputed exclusions. adding reports whether the
+// data, runs instance.FullClean with validate_unique and validate_constraints
+// disabled, and then runs orm.ValidateUnique and orm.ValidateConstraints with
+// recomputed exclusions. adding reports whether the
 // instance is a new row, Django's instance._state.adding.
 func (mf *modelSide) postClean(f *Form, instance any, adding func() bool) {
 	if err := PopulateStruct(mf.model, mf.constructData(f), instance); err != nil {
@@ -642,6 +643,7 @@ func (mf *modelSide) postClean(f *Form, instance any, adding func() bool) {
 	if err := mf.model.FullClean(f.Context(), mf.db, instance,
 		orm.WithExclude(exclude...),
 		orm.WithValidateUnique(false),
+		orm.WithValidateConstraints(false),
 	); err != nil {
 		var ve *ValidationError
 		if errors.As(err, &ve) {
@@ -662,6 +664,17 @@ func (mf *modelSide) postClean(f *Form, instance any, adding func() bool) {
 				mf.updateErrors(f, ve)
 			} else {
 				f.fail(fmt.Errorf("forms: unique check: %w", err))
+			}
+		}
+		if err := orm.ValidateConstraints(f.Context(), mf.db, instance,
+			orm.WithExclude(mf.validationExclusions(f)...),
+			orm.WithAdding(adding()),
+		); err != nil {
+			var ve *ValidationError
+			if errors.As(err, &ve) {
+				mf.updateErrors(f, ve)
+			} else {
+				f.fail(fmt.Errorf("forms: constraint check: %w", err))
 			}
 		}
 	}

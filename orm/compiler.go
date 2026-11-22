@@ -77,7 +77,11 @@ func (c *compiler) column(p fieldPath) colNode {
 		j = joins[len(joins)-1]
 	}
 	c.used = append(c.used, c.joins.reserve(j, p.trimmed, c.reuse)...)
-	return colNode{join: j, field: p.field}
+	col := colNode{join: j, field: p.field}
+	if j == c.joins.base {
+		col.value = c.q.against[p.field]
+	}
+	return col
 }
 
 // baseColumn returns field f of the query's own table.

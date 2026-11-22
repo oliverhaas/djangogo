@@ -2229,3 +2229,24 @@ func TestInlineformsetFactoryCanNotDeleteExtra(t *testing.T) {
 // test_inlineformset_factory_default_renderer of
 // TestModelFormsetOverridesTroughFormMeta have no Go counterpart: forms has
 // no renderers, and a formset renders in Go code.
+
+// No Django test exists: Django's BaseModelFormSet.validate_unique checks the
+// fields of a unique constraint without a condition like unique_together.
+func TestPreventDuplicatesOfUniqueConstraintFields(t *testing.T) {
+	eachDB(t, func(t *testing.T, db *orm.DB) {
+		prices := forms.NewModelFormSet[ConstraintPrice](db)
+		prices.Extra = 2
+		formset := prices.Bind(postData(
+			"form-TOTAL_FORMS", "2",
+			"form-INITIAL_FORMS", "0",
+			"form-MAX_NUM_FORMS", "",
+			"form-0-price", "25",
+			"form-0-quantity", "7",
+			"form-1-price", "25",
+			"form-1-quantity", "7",
+		))
+		djangotest.AssertEqual(t, formset.IsValid(), false)
+		djangotest.AssertEqual(t, formset.NonFormErrors().Messages(),
+			[]string{"Please correct the duplicate data for price and quantity, which must be unique."})
+	})
+}
