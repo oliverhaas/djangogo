@@ -709,6 +709,11 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   defaults. The object id can be an integer or a text column, and the target
   can have an integer, text or UUID primary key. On PostgreSQL, a join from
   an integer primary key to a text object id casts the column, as Django does.
+- Commands: `remove_stale_contenttypes` deletes the content types whose model
+  no longer exists, with the rows that depend on them, as Django's command
+  does. It lists them and asks first unless `--noinput` is given, and
+  `--include-stale-apps` also covers apps that are no longer installed. It
+  is available when the contenttypes app is installed.
 
 ### Changed
 

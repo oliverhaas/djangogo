@@ -14,6 +14,7 @@
 //	ct.model_class()                               contenttypes.ModelClass(db, ct)
 //	ct.natural_key()                               ct.NaturalKey()
 //	create_contenttypes (post_migrate)             contenttypes.Sync(ctx, db)
+//	manage.py remove_stale_contenttypes            the remove_stale_contenttypes command of djangogo
 //
 // A model is identified by its app label and its lowercased type name, as in
 // Django ("auth", "permission"). A model registered without an app has an empty

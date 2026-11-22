@@ -170,6 +170,9 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	_ = app.Commands.Register(&clearsessionsCommand{app: app, store: app.sessions})
 	_ = app.Commands.Register(&startprojectCommand{app: app})
 	_ = app.Commands.Register(&startappCommand{app: app})
+	if appReg.IsInstalled(contenttypes.App{}.Name()) {
+		_ = app.Commands.Register(&removeStaleContentTypesCommand{app: app})
+	}
 	app.registerCoreCommands()
 
 	return app, nil
