@@ -167,9 +167,13 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   inheritance.
 - **Database:** one database per application. Two models with foreign keys to
   each other cannot be created on PostgreSQL.
-- **Querying:** of Django's transforms only the date and time ones exist
-  (`__year`, `__date`, `__hour` and the others), and they read a datetime in
-  UTC. There are no text transforms or functions such as `Lower` and `Length`,
+- **Querying:** the date and time transforms (`__year`, `__date`, `__hour`
+  and the others) read a datetime in UTC. Besides the aggregates, the only
+  database functions are `Lower`, `Upper`, `Length`, `Trim`, `LTrim` and
+  `RTrim`: there is no `Coalesce`, `Concat`, `Cast` or `Case`. A transform of
+  `RegisterTransform` applies to one field kind, where Django's registration
+  on `CharField` also covers its subclasses. `OrderBy` takes keys, not
+  expressions: annotate an expression to order by it. There is
   no `extra()`, no fetch modes and no `select_related()` without arguments. A model keeps prefetched
   reverse and many-to-many sets only when it embeds `orm.RelCache`, and the
   queryset of an `orm.Prefetch` cannot be sliced. `Raw` leaves the fields missing

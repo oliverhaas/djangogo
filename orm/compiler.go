@@ -122,6 +122,18 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		return binaryNode{op: e.op, left: left, right: right}, nil
 	case exprAggregate:
 		return c.resolveAggregate(e)
+	case exprFunc:
+		arg, err := c.resolveExpr(*e.arg)
+		if err != nil {
+			return nil, err
+		}
+		typ := arg.vtype()
+		if e.typed {
+			typ = fieldValueType(&Field{Kind: e.output})
+		}
+		return funcNode{fn: e.fn, arg: arg, typ: typ}, nil
+	case exprNode:
+		return e.node, nil
 	case exprStar:
 		return nil, errors.New(`orm: "*" is only valid as the argument of Count`)
 	default:
@@ -469,6 +481,11 @@ func columnsOf(n sqlNode) []sqlNode {
 	case transformNode:
 		// Django groups by the transform itself: grouping by its column would
 		// split a group such as one year into one group per value.
+		return []sqlNode{v}
+	case funcNode:
+		if v.aggregate() {
+			return columnsOf(v.arg)
+		}
 		return []sqlNode{v}
 	default:
 		return nil

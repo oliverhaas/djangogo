@@ -18,11 +18,17 @@ const (
 	exprAggregate
 	// exprStar is the "*" argument of COUNT(*).
 	exprStar
+	// exprFunc is a call of a function of one argument, such as LOWER.
+	exprFunc
+	// exprNode is a value that is already bound to the query: the value a
+	// transform of RegisterTransform transforms.
+	exprNode
 )
 
 // Expr is an SQL value expression: a field reference (F), a literal (Value),
-// an arithmetic or bitwise combination of expressions, or an aggregate (Count, Sum, Avg,
-// Min, Max). It is immutable; every method returns a new Expr.
+// an arithmetic or bitwise combination of expressions, an aggregate (Count,
+// Sum, Avg, Min, Max) or a text function (Lower, Upper, Length, Trim, LTrim,
+// RTrim). It is immutable; every method returns a new Expr.
 //
 // An Expr can be the value of a filter, so a column is compared with another
 // column or with a computed value:
@@ -50,6 +56,12 @@ type Expr struct {
 	distinct bool
 	// filter is the condition of an aggregate's Filter, nil without one.
 	filter *Cond
+	// output is the kind of the result of a function when typed is set.
+	// Without typed the result has the kind of the argument.
+	output Kind
+	typed  bool
+	// node is the bound value of an exprNode.
+	node sqlNode
 }
 
 // F references a model field by key, like Django's F(): F("views") or, across
@@ -208,6 +220,10 @@ func (e Expr) containsAggregate() bool {
 		return true
 	case exprBinary:
 		return e.left.containsAggregate() || e.right.containsAggregate()
+	case exprFunc:
+		return e.arg.containsAggregate()
+	case exprNode:
+		return e.node.aggregate()
 	default:
 		return false
 	}

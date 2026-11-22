@@ -298,6 +298,26 @@ func (n binaryNode) vtype() valueType {
 // aggregate reports whether either side holds an aggregate.
 func (n binaryNode) aggregate() bool { return n.left.aggregate() || n.right.aggregate() }
 
+// funcNode is a call of a function of one argument, such as LOWER(name).
+type funcNode struct {
+	fn  string
+	arg sqlNode
+	typ valueType
+}
+
+// render writes "FN(arg)".
+func (n funcNode) render(w *sqlWriter) {
+	w.write(n.fn + "(")
+	n.arg.render(w)
+	w.write(")")
+}
+
+// vtype is the type of the function's result.
+func (n funcNode) vtype() valueType { return n.typ }
+
+// aggregate reports whether the argument holds an aggregate.
+func (n funcNode) aggregate() bool { return n.arg.aggregate() }
+
 // likeExprNode is the LIKE pattern built from an expression: the value of
 // inner with "\", "%", and "_" escaped by a backslash, between the "%"
 // wildcards that prefix and suffix ask for. The wildcards are SQL literals,
@@ -442,6 +462,8 @@ func readsJoin(n sqlNode) bool {
 		return n.arg != nil && readsJoin(n.arg)
 	case transformNode:
 		return readsJoin(n.inner)
+	case funcNode:
+		return readsJoin(n.arg)
 	default:
 		return false
 	}

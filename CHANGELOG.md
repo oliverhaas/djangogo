@@ -591,6 +591,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - URLs: `Router.HandlerFor` and `Application.HandlerFor` return the view that
   serves a request, the resolve function of `auth.LoginRequiredMiddleware` and
   of `csrf.Options.Resolve`.
+- ORM: the text functions `orm.Lower`, `orm.Upper`, `orm.Length`,
+  `orm.Trim`, `orm.LTrim` and `orm.RTrim`, Django's functions of the same
+  names, work in `Annotate`, `Filter`, `Update` and aggregates:
+  `Update(ctx, "name", orm.Lower("name"))`. `orm.RegisterTransform`, Django's
+  `register_lookup`, makes a function a transform of a field kind:
+  after `orm.RegisterTransform(orm.KindChar, "lower", orm.Lower)` the key
+  `"name__lower"` works in `Filter`, `Values`, `OrderBy` and `F`.
 
 ### Changed
 

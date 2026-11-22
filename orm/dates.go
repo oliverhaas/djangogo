@@ -112,7 +112,7 @@ func truncatable(m *Model, field, kind string, datetimes bool) error {
 	}
 	name, k := p.field.Attr, p.field.Kind
 	for _, t := range p.rest {
-		name, k = t, transformOutput(t)
+		name, k = t, outputOf(k, t)
 	}
 	date := !p.relation && k == KindDate
 	output := "DateField"

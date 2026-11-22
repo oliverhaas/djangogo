@@ -412,7 +412,7 @@ func (c *compiler) lookupOf(rest []string, path *fieldPath) (string, []string, e
 			unsupported := strings.Join(rest[slices.Index(rest, name):], lookupSep)
 			return "", nil, c.unsupportedLookup(unsupported, name, fieldName, lookupCandidates(kind))
 		}
-		kind = transformOutput(name)
+		kind = outputOf(kind, name)
 		fieldName = djangoFieldName(&Field{Kind: kind})
 	}
 	switch name := rest[last]; {
@@ -463,17 +463,18 @@ func (c *compiler) fieldPredicate(lookup string, transforms []string, col colNod
 		return c.buildPredicate(lookup, col, field, value, expectedModel)
 	}
 	var lhs sqlNode = col
-	var last transformNode
 	kind := field.Kind
 	for _, name := range transforms {
-		tn, err := applyTransform(c.d, lhs, kind, name)
+		n, err := c.transform(lhs, kind, name)
 		if err != nil {
 			return nil, err
 		}
-		lhs, last, kind = tn, tn, transformOutput(name)
+		lhs, kind = n, outputOf(kind, name)
 	}
-	if p, err := c.yearPredicate(lookup, last, value); p != nil || err != nil {
-		return p, err
+	if last, ok := lhs.(transformNode); ok {
+		if p, err := c.yearPredicate(lookup, last, value); p != nil || err != nil {
+			return p, err
+		}
 	}
 	return c.buildPredicate(lookup, lhs, &Field{Kind: kind}, value, nil)
 }

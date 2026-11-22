@@ -46,22 +46,39 @@ var timeTransforms = []string{transformHour, transformMinute, transformSecond}
 // of a time, and the two casts.
 var datetimeTransforms = slices.Concat(dateTransforms, timeTransforms, []string{transformDate, transformTime})
 
-// transformsOf returns the transforms registered for a value of kind k.
+// transformsOf returns the transforms of a value of kind k: the date and
+// time transforms and those of RegisterTransform.
 func transformsOf(k Kind) []string {
+	var builtin []string
 	switch k {
 	case KindDate:
-		return dateTransforms
+		builtin = dateTransforms
 	case KindTime:
-		return timeTransforms
+		builtin = timeTransforms
 	case KindDateTime:
-		return datetimeTransforms
-	default:
-		return nil
+		builtin = datetimeTransforms
 	}
+	out := builtin
+	for _, name := range registeredNames(k) {
+		if !slices.Contains(builtin, name) {
+			out = append(slices.Clip(out), name)
+		}
+	}
+	return out
 }
 
-// transformOutput returns the kind of the value transform name yields: a date
-// for "date", a time of day for "time", and an integer for an extract.
+// outputOf returns the kind of the value that transform name yields for a
+// value of kind input.
+func outputOf(input Kind, name string) Kind {
+	if fn, ok := registered(input, name); ok {
+		return fn(Expr{kind: exprNode}).outputKind(input)
+	}
+	return transformOutput(name)
+}
+
+// transformOutput returns the kind of the value date or time transform name
+// yields: a date for "date", a time of day for "time", and an integer for an
+// extract.
 func transformOutput(name string) Kind {
 	switch name {
 	case transformDate:
@@ -150,6 +167,15 @@ func applyTransform(d Dialect, n sqlNode, input Kind, name string) (transformNod
 	return transformNode{name: name, inner: n, input: input}, nil
 }
 
+// transform wraps n, a value of kind input, in transform name: a transform
+// of RegisterTransform, or else a date or time transform.
+func (c *compiler) transform(n sqlNode, input Kind, name string) (sqlNode, error) {
+	if fn, ok := registered(input, name); ok {
+		return c.resolveExpr(fn(Expr{kind: exprNode, node: n}))
+	}
+	return applyTransform(c.d, n, input, name)
+}
+
 // withColumn returns n with its innermost column replaced by col. It moves a
 // transformed column into the subquery of an exclude across a multi-valued
 // relation.
@@ -159,6 +185,9 @@ func withColumn(n sqlNode, col colNode) sqlNode {
 		return col
 	case transformNode:
 		v.inner = withColumn(v.inner, col)
+		return v
+	case funcNode:
+		v.arg = withColumn(v.arg, col)
 		return v
 	default:
 		return n
@@ -172,7 +201,7 @@ func validTransforms(k Kind, names []string) bool {
 		if !slices.Contains(transformsOf(k), name) {
 			return false
 		}
-		k = transformOutput(name)
+		k = outputOf(k, name)
 	}
 	return true
 }
@@ -183,11 +212,11 @@ func (c *compiler) keyNode(p fieldPath) (sqlNode, error) {
 	var n sqlNode = c.column(p)
 	kind := p.field.Kind
 	for _, name := range p.rest {
-		tn, err := applyTransform(c.d, n, kind, name)
+		tn, err := c.transform(n, kind, name)
 		if err != nil {
 			return nil, err
 		}
-		n, kind = tn, transformOutput(name)
+		n, kind = tn, outputOf(kind, name)
 	}
 	return n, nil
 }
