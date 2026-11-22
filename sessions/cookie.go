@@ -48,6 +48,9 @@ func (s *SignedCookieStore) New() *Session {
 
 // Encode returns the signed cookie value for the values of sess.
 func (s *SignedCookieStore) Encode(_ context.Context, sess *Session) (string, error) {
+	if err := sess.load(); err != nil {
+		return "", err
+	}
 	raw, err := json.Marshal(sess.data)
 	if err != nil {
 		return "", err

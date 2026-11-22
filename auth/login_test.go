@@ -326,8 +326,7 @@ func TestUserIsLoadedLazily(t *testing.T) {
 	idle.ForceLogin(alice)
 	asking.ForceLogin(alice)
 
-	// One query reads the session row.
-	djangotest.AssertNumQueries(t, db, 1, func() { idle.Get("/") })
+	djangotest.AssertNumQueries(t, db, 0, func() { idle.Get("/") })
 	if !ran {
 		t.Fatal("the handler did not run")
 	}

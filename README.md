@@ -241,9 +241,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   database, and `user` has no related objects such as groups.
 - **Sessions and messages:** no cache or cache_db session stores. The
   database store needs a database and the installed `sessions` app; without
-  them, sessions use signed cookies. The middleware loads the session of the
-  cookie with each request, also when no view reads it, where Django loads it
-  on first access. A message added after the response
+  them, sessions use signed cookies. A message added after the response
   headers are written is lost, and reading `messages` in a template, also in
   `{% if messages %}`, marks them as read.
 - **Commands:** the auto-reloader of `runserver` needs the `go` command and

@@ -177,17 +177,13 @@ func TestLoginRequiredMiddlewareGetRedirectFieldNameDefault(t *testing.T) {
 	})
 }
 
-// A public view does not load the user. Django runs no query at all; the Go
-// sessions middleware loads the session of the cookie with every request, so
-// one query remains.
-//
 // Ported from Django: tests/auth_tests/test_middleware.py::TestLoginRequiredMiddleware.test_public_view_logged_in_performance
 func TestLoginRequiredMiddlewarePublicViewLoggedInPerformance(t *testing.T) {
 	eachDB(t, func(t *testing.T, db *orm.DB) {
 		s, user := newLoginRequiredSite(t, db)
 		s.ForceLogin(user)
 		var resp *djangotest.Response
-		djangotest.AssertNumQueries(t, db, 1, func() { resp = s.Get("/public_view/") })
+		djangotest.AssertNumQueries(t, db, 0, func() { resp = s.Get("/public_view/") })
 		djangotest.AssertEqual(t, resp.StatusCode, http.StatusOK)
 	})
 }

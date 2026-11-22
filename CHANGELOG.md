@@ -940,6 +940,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   error matched by `ErrTransactionManagement`, and that block then rolls
   back. The writes are `Save`, `Create`, `Update`, `Delete`, `BulkCreate`
   and the add, remove, clear and set methods of the related managers.
+- Sessions: a request whose handler does not use the session no longer reads
+  it from the store, which saves a database query on such requests with the
+  database store. The middleware reads the session when a handler first uses
+  it, as Django does. When the store fails, the handler sees an empty
+  session and the response becomes a 500; before, the handler did not run.
+  A session cookie of an unknown or expired session is deleted only when the
+  handler uses the session.
 
 ### Fixed
 

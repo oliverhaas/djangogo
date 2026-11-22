@@ -72,9 +72,9 @@ func Middleware(store Store, cookieName string) func(http.Handler) http.Handler 
 }
 
 // MiddlewareWithOptions returns the session middleware (Django's
-// SessionMiddleware). It loads the session named by the request cookie, puts
-// it into the request context for FromContext, and finishes it just before the
-// response headers go out:
+// SessionMiddleware). It puts the session named by the request cookie into the
+// request context for FromContext, reads it from the store when the handler
+// first uses it, and finishes it just before the response headers go out:
 //
 //   - An empty session whose cookie came with the request has that cookie
 //     deleted.
@@ -83,7 +83,9 @@ func Middleware(store Store, cookieName string) func(http.Handler) http.Handler 
 //   - A response that depends on the session gets "Vary: Cookie".
 //
 // A session that a concurrent request deleted is not saved again: the
-// response becomes a 400 with Django's SessionInterrupted text.
+// response becomes a 400 with Django's SessionInterrupted text. When the store
+// fails to read the session, the handler sees an empty session and the
+// response becomes a 500.
 func MiddlewareWithOptions(store Store, opts Options) func(http.Handler) http.Handler {
 	opts = opts.withDefaults()
 	return func(next http.Handler) http.Handler {
@@ -94,12 +96,7 @@ func MiddlewareWithOptions(store Store, opts Options) func(http.Handler) http.Ha
 			hadCookie := false
 			if c, err := req.Cookie(opts.CookieName); err == nil {
 				hadCookie = true
-				loaded, derr := store.Decode(ctx, c.Value)
-				if derr != nil {
-					http.Error(w, "session error", http.StatusInternalServerError)
-					return
-				}
-				sess = loaded
+				sess.loader = func() (*Session, error) { return store.Decode(req.Context(), c.Value) }
 			}
 			sess.cookieAge = opts.CookieAge
 			sess.browserClose = opts.ExpireAtBrowserClose
@@ -178,6 +175,16 @@ func (w *sessionWriter) finish(status int) {
 	header := w.Header()
 	sess := w.sess
 
+	// A save needs the values, also of a session that the handler only
+	// marked modified.
+	if (sess.Modified() || w.opts.SaveEveryRequest) && status < http.StatusInternalServerError {
+		_ = sess.load()
+	}
+	if sess.loadErr != nil {
+		w.replaced = true
+		http.Error(w.ResponseWriter, "session error", http.StatusInternalServerError)
+		return
+	}
 	if w.hadCookie && sess.IsEmpty() {
 		w.dropStale()
 		w.deleteCookie()

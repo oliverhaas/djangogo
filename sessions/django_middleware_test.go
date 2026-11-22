@@ -2,6 +2,7 @@ package sessions_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -370,4 +371,96 @@ func TestMiddlewareCycleKeyReplacesRow(t *testing.T) {
 		djangotest.AssertEqual(t, exists(t, store, newKey), true)
 		djangotest.AssertEqual(t, load(t, store, newKey).Data(), map[string]any{"hello": "world"})
 	})
+}
+
+// countingStore counts the Decode calls of the store it wraps. When err is set,
+// Decode fails with it.
+type countingStore struct {
+	sessions.Store
+	// decodes is the number of Decode calls.
+	decodes int
+	// err is the error of Decode, or nil.
+	err error
+}
+
+// Decode counts the call and fails with s.err when it is set.
+func (s *countingStore) Decode(ctx context.Context, cookieValue string) (*sessions.Session, error) {
+	s.decodes++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.Store.Decode(ctx, cookieValue)
+}
+
+// The middleware reads the session from the store when the handler first uses
+// it, as Django loads the session cache on first access.
+//
+// No Django test exists: Django's tests do not count the loads of the
+// middleware.
+func TestMiddlewareLoadsSessionOnFirstUse(t *testing.T) {
+	eachMiddlewareStore(t, func(t *testing.T, db *sessions.DBStore, _ *orm.DB) {
+		key := serve(t, db, sessions.Options{}, "", touchingSession).session.Key()
+		store := &countingStore{Store: db}
+
+		untouched := serve(t, store, sessions.Options{}, key, func(w http.ResponseWriter, _ *sessions.Session) {
+			_, _ = w.Write([]byte("ok"))
+		})
+		djangotest.AssertEqual(t, store.decodes, 0)
+		djangotest.AssertEqual(t, len(untouched.rec.Result().Cookies()), 0)
+		djangotest.AssertEqual(t, untouched.rec.Header().Get("Vary"), "")
+
+		read := serve(t, store, sessions.Options{}, key, func(w http.ResponseWriter, s *sessions.Session) {
+			v, _ := s.Get("hello")
+			djangotest.AssertEqual(t, v, any("world"))
+			djangotest.AssertEqual(t, s.Has("hello"), true)
+			_, _ = w.Write([]byte("ok"))
+		})
+		djangotest.AssertEqual(t, store.decodes, 1)
+		djangotest.AssertEqual(t, read.rec.Header().Get("Vary"), "Cookie")
+	})
+}
+
+// A session that the handler only marks modified is read from the store
+// before the save, which keeps its values, as Django's save() loads them.
+//
+// No Django test exists: Django's tests set modified only on sessions they
+// read.
+func TestMiddlewareSavesUnreadModifiedSession(t *testing.T) {
+	eachMiddlewareStore(t, func(t *testing.T, store *sessions.DBStore, _ *orm.DB) {
+		key := serve(t, store, sessions.Options{}, "", touchingSession).session.Key()
+
+		e := serve(t, store, sessions.Options{}, key, func(w http.ResponseWriter, s *sessions.Session) {
+			s.SetModified(true)
+			_, _ = w.Write([]byte("ok"))
+		})
+		djangotest.AssertEqual(t, e.cookie().Value, key)
+		djangotest.AssertEqual(t, load(t, store, key).Data(), map[string]any{"hello": "world"})
+	})
+}
+
+// A store that cannot load the session fails only the requests that use the
+// session. The handler sees an empty session.
+//
+// No Django test exists: Django raises the error of the store in the view.
+func TestMiddlewareLoadError(t *testing.T) {
+	store := &countingStore{Store: sessions.NewSignedCookieStore([]byte("secret")), err: errors.New("store down")}
+	untouched := serve(t, store, sessions.Options{}, "value", func(w http.ResponseWriter, _ *sessions.Session) {
+		_, _ = w.Write([]byte("ok"))
+	})
+	djangotest.AssertEqual(t, untouched.rec.Code, http.StatusOK)
+	djangotest.AssertEqual(t, untouched.rec.Body.String(), "ok")
+
+	read := serve(t, store, sessions.Options{}, "value", func(w http.ResponseWriter, s *sessions.Session) {
+		_, ok := s.Get("hello")
+		djangotest.AssertEqual(t, ok, false)
+		_, _ = w.Write([]byte("ok"))
+	})
+	djangotest.AssertEqual(t, read.rec.Code, http.StatusInternalServerError)
+	djangotest.AssertEqual(t, read.rec.Body.String(), "session error\n")
+
+	everyRequest := serve(t, store, sessions.Options{SaveEveryRequest: true}, "value",
+		func(w http.ResponseWriter, _ *sessions.Session) {
+			_, _ = w.Write([]byte("ok"))
+		})
+	djangotest.AssertEqual(t, everyRequest.rec.Code, http.StatusInternalServerError)
 }

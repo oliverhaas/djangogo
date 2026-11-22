@@ -13,6 +13,10 @@ import (
 // Session is the data of one browser session (Django's SessionBase). The zero
 // value is an empty session without a key.
 //
+// The middleware reads the session from the store when a method first needs
+// its key or its values, as Django loads the session on first access. A
+// request whose handler does not use the session does not read the store.
+//
 // A Session belongs to one request and is not safe for concurrent use. Values
 // travel through JSON: a number read back from the store is a float64.
 type Session struct {
@@ -33,15 +37,41 @@ type Session struct {
 	// loaded the session. Zero values mean Django's defaults.
 	cookieAge    time.Duration
 	browserClose bool
+	// loader reads the session from the store. It is set until the first
+	// load.
+	loader func() (*Session, error)
+	// loadErr is the error of loader. The session reads as empty then, and
+	// the middleware answers with a server error.
+	loadErr error
+}
+
+// load reads the session from the store on the first call and returns the
+// error of that read.
+func (s *Session) load() error {
+	if s.loader != nil {
+		loader := s.loader
+		s.loader = nil
+		loaded, err := loader()
+		if err != nil {
+			s.loadErr = err
+		} else {
+			s.key, s.data, s.persisted = loaded.key, loaded.data, loaded.persisted
+		}
+	}
+	return s.loadErr
 }
 
 // Key returns the key that identifies the session in the store (Django's
 // session_key). It is empty for a session that was never saved, after Flush,
 // and for every session of the signed-cookie store.
-func (s *Session) Key() string { return s.key }
+func (s *Session) Key() string {
+	_ = s.load()
+	return s.key
+}
 
 // Get returns the value stored under k and whether it was present.
 func (s *Session) Get(k string) (any, bool) {
+	_ = s.load()
 	s.accessed = true
 	v, ok := s.data[k]
 	return v, ok
@@ -49,6 +79,7 @@ func (s *Session) Get(k string) (any, bool) {
 
 // Has reports whether a value is stored under k.
 func (s *Session) Has(k string) bool {
+	_ = s.load()
 	s.accessed = true
 	_, ok := s.data[k]
 	return ok
@@ -56,6 +87,7 @@ func (s *Session) Has(k string) bool {
 
 // Set stores v under k and marks the session modified.
 func (s *Session) Set(k string, v any) {
+	_ = s.load()
 	s.values()[k] = v
 	s.accessed = true
 	s.modified = true
@@ -64,6 +96,7 @@ func (s *Session) Set(k string, v any) {
 // SetDefault returns the value stored under k. When there is none it stores v
 // first, which marks the session modified (Django's setdefault).
 func (s *Session) SetDefault(k string, v any) any {
+	_ = s.load()
 	s.accessed = true
 	if cur, ok := s.data[k]; ok {
 		return cur
@@ -74,6 +107,7 @@ func (s *Session) SetDefault(k string, v any) any {
 
 // Update stores every value of values and marks the session modified.
 func (s *Session) Update(values map[string]any) {
+	_ = s.load()
 	maps.Copy(s.values(), values)
 	s.accessed = true
 	s.modified = true
@@ -88,6 +122,7 @@ func (s *Session) Delete(k string) {
 // Pop returns the value stored under k and removes it. The boolean reports
 // whether k was present; the session is marked modified in that case only.
 func (s *Session) Pop(k string) (any, bool) {
+	_ = s.load()
 	s.accessed = true
 	v, ok := s.data[k]
 	if !ok {
@@ -100,6 +135,7 @@ func (s *Session) Pop(k string) (any, bool) {
 
 // Data returns a shallow copy of the values of the session.
 func (s *Session) Data() map[string]any {
+	_ = s.load()
 	s.accessed = true
 	cp := make(map[string]any, len(s.data))
 	maps.Copy(cp, s.data)
@@ -109,6 +145,7 @@ func (s *Session) Data() map[string]any {
 // Clear removes all values and marks the session modified. The key stays; use
 // Flush to end the session.
 func (s *Session) Clear() {
+	_ = s.load()
 	s.data = make(map[string]any)
 	s.accessed = true
 	s.modified = true
@@ -128,9 +165,10 @@ func (s *Session) Accessed() bool { return s.accessed }
 
 // IsEmpty reports whether the session has neither a key nor values (Django's
 // is_empty). The middleware does not save an empty session and deletes its
-// cookie.
+// cookie. A session that the middleware has not read yet is not empty, as in
+// Django, where it has the key of the cookie.
 func (s *Session) IsEmpty() bool {
-	return s.key == "" && len(s.data) == 0
+	return s.loader == nil && s.key == "" && len(s.data) == 0
 }
 
 // CycleKey gives the session a new key and keeps its values (Django's
@@ -138,6 +176,7 @@ func (s *Session) IsEmpty() bool {
 // does, so that a key known to an attacker beforehand is worthless. The store
 // removes what it holds under the old key when the session is saved.
 func (s *Session) CycleKey() {
+	_ = s.load()
 	s.retire()
 	s.key = newKey()
 	s.accessed = true
@@ -149,6 +188,7 @@ func (s *Session) CycleKey() {
 // the request. Logout
 // calls it so that the next user of the browser cannot read the old data.
 func (s *Session) Flush() {
+	_ = s.load()
 	s.retire()
 	s.key = ""
 	s.data = make(map[string]any)

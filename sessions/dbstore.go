@@ -70,6 +70,9 @@ func (s *DBStore) New() *Session {
 // the row is gone the result is ErrUpdate and nothing is saved. Rows of keys
 // retired by CycleKey are deleted.
 func (s *DBStore) Encode(ctx context.Context, sess *Session) (string, error) {
+	if err := sess.load(); err != nil {
+		return "", err
+	}
 	raw, err := json.Marshal(sess.data)
 	if err != nil {
 		return "", err
@@ -126,6 +129,9 @@ func (s *DBStore) Decode(ctx context.Context, cookieValue string) (*Session, err
 // Delete removes the row of sess and the rows of its retired keys. A later
 // save of sess fails with ErrUpdate.
 func (s *DBStore) Delete(ctx context.Context, sess *Session) error {
+	if err := sess.load(); err != nil {
+		return err
+	}
 	if err := s.dropStale(ctx, sess); err != nil {
 		return err
 	}

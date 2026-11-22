@@ -34,6 +34,7 @@ func (s *Session) ClearExpiry() {
 // get_expiry_age). Without a custom expiry this is the cookie age of the
 // middleware.
 func (s *Session) GetExpiryAge() time.Duration {
+	_ = s.load()
 	s.accessed = true
 	return s.expiryAge(time.Now())
 }
@@ -41,6 +42,7 @@ func (s *Session) GetExpiryAge() time.Duration {
 // GetExpiryDate returns the time at which the session expires (Django's
 // get_expiry_date).
 func (s *Session) GetExpiryDate() time.Time {
+	_ = s.load()
 	s.accessed = true
 	return s.expiryDate(time.Now())
 }
@@ -50,6 +52,7 @@ func (s *Session) GetExpiryDate() time.Time {
 // decides: only SetExpiry(0) says yes. Without one the policy of the
 // middleware applies.
 func (s *Session) GetExpireAtBrowserClose() bool {
+	_ = s.load()
 	s.accessed = true
 	seconds, _, kind := s.expiry()
 	if kind == kindNone {

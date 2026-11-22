@@ -69,6 +69,9 @@ func (s *FileStore) New() *Session {
 // replaces that file; when the file is gone the result is ErrUpdate and
 // nothing is saved. Files of keys retired by CycleKey are deleted.
 func (s *FileStore) Encode(_ context.Context, sess *Session) (string, error) {
+	if err := sess.load(); err != nil {
+		return "", err
+	}
 	raw, err := json.Marshal(sess.data)
 	if err != nil {
 		return "", err
@@ -132,6 +135,9 @@ func (s *FileStore) Decode(_ context.Context, cookieValue string) (*Session, err
 // Delete removes the file of sess and the files of its retired keys. A later
 // save of sess fails with ErrUpdate.
 func (s *FileStore) Delete(_ context.Context, sess *Session) error {
+	if err := sess.load(); err != nil {
+		return err
+	}
 	s.dropStale(sess)
 	s.remove(sess.key)
 	return nil
