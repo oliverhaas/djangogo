@@ -629,6 +629,18 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - Testing: `djangotest.AssertConstraintExists` and
   `djangotest.AssertConstraintNotExists` check a named constraint or index
   of a table.
+- Migrations: `makemigrations` records `Meta.Constraints`. `CreateModel`
+  takes `Constraints`, and the operations `AddConstraint`, `RemoveConstraint`
+  and `AlterConstraint` add, drop and change a constraint. A change of only
+  the violation message or code gives an `AlterConstraint`, which leaves the
+  database alone; any other change drops the constraint and adds it again.
+  On SQLite, adding or dropping a check constraint or a unique constraint on
+  fields rebuilds the table. The migration writer writes conditions and
+  expressions as the Go calls that build them, and the optimizer folds the
+  constraint operations into `CreateModel` as Django's does.
+  `orm.ConstraintSource` returns that Go source, and `orm.NewStateModel` and
+  `orm.ConstraintSQL` render the SQL of a constraint on a model of a
+  migration state.
 
 ### Changed
 

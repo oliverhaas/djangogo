@@ -78,7 +78,7 @@ const (
 	depAlter
 	// depAlterTogether: the unique-together sets of the model are altered.
 	depAlterTogether
-	// depRemoveIndex: an index of the model is removed.
+	// depRemoveIndex: an index or a constraint of the model is removed.
 	depRemoveIndex
 )
 
@@ -122,8 +122,12 @@ func satisfies(op Operation, dep opDep) bool {
 		o, ok := op.(AlterUniqueTogether)
 		return ok && o.Name == dep.model
 	case depRemoveIndex:
-		o, ok := op.(RemoveIndex)
-		return ok && o.Model == dep.model
+		switch o := op.(type) {
+		case RemoveIndex:
+			return o.Model == dep.model
+		case RemoveConstraint:
+			return o.Model == dep.model
+		}
 	}
 	return false
 }
@@ -159,6 +163,8 @@ type Autodetector struct {
 	renamedFields map[fieldKey]string
 	renames       []fieldRename
 	indexChanges  []indexChange
+	// constraintChanges lists the constraint changes of the kept models.
+	constraintChanges []constraintChange
 }
 
 // NewAutodetector returns an autodetector for the change from the state from
@@ -197,6 +203,7 @@ func (a *Autodetector) detectChanges(graph *Graph) error {
 	a.renamedFields = map[fieldKey]string{}
 	a.renames = nil
 	a.indexChanges = nil
+	a.constraintChanges = nil
 	a.existingApps = map[string]bool{}
 	a.oldModels = map[modelKey]bool{}
 	a.newModels = map[modelKey]bool{}
@@ -218,6 +225,8 @@ func (a *Autodetector) detectChanges(graph *Graph) error {
 		return err
 	}
 	a.createAlteredIndexes()
+	a.createAlteredConstraints()
+	a.generateRemovedConstraints()
 	a.generateRemovedIndexes()
 	a.generateRenamedFields()
 	a.generateAlteredUniqueTogether(true)
@@ -230,6 +239,8 @@ func (a *Autodetector) detectChanges(graph *Graph) error {
 	}
 	a.generateAlteredUniqueTogether(false)
 	a.generateAddedIndexes()
+	a.generateAddedConstraints()
+	a.generateAlteredConstraints()
 	a.generateAlteredTables()
 
 	if err := a.sortOperations(); err != nil {

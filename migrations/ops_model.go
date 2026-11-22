@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/oliverhaas/djangogo/internal/naming"
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // CreateModel creates a model's table, with its indexes and unique-together
@@ -20,6 +21,8 @@ type CreateModel struct {
 	Fields         []FieldState
 	Indexes        []Index
 	UniqueTogether [][]string
+	// Constraints holds the check and unique constraints of the model.
+	Constraints []orm.Constraint
 }
 
 // StateForwards adds the model to the state.
@@ -43,7 +46,10 @@ func (o CreateModel) StateForwards(app string, state *ProjectState) error {
 	if table == "" {
 		table = defaultTable(app, o.Name)
 	}
-	ms := &ModelState{App: app, Name: o.Name, Table: table, Fields: o.Fields, Indexes: o.Indexes, UniqueTogether: o.UniqueTogether}
+	ms := &ModelState{
+		App: app, Name: o.Name, Table: table, Fields: o.Fields, Indexes: o.Indexes,
+		UniqueTogether: o.UniqueTogether, Constraints: o.Constraints,
+	}
 	state.AddModel(ms.clone())
 	return nil
 }

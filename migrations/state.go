@@ -160,6 +160,8 @@ type ModelState struct {
 	Indexes []Index
 	// UniqueTogether holds sets of Go field names that must be unique together.
 	UniqueTogether [][]string
+	// Constraints holds the check and unique constraints of Meta.Constraints.
+	Constraints []orm.Constraint
 }
 
 // Label returns "app.Name".
@@ -183,6 +185,16 @@ func (m *ModelState) PrimaryKey() *FieldState {
 		}
 	}
 	return nil
+}
+
+// ConstraintByName returns the constraint with the given name.
+func (m *ModelState) ConstraintByName(name string) (orm.Constraint, bool) {
+	for _, c := range m.Constraints {
+		if c.ConstraintName() == name {
+			return c, true
+		}
+	}
+	return nil, false
 }
 
 // IndexByName returns the model-level index with the given name.
@@ -242,6 +254,7 @@ func (m *ModelState) clone() *ModelState {
 		out.Indexes = nil
 	}
 	out.UniqueTogether = cloneFieldSets(m.UniqueTogether)
+	out.Constraints = slices.Clone(m.Constraints)
 	return &out
 }
 
@@ -373,8 +386,8 @@ type fieldRef struct {
 }
 
 // StateFromRegistry snapshots every model of r, including its M2M fields and
-// Meta.Indexes and Meta.UniqueTogether options. Models keep their registration
-// order.
+// its Meta.Indexes, Meta.UniqueTogether and Meta.Constraints options. Models
+// keep their registration order.
 func StateFromRegistry(r *orm.Registry) *ProjectState {
 	ps := NewProjectState()
 	for _, m := range r.Models() {
@@ -402,6 +415,7 @@ func StateFromRegistry(r *orm.Registry) *ProjectState {
 			Fields:         fields,
 			Indexes:        indexes,
 			UniqueTogether: m.UniqueTogether(),
+			Constraints:    m.Constraints(),
 		})
 	}
 	return ps

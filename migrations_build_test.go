@@ -76,6 +76,15 @@ func handWritten() migrations.Migration {
 				},
 				Indexes:        []migrations.Index{{Name: "agent_rank_idx", Fields: []string{"Rank", "Name"}}},
 				UniqueTogether: [][]string{{"Name", "Rank"}},
+				// Conditions and expressions with nested pointers would
+				// print their addresses, so the constraints use flat ones.
+				Constraints: []orm.Constraint{
+					orm.UniqueConstraint{
+						Name: "agent_name_rank_uniq", Fields: []string{"Name", "Rank"},
+						Condition: orm.Q("active", true), ViolationErrorCode: "duplicate",
+					},
+					orm.UniqueConstraint{Name: "agent_name_uniq", Expressions: []orm.Expr{orm.F("name")}, NullsNotDistinct: true},
+				},
 			},
 			migrations.RenameModel{OldName: "Agent", NewName: "Broker"},
 			migrations.AlterModelTable{Name: "Broker", Table: "people_broker"},
@@ -83,6 +92,14 @@ func handWritten() migrations.Migration {
 			migrations.AlterUniqueTogether{Name: "Broker"},
 			migrations.AddIndex{Model: "Broker", Index: migrations.Index{Name: "broker_name_idx", Fields: []string{"Name"}}},
 			migrations.RemoveIndex{Model: "Broker", Name: "broker_name_idx"},
+			migrations.AddConstraint{Model: "Broker", Constraint: orm.CheckConstraint{
+				Name: "broker_rank_gte_0", Condition: orm.Q("rank__gte", int64(0)).Or(orm.Q("rank__isnull", true)),
+			}},
+			migrations.AlterConstraint{Model: "Broker", Name: "broker_rank_gte_0", Constraint: orm.CheckConstraint{
+				Name: "broker_rank_gte_0", Condition: orm.Q("rank__gte", int64(0)).Or(orm.Q("rank__isnull", true)),
+				ViolationErrorMessage: "The rank must not be negative.",
+			}},
+			migrations.RemoveConstraint{Model: "Broker", Name: "broker_rank_gte_0"},
 			migrations.AddField{
 				Model:   "Broker",
 				Field:   migrations.FieldState{Name: "Fee", Column: "fee", Kind: orm.KindInt},

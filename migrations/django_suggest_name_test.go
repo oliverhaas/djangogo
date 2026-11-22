@@ -6,6 +6,7 @@ import (
 
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/migrations"
+	"github.com/oliverhaas/djangogo/orm"
 )
 
 // suggestName returns the suggested name of a migration with the operations.
@@ -86,15 +87,11 @@ func TestOperationWithNoSuggestedName(t *testing.T) {
 	assertAutoName(t, suggestName(false, migrations.CreateModel{Name: "Person"}, selectOne))
 }
 
-// The Django test adds a UniqueConstraint with that name. Go has no
-// constraint operations, so the port adds an index, whose name ends up in the
-// suggested name in the same way.
-//
 // Ported from Django: tests/migrations/test_autodetector.py::MigrationSuggestNameTests.test_operation_with_invalid_chars_in_suggested_name
 func TestOperationWithInvalidCharsInSuggestedName(t *testing.T) {
-	op := migrations.AddIndex{
-		Model: "Person",
-		Index: migrations.Index{Name: "person.name-*~unique!", Fields: []string{"Name"}},
+	op := migrations.AddConstraint{
+		Model:      "Person",
+		Constraint: orm.UniqueConstraint{Fields: []string{"Name"}, Name: "person.name-*~unique!"},
 	}
 	djangotest.AssertEqual(t, suggestName(false, op), "person_person_name_unique_")
 }

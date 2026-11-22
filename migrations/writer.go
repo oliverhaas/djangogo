@@ -200,6 +200,17 @@ func (w *writer) operation(op Operation) (string, error) {
 		if len(o.UniqueTogether) > 0 {
 			fmt.Fprintf(&b, "UniqueTogether: %s,\n", fieldSets(o.UniqueTogether))
 		}
+		if len(o.Constraints) > 0 {
+			b.WriteString("Constraints: []orm.Constraint{\n")
+			for _, c := range o.Constraints {
+				src, err := w.constraint(c)
+				if err != nil {
+					return "", err
+				}
+				b.WriteString(src + ",\n")
+			}
+			b.WriteString("},\n")
+		}
 		b.WriteString("}")
 	case DeleteModel:
 		fmt.Fprintf(&b, "migrations.DeleteModel{Name: %q}", o.Name)
@@ -217,6 +228,20 @@ func (w *writer) operation(op Operation) (string, error) {
 		fmt.Fprintf(&b, "migrations.AddIndex{\nModel: %q,\nIndex: migrations.Index{%s},\n}", o.Model, indexParts(o.Index))
 	case RemoveIndex:
 		fmt.Fprintf(&b, "migrations.RemoveIndex{Model: %q, Name: %q}", o.Model, o.Name)
+	case AddConstraint:
+		src, err := w.constraint(o.Constraint)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "migrations.AddConstraint{\nModel: %q,\nConstraint: %s,\n}", o.Model, src)
+	case RemoveConstraint:
+		fmt.Fprintf(&b, "migrations.RemoveConstraint{Model: %q, Name: %q}", o.Model, o.Name)
+	case AlterConstraint:
+		src, err := w.constraint(o.Constraint)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "migrations.AlterConstraint{\nModel: %q,\nName: %q,\nConstraint: %s,\n}", o.Model, o.Name, src)
 	case AddField:
 		oneOff, err := w.oneOffDefault(o.Default)
 		if err != nil {

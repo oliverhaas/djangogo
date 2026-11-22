@@ -466,3 +466,38 @@ func TestSanityIndexName(t *testing.T) {
 		t.Errorf("AddIndex with an unnamed index: err = %v", err)
 	}
 }
+
+// stateModelWithConstraints is the model of TestFromModelConstraints.
+type stateModelWithConstraints struct {
+	ID   int64
+	Size int64
+}
+
+// Meta sets the constraints of stateModelWithConstraints.
+func (stateModelWithConstraints) Meta() orm.Meta {
+	return orm.Meta{Constraints: []orm.Constraint{
+		orm.CheckConstraint{Condition: orm.Q("size__gt", 1), Name: "size_gt_1"},
+	}}
+}
+
+// Ported from Django: tests/migrations/test_state.py::ModelStateTests.test_from_model_constraints
+//
+// Django asserts that the state holds copies of the model's constraints. A
+// Go constraint is a value, so the test asserts that a change to the state's
+// list leaves the model's constraints alone.
+func TestFromModelConstraints(t *testing.T) {
+	reg := orm.NewRegistry()
+	m, err := reg.RegisterApp("migrations", &stateModelWithConstraints{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Resolve(); err != nil {
+		t.Fatal(err)
+	}
+	state := migrations.StateFromRegistry(reg)
+	modelConstraints := m.Constraints()
+	stateConstraints := modelOf(t, state, "migrations", "stateModelWithConstraints").Constraints
+	djangotest.AssertEqual(t, stateConstraints, modelConstraints)
+	stateConstraints[0] = orm.CheckConstraint{Condition: orm.Q("size__gt", 2), Name: "size_gt_2"}
+	djangotest.AssertEqual(t, m.Constraints(), modelConstraints)
+}

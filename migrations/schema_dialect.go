@@ -20,7 +20,7 @@ import (
 // pointing to the table by name.
 func (e *SchemaEditor) remakeTable(ctx context.Context, state *ProjectState, oldMS, newMS *ModelState, exprs map[string]string) error {
 	tmp := "new__" + newMS.Table
-	create, err := e.createTableSQL(state, tmp, newMS.Fields)
+	create, err := e.createTableSQL(state, newMS, tmp)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func (e *SchemaEditor) remakeTable(ctx context.Context, state *ProjectState, old
 			strings.Join(sources, ", ")+" FROM "+e.q(oldMS.Table))
 	}
 	stmts = append(stmts, "DROP TABLE "+e.q(oldMS.Table), "ALTER TABLE "+e.q(tmp)+" RENAME TO "+e.q(newMS.Table))
-	indexes, err := e.indexStatements(newMS)
+	indexes, err := e.indexStatements(state, newMS)
 	if err != nil {
 		return err
 	}

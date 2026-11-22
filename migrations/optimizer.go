@@ -1,6 +1,10 @@
 package migrations
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/oliverhaas/djangogo/orm"
+)
 
 // Optimize shortens a list of operations of one app without changing its
 // effect, the counterpart of Django's MigrationOptimizer. A CreateModel
@@ -133,6 +137,28 @@ func reduce(op, other Operation, app string) ([]Operation, int) {
 		if x, ok := other.(RemoveIndex); ok && x.Model == o.Model && x.Name == o.Index.Name {
 			return nil, reduceReplaced
 		}
+	case AddConstraint:
+		switch x := other.(type) {
+		case RemoveConstraint:
+			if x.Model == o.Model && x.Name == constraintName(o.Constraint) {
+				return nil, reduceReplaced
+			}
+		case AlterConstraint:
+			if x.Model == o.Model && x.Name == constraintName(o.Constraint) {
+				return []Operation{AddConstraint{Model: o.Model, Constraint: x.Constraint}}, reduceReplaced
+			}
+		}
+	case AlterConstraint:
+		switch x := other.(type) {
+		case AlterConstraint:
+			if x.Model == o.Model && x.Name == o.Name {
+				return []Operation{other}, reduceReplaced
+			}
+		case RemoveConstraint:
+			if x.Model == o.Model && x.Name == o.Name {
+				return []Operation{other}, reduceReplaced
+			}
+		}
 	}
 	return nil, reduceBlocked
 }
@@ -234,8 +260,35 @@ func reduceCreateModel(o CreateModel, other Operation, app string) ([]Operation,
 			c.Indexes = slices.DeleteFunc(cloneIndexes(o.Indexes), func(idx Index) bool { return idx.Name == x.Name })
 			return one(c)
 		}
+	case AddConstraint:
+		if x.Model == o.Name {
+			c := o
+			c.Constraints = append(slices.Clone(o.Constraints), x.Constraint)
+			return one(c)
+		}
+	case AlterConstraint:
+		if x.Model == o.Name {
+			c := o
+			c.Constraints = append(withoutConstraint(o.Constraints, x.Name), x.Constraint)
+			return one(c)
+		}
+	case RemoveConstraint:
+		if x.Model == o.Name {
+			c := o
+			c.Constraints = withoutConstraint(o.Constraints, x.Name)
+			return one(c)
+		}
 	}
 	return nil, false
+}
+
+// withoutConstraint returns a copy of constraints without the one named name.
+func withoutConstraint(constraints []orm.Constraint, name string) []orm.Constraint {
+	out := slices.DeleteFunc(slices.Clone(constraints), func(c orm.Constraint) bool { return c.ConstraintName() == name })
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // cloneIndexes deep-copies a list of indexes.

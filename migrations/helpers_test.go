@@ -40,6 +40,7 @@ type testModelOptions struct {
 	multicolIndex  bool
 	uniqueTogether bool
 	table          string
+	constraints    []orm.Constraint
 }
 
 // applyOps runs the operations forwards in one schema editor, starting from
@@ -159,6 +160,9 @@ func setUpTestModel(t *testing.T, db *orm.DB, app string, opts testModelOptions)
 		ops = append(ops, migrations.AddIndex{
 			Model: "Pony", Index: migrations.Index{Name: "pony_test_idx", Fields: []string{"Pink", "Weight"}},
 		})
+	}
+	for _, c := range opts.constraints {
+		ops = append(ops, migrations.AddConstraint{Model: "Pony", Constraint: c})
 	}
 	if opts.secondModel {
 		ops = append(ops, migrations.CreateModel{Name: "Stable", Fields: []migrations.FieldState{idField}})

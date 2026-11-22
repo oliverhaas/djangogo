@@ -135,27 +135,22 @@ func TestRemoveIndexes(t *testing.T) {
 		migrations.RemoveIndex{Model: "Book", Name: "book_title_author_idx"})
 }
 
-// The Django model also has a UniqueConstraint, and Django expects a
-// RemoveConstraint after the RemoveIndex. Go has no constraint operations, so
-// the port keeps the index only.
-//
 // Ported from Django: tests/migrations/test_autodetector.py::AutodetectorTests.test_remove_field_with_model_options
 func TestRemoveFieldWithModelOptions(t *testing.T) {
+	dog := withIndexes(
+		model("testapp", "Dog", idField, charField("Name", "name", 100), fkField("Animal", "animal_id", "testapp.Animal")),
+		migrations.Index{Name: "animal_name_idx", Fields: []string{"Animal", "Name"}})
 	before := models{
 		model("testapp", "Animal", idField),
-		withIndexes(
-			model("testapp", "Dog", idField, charField("Name", "name", 100), fkField("Animal", "animal_id", "testapp.Animal")),
-			migrations.Index{Name: "animal_name_idx", Fields: []string{"Animal", "Name"}}),
+		withConstraints(dog, orm.UniqueConstraint{Fields: []string{"Animal", "Name"}, Name: "animal_name_idx"}),
 	}
 	changes := getChanges(t, before, nil, nil)
+	// Right number/type of migrations?
 	assertNumberMigrations(t, changes, "testapp", 1)
-	assertOperationTypes(t, changes, "testapp", 0, "RemoveIndex", "RemoveField", "DeleteModel", "DeleteModel")
+	assertOperationTypes(t, changes, "testapp", 0,
+		"RemoveIndex", "RemoveConstraint", "RemoveField", "DeleteModel", "DeleteModel")
 }
 
-// The Django model has a UniqueConstraint over the two fields and Django
-// expects RemoveConstraint first. Go has no constraint operations; the port
-// uses unique_together, which must go before the field in the same way.
-//
 // Ported from Django: tests/migrations/test_autodetector.py::AutodetectorTests.test_remove_field_with_remove_index_or_constraint_dependency
 func TestRemoveFieldWithRemoveIndexOrConstraintDependency(t *testing.T) {
 	date := autoNow(dateTimeField("Date", "date"))
@@ -163,11 +158,13 @@ func TestRemoveFieldWithRemoveIndexOrConstraintDependency(t *testing.T) {
 	category.RelOnDelete = orm.OnDeleteSetNull
 	before := models{
 		model("testapp", "Category", idField),
-		withUniqueTogether(model("testapp", "Model", idField, date, category), []string{"Date", "Category"}),
+		withConstraints(model("testapp", "Model", idField, date, category),
+			orm.UniqueConstraint{Fields: []string{"Date", "Category"}, Name: "unique_category_for_date"}),
 	}
 	changes := getChanges(t, before, models{model("testapp", "Model", idField, date)}, nil)
+	// Right number/type of migrations?
 	assertNumberMigrations(t, changes, "testapp", 1)
-	assertOperationTypes(t, changes, "testapp", 0, "AlterUniqueTogether", "RemoveField", "DeleteModel")
+	assertOperationTypes(t, changes, "testapp", 0, "RemoveConstraint", "RemoveField", "DeleteModel")
 }
 
 // Ported from Django: tests/migrations/test_autodetector.py::AutodetectorTests.test_order_fields_indexes

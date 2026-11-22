@@ -133,10 +133,12 @@ func (e *SchemaEditor) referencesClause(state *ProjectState, f FieldState) (stri
 	return "REFERENCES " + e.q(target.Table) + " (" + e.q(pk.Column) + ")" + f.RelOnDelete.Clause(), nil
 }
 
-// createTableSQL renders CREATE TABLE for the fields, with a FOREIGN KEY
-// constraint per relation. It is the statement orm.DB.CreateTable issues, so a
+// createTableSQL renders CREATE TABLE named table for the fields of ms, with
+// a FOREIGN KEY constraint per relation and the table constraints of
+// ms.Constraints. It is the statement orm.DB.CreateTable issues, so a
 // migrated schema equals a directly created one.
-func (e *SchemaEditor) createTableSQL(state *ProjectState, table string, fields []FieldState) (string, error) {
+func (e *SchemaEditor) createTableSQL(state *ProjectState, ms *ModelState, table string) (string, error) {
+	fields := ms.Fields
 	defs := make([]string, 0, len(fields))
 	for _, f := range fields {
 		if f.IsManyToMany() {
@@ -154,6 +156,11 @@ func (e *SchemaEditor) createTableSQL(state *ProjectState, table string, fields 
 		}
 		defs = append(defs, "FOREIGN KEY ("+e.q(f.Column)+") "+ref)
 	}
+	constraints, _, err := e.constraintsSQL(state, ms)
+	if err != nil {
+		return "", err
+	}
+	defs = append(defs, constraints...)
 	return "CREATE TABLE " + e.q(table) + " (" + strings.Join(defs, ", ") + ")", nil
 }
 
@@ -213,8 +220,9 @@ func (e *SchemaEditor) dropUniqueSQL(name, table string) string {
 }
 
 // indexStatements returns the statements that create every index and
-// unique-together constraint of a model.
-func (e *SchemaEditor) indexStatements(ms *ModelState) ([]string, error) {
+// unique-together constraint of a model, and the unique indexes of its
+// constraints.
+func (e *SchemaEditor) indexStatements(state *ProjectState, ms *ModelState) ([]string, error) {
 	var out []string
 	for _, f := range ms.Fields {
 		if shouldIndex(f) {
@@ -235,7 +243,11 @@ func (e *SchemaEditor) indexStatements(ms *ModelState) ([]string, error) {
 		}
 		out = append(out, e.addUniqueSQL(e.uniqueTogetherName(ms.Table, cols), ms.Table, cols))
 	}
-	return out, nil
+	_, stmts, err := e.constraintsSQL(state, ms)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, stmts...), nil
 }
 
 // executeAll runs the statements in order.
@@ -251,11 +263,11 @@ func (e *SchemaEditor) executeAll(ctx context.Context, stmts ...string) error {
 // createModel creates the table of ms with its indexes and any auto-created
 // M2M join tables declared on ms.
 func (e *SchemaEditor) createModel(ctx context.Context, state *ProjectState, ms *ModelState) error {
-	create, err := e.createTableSQL(state, ms.Table, ms.Fields)
+	create, err := e.createTableSQL(state, ms, ms.Table)
 	if err != nil {
 		return err
 	}
-	indexes, err := e.indexStatements(ms)
+	indexes, err := e.indexStatements(state, ms)
 	if err != nil {
 		return err
 	}

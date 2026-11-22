@@ -166,9 +166,9 @@ func consPtr[T any](v T) *T { return &v }
 // test_deconstruction test the methods of the abstract BaseConstraint, which
 // orm.Constraint seals. CheckConstraintTests.test_invalid_check_types and
 // UniqueConstraintTests.test_condition_must_be_q are type errors in Go.
-// test_eq, test_repr, and test_deconstruction* of both classes have no
-// counterpart: constraints are plain struct values without a migration
-// serialization of their own.
+// test_eq and test_repr of both classes have no counterpart: constraints are
+// plain struct values. The test_deconstruction* tests are ported in
+// django_constraints_source_test.go.
 
 // Ported from Django: tests/constraints/tests.py::BaseConstraintTests.test_default_violation_error_message
 func TestConstraintsDefaultViolationErrorMessage(t *testing.T) {

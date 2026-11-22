@@ -167,8 +167,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   inheritance. A constraint has no `deferrable`, `include` or `opclasses`,
   cannot refer to a field across a relation, and its expressions cannot be
   ordered. SQLite does not create a unique constraint with
-  `NullsNotDistinct`, which PostgreSQL 15 needs. Migrations do not record
-  constraints yet: `CreateTable` creates them.
+  `NullsNotDistinct`, which PostgreSQL 15 needs. A migration writes the
+  condition and expressions of a constraint as Go code, which covers `Q`,
+  `F`, `Value`, arithmetic and the text functions but no aggregate.
 - **Database:** one database per application. Two models with foreign keys to
   each other cannot be created on PostgreSQL.
 - **Querying:** the date and time transforms (`__year`, `__date`, `__hour`

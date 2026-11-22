@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -78,4 +79,40 @@ func (w *writer) oneOffKindDefault(v any) (string, bool) {
 		return "Default: orm.DefaultUUID4,\n", true
 	}
 	return "", false
+}
+
+// constraint renders a check or unique constraint as Go source.
+func (w *writer) constraint(c orm.Constraint) (string, error) {
+	w.usesORM = true
+	src, err := orm.ConstraintSource(c, w.conditionLiteral)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrNotSerializable, err)
+	}
+	return src, nil
+}
+
+// conditionLiteral renders a value of a constraint condition or expression.
+// Integers are written as int64 and floats as float64, the types the ORM
+// reads them back as.
+func (w *writer) conditionLiteral(v any) (string, error) {
+	switch v.(type) {
+	case bool, string, int64, float64, orm.Decimal, orm.Date, orm.Time, orm.UUID, time.Duration, []byte:
+		return w.defaultLiteral(v), nil
+	}
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return fmt.Sprintf("int64(%d)", rv.Int()), nil
+	case reflect.Uint8, reflect.Uint16, reflect.Uint32:
+		return fmt.Sprintf("int64(%d)", rv.Uint()), nil
+	case reflect.Float32:
+		return w.defaultLiteral(rv.Float()), nil
+	}
+	return "", fmt.Errorf("a value of type %T has no Go source", v)
+}
+
+// constraintSource renders c for comparison: two constraints are the same
+// when their sources are. A constraint without source is compared by value.
+func constraintSource(c orm.Constraint) (string, bool) {
+	src, err := (&writer{}).constraint(c)
+	return src, err == nil
 }

@@ -166,6 +166,9 @@ func (a *Autodetector) generateDeletedModels() {
 		for _, idx := range ms.Indexes {
 			a.addOperation(key.app, RemoveIndex{Model: key.name, Name: idx.Name}, nil, false)
 		}
+		for _, c := range ms.Constraints {
+			a.addOperation(key.app, RemoveConstraint{Model: key.name, Name: c.ConstraintName()}, nil, false)
+		}
 		for _, f := range related {
 			a.addOperation(key.app, RemoveField{Model: key.name, Field: f.Name},
 				[]opDep{{app: key.app, model: key.name, field: f.Name, kind: depRemoveIndex}}, false)
@@ -218,6 +221,9 @@ func (a *Autodetector) generateCreatedModels() {
 		relatedDeps = append(relatedDeps, created)
 		for _, idx := range ms.Indexes {
 			a.addOperation(key.app, AddIndex{Model: key.name, Index: idx}, relatedDeps, false)
+		}
+		for _, c := range ms.Constraints {
+			a.addOperation(key.app, AddConstraint{Model: key.name, Constraint: c}, relatedDeps, false)
 		}
 		if len(ms.UniqueTogether) > 0 {
 			a.addOperation(key.app,
