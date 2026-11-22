@@ -840,6 +840,10 @@ func readsJoin(n sqlNode) bool {
 		return slices.ContainsFunc(n.where.operands(), readsJoin)
 	case typedNode:
 		return readsJoin(n.node)
+	case notNode:
+		return readsJoin(n.inner)
+	case subqueryNode:
+		return slices.ContainsFunc(n.refs, func(r outerRef) bool { return readsJoin(r.node) })
 	default:
 		return false
 	}

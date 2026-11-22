@@ -136,8 +136,16 @@ func (g sourceWriter) condInner(c Cond) (string, error) {
 	if c.conn == connAnd || len(c.children) < 2 {
 		args := make([]string, 0, 2*len(c.children))
 		for _, ch := range c.children {
-			if ch.sub != nil {
+			switch {
+			case ch.sub != nil:
 				s, err := g.cond(*ch.sub)
+				if err != nil {
+					return "", err
+				}
+				args = append(args, s)
+				continue
+			case ch.expr != nil:
+				s, err := g.expr(*ch.expr)
 				if err != nil {
 					return "", err
 				}

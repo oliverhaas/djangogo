@@ -31,11 +31,11 @@ func (c *compiler) splitExclude(path fieldPath, transforms []string, lookup stri
 
 	// isnull=True (including exact=nil) must match outer rows that have NO
 	// related row at all as well as those whose related column is NULL, so the
-	// subquery starts at the outer base model U0 with LEFT OUTER JOINs along
-	// the full path.
+	// subquery starts at the outer base model, such as U0, with LEFT OUTER
+	// JOINs along the full path.
 	if pred.lookup == lookupIsNull && pred.flag {
 		basePK := c.q.model.PrimaryKey()
-		subJS := newSubqueryJoinSet(c.q.model, "U0")
+		subJS := newSubqueryJoinSet(c.q.model, nextAliasPrefix(c.joins.aliasPrefix), 0)
 		subJoins := subJS.follow(subJS.base, path.hops, true, nil)
 		// Force every hop in the isnull=True subquery to LEFT OUTER JOIN so
 		// missing intermediate rows evaluate to NULL rather than being dropped.
@@ -75,7 +75,7 @@ func (c *compiler) splitExclude(path fieldPath, transforms []string, lookup stri
 		outerJoin = prefixJoins[len(prefixJoins)-1]
 	}
 	firstHop := path.hops[firstMany]
-	subJS := newSubqueryJoinSet(firstHop.target, "U1")
+	subJS := newSubqueryJoinSet(firstHop.target, nextAliasPrefix(c.joins.aliasPrefix), 1)
 	targetJoin := subJS.base
 	if len(path.hops) > firstMany+1 {
 		restJoins := subJS.follow(subJS.base, path.hops[firstMany+1:], true, nil)

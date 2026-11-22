@@ -40,25 +40,52 @@ type compiler struct {
 	// m2mPrefetchJoin holds the through-table join used by an M2M prefetch
 	// query so rowsStmt selects its parent FK column.
 	m2mPrefetchJoin *join
+	// parent is the compiler of the query that this one is a subquery of, nil
+	// for a query of its own. outerRefs are the references to it, which a
+	// GROUP BY of the parent needs.
+	parent    *compiler
+	outerRefs []outerRef
+	// groupKeys are the resolved valuesSpec.groupKeys.
+	groupKeys []sqlNode
 }
 
 // compile runs the first phase for q: it resolves the annotations and the
 // filters in call order.
-func (q *query) compile() (*compiler, error) {
+func (q *query) compile() (*compiler, error) { return q.compileIn(nil) }
+
+// compileIn runs the first phase for q as a subquery of the query of parent,
+// whose fields OuterRef reads, or for a query of its own when parent is nil.
+// The tables of a subquery take aliases with the prefix after the one of
+// parent.
+func (q *query) compileIn(parent *compiler) (*compiler, error) {
 	if q.err != nil {
 		return nil, q.err
+	}
+	js := newJoinSet(q.model)
+	if parent != nil {
+		js = newSubqueryJoinSet(q.model, nextAliasPrefix(parent.joins.aliasPrefix), 0)
 	}
 	c := &compiler{
 		q:      q,
 		d:      q.db.Dialect(),
-		joins:  newJoinSet(q.model),
+		joins:  js,
 		annots: make(map[string]sqlNode, len(q.annotations)),
+		parent: parent,
 	}
 	if err := c.addFilters(); err != nil {
 		return nil, err
 	}
 	if err := c.resolveAnnotations(len(q.filters)); err != nil {
 		return nil, err
+	}
+	if q.values != nil && q.values.groups {
+		for _, key := range q.values.groupKeys {
+			n, err := c.resolveExpr(F(key))
+			if err != nil {
+				return nil, err
+			}
+			c.groupKeys = append(c.groupKeys, n)
+		}
 	}
 	// A limit of zero rows matches nothing, whatever the filters say.
 	c.empty = c.empty || q.limit == 0
@@ -202,6 +229,10 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 			return nil, errNegateNonConditional
 		}
 		return notNode{inner: arg}, nil
+	case exprSubquery:
+		return c.resolveSubquery(e)
+	case exprOuterRef:
+		return c.resolveOuterRef(e)
 	case exprStar:
 		return nil, errors.New(`orm: "*" is only valid as the argument of Count`)
 	default:
@@ -721,7 +752,8 @@ func (c *compiler) withOrderColumns(items []selectItem, order []orderItem) []sel
 
 // groupBy returns the GROUP BY columns of a statement, or nil when the query
 // has no aggregate annotation. A query that called Values before annotating
-// groups by the values columns (Django's values().annotate() idiom); any other
+// groups by the values columns (Django's values().annotate() idiom), and by
+// the keys of an earlier Values that grouped (valuesSpec.groupKeys); any other
 // query groups by every column of its own table, so that each row stays one
 // group. The columns of the remaining selected and ordering expressions are
 // added because PostgreSQL requires them.
@@ -745,8 +777,8 @@ func (c *compiler) groupBy(items []selectItem, order []orderItem) []sqlNode {
 	}
 	var out []sqlNode
 	seen := make(map[string]bool)
-	add := func(n sqlNode) {
-		for _, col := range columnsOf(n) {
+	addCols := func(cols []sqlNode) {
+		for _, col := range cols {
 			key := nodeKey(c.d, col)
 			if seen[key] {
 				continue
@@ -759,10 +791,23 @@ func (c *compiler) groupBy(items []selectItem, order []orderItem) []sqlNode {
 			out = append(out, col)
 		}
 	}
-	if c.q.values == nil || !c.q.values.groups {
+	grouped := c.q.values != nil && c.q.values.groups
+	add := func(n sqlNode) {
+		// Values groups by a subquery that reads the outer query as a
+		// whole, as Django's set_group_by groups by a reference to it.
+		if sq, ok := n.(subqueryNode); ok && grouped && len(sq.refs) > 0 {
+			addCols([]sqlNode{sq})
+			return
+		}
+		addCols(columnsOf(n))
+	}
+	if !grouped {
 		for _, f := range c.q.model.fields {
 			add(c.baseColumn(f))
 		}
+	}
+	for _, n := range c.groupKeys {
+		add(n)
 	}
 	for _, it := range items {
 		add(it.node)
@@ -817,7 +862,23 @@ func columnsOf(n sqlNode) []sqlNode {
 		return out
 	case typedNode:
 		return columnsOf(v.node)
+	case notNode:
+		return columnsOf(v.inner)
+	case subqueryNode:
+		// A subquery is grouped by the columns of the outer query it reads,
+		// or as a whole when one of them crosses a relation, as Django's
+		// Query.get_group_by_cols does.
+		var out []sqlNode
+		for _, r := range v.refs {
+			if r.multi {
+				return []sqlNode{v}
+			}
+			out = append(out, columnsOf(r.node)...)
+		}
+		return out
 	default:
+		// An OuterRef is a value of the outer query, which this query does
+		// not group by.
 		return nil
 	}
 }
@@ -1006,58 +1067,47 @@ func renderLimit(w *sqlWriter, limit, offset int) {
 // sliced reports whether the query has a limit or an offset.
 func (q *query) sliced() bool { return q.limit >= 0 || q.offset > 0 }
 
-// subselect returns the statement of q used as the value of a lookup, which
-// the error for a queryset that selects several columns names. It selects the
-// single Values column, or the primary key of a queryset of model rows.
-func (q *query) subselect(lookup string) (*selectStmt, error) {
-	c, err := q.compile()
+// subselect returns the statement of q as a subquery of the query of parent,
+// and the references of q to that query. It selects the single Values column,
+// or the primary key of a queryset of model rows. lookup names the lookup
+// whose value q is in the error for a queryset that selects several columns,
+// and is empty for a Subquery. A query that can match no row returns its
+// statement with errEmptyResultSet.
+func (q *query) subselect(parent *compiler, lookup string) (*selectStmt, []outerRef, error) {
+	c, err := q.compileIn(parent)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var items []selectItem
-	if q.values != nil {
-		items, _, err = c.valuesItems()
-		if err != nil {
-			return nil, err
+	items, err := c.selectedItems()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(items) != 1 {
+		if lookup == "" {
+			return nil, nil, fmt.Errorf("orm: the QuerySet of a Subquery must have 1 selected field (received %d)",
+				len(items))
 		}
-		if len(items) != 1 {
-			return nil, fmt.Errorf(
-				"orm: the QuerySet value for the %s lookup must have 1 selected fields (received %d)",
-				lookup, len(items))
-		}
-	} else {
-		pk := q.model.PrimaryKey()
-		if pk == nil {
-			return nil, fmt.Errorf("orm: model %s has no primary key", q.model.Name())
-		}
-		items = []selectItem{{node: c.baseColumn(pk)}}
+		return nil, nil, fmt.Errorf(
+			"orm: the QuerySet value for the %s lookup must have 1 selected fields (received %d)",
+			lookup, len(items))
 	}
 	// The order of a subquery only matters when it is sliced.
 	s, err := c.build(items, q.sliced())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if c.empty {
-		return nil, errEmptyResultSet
+		return s, c.outerRefs, errEmptyResultSet
 	}
-	return s, nil
+	return s, c.outerRefs, nil
 }
 
 // existsSQL returns the statement that reports whether q matches any row.
 func (q *query) existsSQL() (string, []any, error) {
-	c, err := q.compile()
+	c, s, err := q.existsStmt(nil)
 	if err != nil {
 		return "", nil, err
 	}
-	s, err := c.build([]selectItem{{node: rawNode{sql: "1", typ: typeInt}}}, false)
-	if err != nil {
-		return "", nil, err
-	}
-	if c.empty {
-		return "", nil, errEmptyResultSet
-	}
-	s.distinct = false
-	s.forUpdate = false
 	w := newSQLWriter(c.d)
 	w.write("SELECT EXISTS(")
 	s.render(w)

@@ -241,7 +241,7 @@ func (c *compiler) yearPredicate(lookup string, tn transformNode, value any) (*p
 		return nil, nil
 	}
 	switch value.(type) {
-	case nil, Expr, *Expr, subqueryer:
+	case nil, Expr, *Expr, AnyQuerySet:
 		return nil, nil
 	}
 	year, err := yearValue(value)

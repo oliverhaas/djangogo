@@ -191,16 +191,13 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   condition and expressions of a constraint as Go code, which covers `Q`,
   `F`, `Value`, arithmetic, the text functions, `Abs`, `Coalesce`, `Concat`,
   `Greatest`, `Least`, `Cast`, `ExpressionWrapper`, `Case` and `Not` but no
-  aggregate.
+  aggregate. A constraint cannot hold a subquery.
 - **Database:** one database per application.
 - **Querying:** the date and time transforms (`__year`, `__date`, `__hour`
   and the others) read a datetime in UTC. Besides the aggregates, the
   database functions are `Lower`, `Upper`, `Length`, `Trim`, `LTrim`,
   `RTrim`, `Abs`, `Coalesce`, `Concat`, `Greatest`, `Least`, `Cast` and
-  `Case` with `When`. There
-  are no `Subquery`, `Exists` or `OuterRef` expressions and no window
-  functions, and `Filter` takes no boolean expression as a condition:
-  annotate the expression and filter the annotation by `true` instead. A
+  `Case` with `When`. There are no window functions. A
   transform of `RegisterTransform` applies to one field kind, where Django's
   registration on `CharField` also covers its subclasses. There is no
   `extra()` and no fetch modes. `SelectRelated` needs field names: Django

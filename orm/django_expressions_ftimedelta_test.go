@@ -427,8 +427,20 @@ func TestFTimeDeltaDateSubtraction(t *testing.T) {
 	})
 }
 
-// No Go counterpart: tests/expressions/tests.py::FTimeDeltaTests.test_date_subquery_subtraction
-// needs Subquery and OuterRef, which the ORM does not have.
+// Ported from Django: tests/expressions/tests.py::FTimeDeltaTests.test_date_subquery_subtraction
+func TestFTimeDeltaDateSubquerySubtraction(t *testing.T) {
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		ftdSetUp(t, db)
+		subquery := orm.Query[expExperiment](db).Filter("pk", orm.OuterRef("pk")).Values("completed")
+		exists, err := orm.Query[expExperiment](db).Annotate(
+			"difference", orm.Subquery(subquery).Sub(orm.F("completed")),
+		).Filter("difference", time.Duration(0)).Exists(context.Background())
+		if err != nil {
+			t.Fatalf("Exists: %v", err)
+		}
+		djangotest.AssertEqual(t, exists, true)
+	})
+}
 
 // Ported from Django: tests/expressions/tests.py::FTimeDeltaTests.test_date_case_subtraction
 func TestFTimeDeltaDateCaseSubtraction(t *testing.T) {
@@ -469,8 +481,20 @@ func TestFTimeDeltaTimeSubtraction(t *testing.T) {
 	})
 }
 
-// No Go counterpart: tests/expressions/tests.py::FTimeDeltaTests.test_time_subquery_subtraction
-// needs Subquery and OuterRef, which the ORM does not have.
+// Ported from Django: tests/expressions/tests.py::FTimeDeltaTests.test_time_subquery_subtraction
+func TestFTimeDeltaTimeSubquerySubtraction(t *testing.T) {
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		create(t, db, &expTime{Time: new(orm.NewTime(12, 30, 15, 2345000))})
+		subquery := orm.Query[expTime](db).Filter("pk", orm.OuterRef("pk")).Values("time")
+		exists, err := orm.Query[expTime](db).Annotate(
+			"difference", orm.Subquery(subquery).Sub(orm.F("time")),
+		).Filter("difference", time.Duration(0)).Exists(context.Background())
+		if err != nil {
+			t.Fatalf("Exists: %v", err)
+		}
+		djangotest.AssertEqual(t, exists, true)
+	})
+}
 
 // Ported from Django: tests/expressions/tests.py::FTimeDeltaTests.test_datetime_subtraction
 func TestFTimeDeltaDatetimeSubtraction(t *testing.T) {
@@ -491,8 +515,20 @@ func TestFTimeDeltaDatetimeSubtraction(t *testing.T) {
 	})
 }
 
-// No Go counterpart: tests/expressions/tests.py::FTimeDeltaTests.test_datetime_subquery_subtraction
-// needs Subquery and OuterRef, which the ORM does not have.
+// Ported from Django: tests/expressions/tests.py::FTimeDeltaTests.test_datetime_subquery_subtraction
+func TestFTimeDeltaDatetimeSubquerySubtraction(t *testing.T) {
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		ftdSetUp(t, db)
+		subquery := orm.Query[expExperiment](db).Filter("pk", orm.OuterRef("pk")).Values("start")
+		exists, err := orm.Query[expExperiment](db).Annotate(
+			"difference", orm.Subquery(subquery).Sub(orm.F("start")),
+		).Filter("difference", time.Duration(0)).Exists(context.Background())
+		if err != nil {
+			t.Fatalf("Exists: %v", err)
+		}
+		djangotest.AssertEqual(t, exists, true)
+	})
+}
 
 // Ported from Django: tests/expressions/tests.py::FTimeDeltaTests.test_datetime_subtraction_microseconds
 func TestFTimeDeltaDatetimeSubtractionMicroseconds(t *testing.T) {

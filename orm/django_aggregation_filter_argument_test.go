@@ -107,15 +107,24 @@ func TestFilteredAggregates(t *testing.T) {
 }
 
 // Ported from Django: tests/aggregation/test_filter_argument.py::FilteredAggregateTests.test_filtered_numerical_aggregates
-//
-// FIXME-PORT: the StdDev and Variance subtests; the ORM has no StdDev or
-// Variance aggregate.
 func TestFilteredNumericalAggregates(t *testing.T) {
 	djangotest.EachDB(t, faModels(), func(t *testing.T, db *orm.DB) {
 		faSetUp(t, db)
-		agg := orm.Avg("age").Filter("name__startswith", "test")
-		res := faAggregate(t, orm.Query[faAuthor](db), "age", agg)
-		agApprox(t, res["age"], 66.7, 1)
+		for _, tc := range []struct {
+			name      string
+			aggregate func(arg any) orm.Expr
+			want      float64
+		}{
+			{"Avg", orm.Avg, 66.7},
+			{"StdDev", func(arg any) orm.Expr { return orm.StdDev(arg, false) }, 24.9},
+			{"Variance", func(arg any) orm.Expr { return orm.Variance(arg, false) }, 622.2},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				agg := tc.aggregate("age").Filter("name__startswith", "test")
+				res := faAggregate(t, orm.Query[faAuthor](db), "age", agg)
+				agApprox(t, res["age"], tc.want, 1)
+			})
+		}
 	})
 }
 
@@ -195,8 +204,16 @@ func TestFilteredAggregateOnAnnotate(t *testing.T) {
 	})
 }
 
-// FIXME-PORT: tests/aggregation/test_filter_argument.py::FilteredAggregateTests.test_case_aggregate
-// needs Case and When, which the ORM does not have.
+// Ported from Django: tests/aggregation/test_filter_argument.py::FilteredAggregateTests.test_case_aggregate
+func TestFilteredCaseAggregate(t *testing.T) {
+	djangotest.EachDB(t, faModels(), func(t *testing.T, db *orm.DB) {
+		faSetUp(t, db)
+		agg := orm.Sum(orm.Case(orm.When{Cond: orm.Q("friends__age", 40), Then: orm.F("friends__age")})).
+			Filter("friends__name__startswith", "test")
+		res := faAggregate(t, orm.Query[faAuthor](db), "age", agg)
+		djangotest.AssertEqual(t, res["age"], any(int64(80)))
+	})
+}
 
 // Ported from Django: tests/aggregation/test_filter_argument.py::FilteredAggregateTests.test_sum_star_exception
 func TestFilteredCountStarError(t *testing.T) {
@@ -234,13 +251,67 @@ func TestFilteredAggregateRefAnnotation(t *testing.T) {
 	})
 }
 
-// FIXME-PORT: these tests of
-// tests/aggregation/test_filter_argument.py::FilteredAggregateTests need
-// Subquery, OuterRef or Exists, which the ORM does not have:
-// test_filtered_aggregate_ref_subquery_annotation,
-// test_filtered_aggregate_ref_multiple_subquery_annotation,
-// test_filtered_aggregrate_ref_in_subquery_annotation and
-// test_filtered_aggregate_on_exists.
+// Ported from Django: tests/aggregation/test_filter_argument.py::FilteredAggregateTests.test_filtered_aggregate_ref_subquery_annotation
+func TestFilteredAggregateRefSubqueryAnnotation(t *testing.T) {
+	djangotest.EachDB(t, faModels(), func(t *testing.T, db *orm.DB) {
+		faSetUp(t, db)
+		earliest := orm.Query[faBook](db).Filter("contact__pk", orm.OuterRef("pk")).OrderBy("pubdate").
+			Values("pubdate__year").Limit(1)
+		qs := orm.Query[faAuthor](db).Annotate("earliest_book_year", orm.Subquery(earliest))
+		res := faAggregate(t, qs, "cnt", orm.Count("pk").Filter("earliest_book_year", 2008))
+		djangotest.AssertEqual(t, res["cnt"], any(int64(2)))
+	})
+}
+
+// The through model of Book.authors has no Go type. Where Django filters it
+// by book, the port filters Author by its reverse relation to Book, which
+// reads the same through table.
+
+// Ported from Django: tests/aggregation/test_filter_argument.py::FilteredAggregateTests.test_filtered_aggregate_ref_multiple_subquery_annotation
+func TestFilteredAggregateRefMultipleSubqueryAnnotation(t *testing.T) {
+	djangotest.EachDB(t, faModels(), func(t *testing.T, db *orm.DB) {
+		faSetUp(t, db)
+		otherBooks := orm.Query[faBook](db).Filter("authors__in",
+			orm.Query[faAuthor](db).Filter("book_contact_set", orm.OuterRef(orm.OuterRef("pk"))),
+		).Exclude("pk", orm.OuterRef("pk"))
+		aggregate, err := orm.Query[faBook](db).Values("publisher").Annotate(
+			"has_authors", orm.Exists(orm.Query[faAuthor](db).Filter("book", orm.OuterRef("pk"))),
+			"authors_have_other_books", orm.Exists(otherBooks),
+		).Aggregate(context.Background(),
+			"max_rating", orm.Max("rating").Filter("has_authors", true, "authors_have_other_books", false),
+		)
+		if err != nil {
+			t.Fatalf("Aggregate: %v", err)
+		}
+		djangotest.AssertEqual(t, aggregate, map[string]any{"max_rating": 4.5})
+	})
+}
+
+// Ported from Django: tests/aggregation/test_filter_argument.py::FilteredAggregateTests.test_filtered_aggregrate_ref_in_subquery_annotation
+func TestFilteredAggregateRefInSubqueryAnnotation(t *testing.T) {
+	djangotest.EachDB(t, faModels(), func(t *testing.T, db *orm.DB) {
+		faSetUp(t, db)
+		count := orm.Query[faBook](db).Annotate("weird_count", orm.Count("pk").Filter("pages", orm.OuterRef("age"))).
+			Values("weird_count").Limit(1)
+		qs := orm.Query[faAuthor](db).Annotate("count", orm.Subquery(count)).OrderBy("pk")
+		res := faAggregate(t, qs, "sum", orm.Sum("count"))
+		djangotest.AssertEqual(t, res["sum"], any(int64(0)))
+	})
+}
+
+// Ported from Django: tests/aggregation/test_filter_argument.py::FilteredAggregateTests.test_filtered_aggregate_on_exists
+func TestFilteredAggregateOnExists(t *testing.T) {
+	djangotest.EachDB(t, faModels(), func(t *testing.T, db *orm.DB) {
+		faSetUp(t, db)
+		aggregate, err := orm.Query[faBook](db).Values("publisher").Aggregate(context.Background(),
+			"max_rating", orm.Max("rating").Filter(orm.Exists(orm.Query[faAuthor](db).Filter("book", orm.OuterRef("pk")))),
+		)
+		if err != nil {
+			t.Fatalf("Aggregate: %v", err)
+		}
+		djangotest.AssertEqual(t, aggregate, map[string]any{"max_rating": 4.5})
+	})
+}
 
 // Ported from Django: tests/aggregation/test_filter_argument.py::FilteredAggregateTests.test_filtered_aggregate_empty_condition
 func TestFilteredAggregateEmptyCondition(t *testing.T) {

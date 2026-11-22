@@ -24,6 +24,13 @@ type expEmployee struct {
 	BasedInEU bool   `orm:"default=false"`
 }
 
+// expManager is Django's expressions.Manager.
+type expManager struct {
+	ID        int64
+	Name      string              `orm:"max_length=50"`
+	Secretary orm.FK[expEmployee] `orm:"null;on_delete=cascade;related_name=managers"`
+}
+
 // expCompany is Django's expressions.Company.
 type expCompany struct {
 	ID             int64
@@ -35,11 +42,12 @@ type expCompany struct {
 	BasedInEU      bool                `orm:"default=false"`
 }
 
-// expNumber is Django's expressions.Number without its float and
-// decimal_value fields, which have no kind here.
+// expNumber is Django's expressions.Number without its decimal_value field,
+// which no port reads.
 type expNumber struct {
 	ID      int64
-	Integer int64 `orm:"column=the_integer"`
+	Integer int64    `orm:"column=the_integer"`
+	Float   *float64 `orm:"null;column=the_float"`
 }
 
 // expExperiment is Django's expressions.Experiment.
@@ -84,7 +92,7 @@ type expSimulationRun struct {
 // ports use.
 func expModels() []any {
 	return []any{djangotest.App("expressions",
-		&expEmployee{}, &expCompany{}, &expNumber{},
+		&expEmployee{}, &expManager{}, &expCompany{}, &expNumber{},
 		&expExperiment{}, &expResult{}, &expTime{}, &expSimulationRun{})}
 }
 
@@ -295,17 +303,14 @@ func TestExpressionsUpdateWithFK(t *testing.T) {
 	})
 }
 
-// Django sets Number.float to NULL. Number has no float here, so the port
-// updates Employee.salary, a nullable integer, with Value(nil).
-//
 // Ported from Django: tests/expressions/tests.py::BasicExpressionsTests.test_update_with_none
 func TestExpressionsUpdateWithNone(t *testing.T) {
 	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
-		create(t, db, &expEmployee{Firstname: "A", Lastname: "A", Salary: 1})
-		expCreateNullSalary(t, db, "B", "B")
-		expUpdate(t, orm.Query[expEmployee](db).Filter("salary__isnull", false), 1,
-			"salary", orm.Value(nil))
-		assertFlat(t, orm.Query[expEmployee](db).ValuesList("salary").OrderBy("pk"), []any{nil, nil})
+		create(t, db, &expNumber{Integer: 1, Float: new(1.0)})
+		create(t, db, &expNumber{Integer: 2})
+		expUpdate(t, orm.Query[expNumber](db).Filter("float__isnull", false), 1,
+			"float", orm.Value(nil))
+		assertFlat(t, orm.Query[expNumber](db).ValuesList("float").OrderBy("pk"), []any{nil, nil})
 	})
 }
 

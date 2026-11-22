@@ -45,19 +45,25 @@ type Cond struct {
 	err      error
 }
 
-// condChild is one child of a Cond: a key/value leaf, or a nested condition
-// when sub is set.
+// condChild is one child of a Cond: a key/value leaf, a nested condition
+// when sub is set, or a boolean expression when expr is set.
 type condChild struct {
 	key   string
 	value any
 	sub   *Cond
+	expr  *Expr
 }
 
 // Q builds a condition from alternating keys and values, combined with AND,
 // like Django's Q(**kwargs). A key is a field name with an optional lookup
 // ("name", "age__gt", "author__name__icontains"). An argument may also be
-// another Cond, which is ANDed in. A malformed argument list is reported when
-// the queryset runs.
+// another Cond, which is ANDed in, or a boolean Expr such as Exists, which
+// holds where the expression is true:
+//
+//	orm.Q(orm.Exists(orm.Query[Comment](db).Filter("post", orm.OuterRef("pk"))), "draft", false)
+//
+// A malformed argument list, or an expression that is not boolean, is
+// reported when the queryset runs.
 func Q(args ...any) Cond {
 	c, err := parseConds(args)
 	if err != nil {
@@ -106,17 +112,47 @@ func (c Cond) String() string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		if ch.sub != nil {
+		switch {
+		case ch.sub != nil:
 			b.WriteString(ch.sub.String())
-			continue
+		case ch.expr != nil:
+			b.WriteString(exprLabel(*ch.expr))
+		default:
+			fmt.Fprintf(&b, "('%s', %v)", ch.key, formatCondValue(ch.value))
 		}
-		fmt.Fprintf(&b, "('%s', %v)", ch.key, formatCondValue(ch.value))
 	}
 	b.WriteString(")")
 	if c.negated {
 		b.WriteString(")")
 	}
 	return b.String()
+}
+
+// exprLabel names a boolean expression of a Cond for Cond.String, in the form
+// of Django's repr where it has a readable one, such as "Exists(Post)" or
+// "~F(is_active)".
+func exprLabel(e Expr) string {
+	switch e.kind {
+	case exprSubquery:
+		name := "Subquery"
+		if e.exists {
+			name = "Exists"
+		}
+		if e.sub == nil {
+			return name + "()"
+		}
+		return name + "(" + e.sub.model.Name() + ")"
+	case exprNot:
+		return "~" + exprLabel(*e.arg)
+	case exprField:
+		return "F(" + e.key + ")"
+	case exprWrap:
+		return "ExpressionWrapper(" + exprLabel(*e.arg) + ")"
+	case exprCase:
+		return "Case()"
+	default:
+		return "Expr"
+	}
 }
 
 // formatCondValue renders a leaf value for Cond.String: strings are quoted, as
@@ -131,14 +167,14 @@ func formatCondValue(v any) string {
 // Pairs returns the alternating keys and values of c when c is a conjunction
 // of key/value pairs, such as orm.Q("warm", true, "age__gt", 3): the
 // counterpart of a Django lookup dict. It reports false for a negated, OR or
-// nested condition and for one with an error.
+// nested condition, for one with an expression and for one with an error.
 func (c Cond) Pairs() ([]any, bool) {
 	if c.err != nil || c.negated || c.conn != connAnd {
 		return nil, false
 	}
 	out := make([]any, 0, 2*len(c.children))
 	for _, ch := range c.children {
-		if ch.sub != nil {
+		if ch.sub != nil || ch.expr != nil {
 			return nil, false
 		}
 		out = append(out, ch.key, ch.value)
@@ -195,7 +231,8 @@ func (c *Cond) add(child Cond) {
 }
 
 // parseConds turns the arguments of Filter, Exclude, Get, or Q into one AND
-// condition. Each argument is a Cond, or a string key followed by its value.
+// condition. Each argument is a Cond, a boolean Expr, or a string key
+// followed by its value.
 func parseConds(args []any) (Cond, error) {
 	var out Cond
 	for i := 0; i < len(args); i++ {
@@ -207,6 +244,14 @@ func parseConds(args []any) (Cond, error) {
 				return Cond{}, errFilterArgs
 			}
 			out.add(*a)
+		case Expr:
+			out.children = append(out.children, condChild{expr: &a})
+		case *Expr:
+			if a == nil {
+				return Cond{}, errFilterArgs
+			}
+			e := *a
+			out.children = append(out.children, condChild{expr: &e})
 		case string:
 			if i+1 >= len(args) {
 				return Cond{}, errFilterArgs

@@ -424,8 +424,11 @@ func constraintRefs(m *Model, name string, cond Cond, exprs ...Expr) ([]constrai
 		if e == nil {
 			return nil
 		}
-		if e.kind == exprField {
+		switch e.kind {
+		case exprField:
 			return add(e.key)
+		case exprSubquery, exprOuterRef:
+			return fmt.Errorf("orm: constraint %q uses a subquery", name)
 		}
 		for _, sub := range []*Expr{e.left, e.right, e.arg, e.def} {
 			if err := walkExpr(sub); err != nil {
@@ -456,8 +459,14 @@ func constraintRefs(m *Model, name string, cond Cond, exprs ...Expr) ([]constrai
 			return c.err
 		}
 		for _, ch := range c.children {
-			if ch.sub != nil {
+			switch {
+			case ch.sub != nil:
 				if err := walkCond(*ch.sub); err != nil {
+					return err
+				}
+				continue
+			case ch.expr != nil:
+				if err := walkExpr(ch.expr); err != nil {
 					return err
 				}
 				continue

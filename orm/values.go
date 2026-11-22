@@ -154,6 +154,17 @@ func (vs *ValuesQuerySet) Annotate(args ...any) *ValuesQuerySet {
 	return &ValuesQuerySet{q: vs.q.annotate(args)}
 }
 
+// Values returns a clone that selects the given keys instead, Django's
+// values() on a values() queryset. After an aggregate annotation the rows
+// stay grouped by the keys of the earlier Values, so
+//
+//	orm.Query[Book](db).Values("publisher").Annotate("n", orm.Count("pk")).Values("n")
+//
+// returns the number of books of each publisher without the publisher.
+func (vs *ValuesQuerySet) Values(keys ...string) *ValuesQuerySet {
+	return &ValuesQuerySet{q: vs.q.withValues(keys)}
+}
+
 // Ordered reports whether the rows come in a defined order; see
 // QuerySet.Ordered.
 func (vs *ValuesQuerySet) Ordered() bool {

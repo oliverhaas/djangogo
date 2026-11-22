@@ -20,7 +20,8 @@ const subqueryAlias = "subquery"
 // The aggregates are normally selected straight from the query's tables. A
 // query that is already grouped, sliced, or distinct cannot be aggregated that
 // way: the rows to aggregate are the result of the query, so it becomes a
-// subquery, as in Django's Query.get_aggregation.
+// subquery, as in Django's Query.get_aggregation. So does a query whose
+// aggregate reads an annotation that holds a subquery.
 func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, error) {
 	c, err := q.compile()
 	if err != nil {
@@ -31,7 +32,9 @@ func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, err
 	// The values over no rows are known when every expression has one.
 	skip := c.empty && emptyValuesKnown(aggs)
 
-	if !q.hasAggregates() && !q.sliced() && !q.distinct {
+	if !q.hasAggregates() && !q.sliced() && !q.distinct && !slices.ContainsFunc(aggs, func(a annotation) bool {
+		return q.refsSubquery(a.expr)
+	}) {
 		items := make([]selectItem, len(aggs))
 		for i, a := range aggs {
 			n, err := c.resolveExpr(a.expr)
@@ -279,8 +282,6 @@ func (c *compiler) outerAggregate(e Expr, named map[string]sqlNode, innerColumn 
 		o.node = innerColumn(o.node)
 		agg.order = append(agg.order, o)
 	}
-	// The subquery selects the condition of a filter, and the outer
-	// aggregate filters on that column.
 	where, match, err := c.condition(e.filter)
 	if err != nil {
 		return nil, err
@@ -290,7 +291,7 @@ func (c *compiler) outerAggregate(e Expr, named map[string]sqlNode, innerColumn 
 	case matchNone:
 		n = emptyAggNode{agg: agg}
 	case matchSome:
-		agg.filter = innerColumn(condNode{where: where})
+		agg.filter = condNode{where: outerWhere(where, innerColumn)}
 		n = agg
 	}
 	if e.def == nil {
@@ -304,6 +305,40 @@ func (c *compiler) outerAggregate(e Expr, named map[string]sqlNode, innerColumn 
 	}
 	e.def = &def
 	return c.aggregateDefault(e, n)
+}
+
+// outerWhere returns the filter of an aggregate that is computed over a
+// subquery, as Django's get_aggregation repoints it: the subquery selects the
+// operands of each condition, and the outer aggregate compares those columns,
+// so that an operand the subquery selects already, such as a subquery
+// annotation, is not computed twice. A condition with a subquery of its own
+// is selected by the subquery as a whole.
+func outerWhere(n *whereNode, innerColumn func(sqlNode) subColNode) *whereNode {
+	out := &whereNode{conn: n.conn, negated: n.negated, children: make([]whereChild, len(n.children))}
+	for i, ch := range n.children {
+		switch {
+		case ch.node != nil:
+			out.children[i] = whereChild{node: outerWhere(ch.node, innerColumn)}
+		case ch.pred.sub != nil:
+			col := innerColumn(condNode{where: &whereNode{conn: connAnd, children: []whereChild{ch}}})
+			out.children[i] = whereChild{pred: &predicate{lookup: lookupExpr, lhs: col}}
+		default:
+			p := *ch.pred
+			if p.lhs != nil {
+				p.lhs = innerColumn(p.lhs)
+			}
+			p.rhs = make([]sqlNode, len(ch.pred.rhs))
+			for k, r := range ch.pred.rhs {
+				if _, ok := r.(paramNode); ok {
+					p.rhs[k] = r
+				} else {
+					p.rhs[k] = innerColumn(r)
+				}
+			}
+			out.children[i] = whereChild{pred: &p}
+		}
+	}
+	return out
 }
 
 // emptyValuesKnown reports whether the value of every expression over no rows

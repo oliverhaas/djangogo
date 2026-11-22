@@ -35,9 +35,11 @@ type joinSet struct {
 	joins []*join // joined tables in creation order, without the base
 	// aliases counts the aliases handed out per table name.
 	aliases map[string]int
-	// aliasPrefix is "T" for main queries and "U" for correlated subqueries.
+	// aliasPrefix is "T" for main queries. A subquery takes the letter after
+	// the prefix of the query it is part of: "U", then "V" and so on, as
+	// Django's bump_prefix does.
 	aliasPrefix string
-	// nextSubAlias is the next numeric suffix when aliasPrefix is "U".
+	// nextSubAlias is the next numeric suffix when aliasPrefix is not "T".
 	nextSubAlias int
 }
 
@@ -51,23 +53,26 @@ func newJoinSet(m *Model) *joinSet {
 	}
 }
 
-// newSubqueryJoinSet returns a joinSet for a correlated subquery starting at
-// model m with an explicit alias such as "U0" or "U1". Every joined table in
-// the subquery gets a fresh "U<n>" alias so it never collides with outer
-// table names.
-func newSubqueryJoinSet(m *Model, baseAlias string) *joinSet {
-	next := 1
-	if len(baseAlias) > 1 {
-		if n, err := strconv.Atoi(baseAlias[1:]); err == nil {
-			next = n + 1
-		}
-	}
+// newSubqueryJoinSet returns the join set of a subquery on model m whose
+// aliases start with prefix. The base table is aliased prefix and base, such
+// as "U0", and every joined table takes the next number, so that no alias
+// collides with one of the queries the subquery is part of.
+func newSubqueryJoinSet(m *Model, prefix string, base int) *joinSet {
 	return &joinSet{
-		base:         &join{alias: baseAlias, model: m},
+		base:         &join{alias: prefix + strconv.Itoa(base), model: m},
 		aliases:      make(map[string]int),
-		aliasPrefix:  "U",
-		nextSubAlias: next,
+		aliasPrefix:  prefix,
+		nextSubAlias: base + 1,
 	}
+}
+
+// nextAliasPrefix returns the alias prefix of a subquery of a query whose
+// prefix is p: the next letter, and after "Z" the prefix with an "A" added.
+func nextAliasPrefix(p string) string {
+	if last := p[len(p)-1]; last < 'Z' {
+		return p[:len(p)-1] + string(last+1)
+	}
+	return p + "A"
 }
 
 // setup follows hops from the base table and returns the join of each hop,
@@ -146,12 +151,11 @@ func (js *joinSet) find(parent *join, h hop, canReuse map[*join]bool) *join {
 
 // newAlias returns the alias for a new use of table. For main queries, the
 // first use is the table name itself and a later one is "T<n>" with n the
-// position among all aliases of the query, matching Django's naming. For
-// correlated subqueries (aliasPrefix == "U"), every table receives a fresh
-// "U<n>" alias.
+// position among all aliases of the query, matching Django's naming. In a
+// subquery every table receives a fresh numbered alias, such as "U1".
 func (js *joinSet) newAlias(table string) string {
-	if js.aliasPrefix == "U" {
-		alias := "U" + strconv.Itoa(js.nextSubAlias)
+	if js.aliasPrefix != "T" {
+		alias := js.aliasPrefix + strconv.Itoa(js.nextSubAlias)
 		js.nextSubAlias++
 		return alias
 	}

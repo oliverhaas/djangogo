@@ -87,6 +87,10 @@ type valuesSpec struct {
 	// groups reports that Values was called before any aggregate annotation, so
 	// the keys form the GROUP BY (Django's values().annotate() idiom).
 	groups bool
+	// groupKeys are the keys of earlier Values calls that still group the
+	// rows: ValuesQuerySet.Values after an aggregate keeps the GROUP BY of
+	// the Values it replaces, as Django's set_values keeps group_by.
+	groupKeys []string
 }
 
 // newQuery returns the empty query for model T on db.
@@ -109,12 +113,13 @@ func (q *query) clone() *query {
 	if q.values != nil {
 		v := *q.values
 		v.keys = append([]string(nil), q.values.keys...)
+		v.groupKeys = slices.Clone(q.values.groupKeys)
 		cp.values = &v
 	}
 	return &cp
 }
 
-// subquery implements subqueryer, so that a query can be the value of an
+// subquery implements AnyQuerySet, so that a query can be the value of an
 // "in" lookup of another.
 func (q *query) subquery() *query { return q }
 
@@ -305,6 +310,13 @@ func (q *query) withValues(keys []string) *query {
 		keys:      append([]string(nil), keys...),
 		annotated: len(cp.annotationNames()),
 		groups:    !cp.hasAggregates(),
+	}
+	// The rows stay grouped by the keys of a Values that preceded the
+	// aggregates. Without keys, that Values grouped by every field, as a
+	// query without Values does.
+	if prev := q.values; prev != nil && prev.groups && cp.hasAggregates() && len(prev.keys) > 0 {
+		cp.values.groups = true
+		cp.values.groupKeys = append(slices.Clone(prev.groupKeys), prev.keys...)
 	}
 	return cp
 }

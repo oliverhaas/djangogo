@@ -200,10 +200,13 @@ func (c Cond) prefixed(prefix string) Cond {
 	}
 	out.children = make([]condChild, len(c.children))
 	for i, ch := range c.children {
-		if ch.sub != nil {
+		switch {
+		case ch.sub != nil:
 			sub := ch.sub.prefixed(prefix)
 			ch.sub = &sub
-		} else {
+		case ch.expr != nil:
+			ch.expr = prefixedPtr(ch.expr, prefix)
+		default:
 			ch.key = prefix + ch.key
 			ch.value = prefixedValue(ch.value, prefix)
 		}

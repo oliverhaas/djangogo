@@ -3,6 +3,7 @@ package orm_test
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -1379,37 +1380,168 @@ func TestAggregationTicket11881(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_subquery_annotation
 func TestAggregationAggregationSubqueryAnnotation(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		// Subquery annotations are excluded from the GROUP BY if they are not
+		// explicitly grouped against.
+		latest := orm.Query[agBook](db).Filter("publisher", orm.OuterRef("pk")).OrderBy("-pubdate").
+			Values("pubdate").Limit(1)
+		qs := orm.Query[agPublisher](db).Annotate("latest_book_pubdate", orm.Subquery(latest)).
+			Annotate("count", orm.Count("book"))
+		capture := djangotest.CaptureQueries(db)
+		if _, err := qs.All(context.Background()); err != nil {
+			t.Fatalf("All: %v", err)
+		}
+		capture.Stop()
+		djangotest.AssertEqual(t, capture.Len(), 1)
+		sql := capture.Queries()[0].SQL
+		djangotest.AssertEqual(t, strings.Count(sql, "SELECT"), 2)
+		// The GROUP BY should not be by alias either.
+		djangotest.AssertEqual(t, strings.Count(strings.ToLower(sql), "latest_book_pubdate"), 1)
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_subquery_annotation_exists
 func TestAggregationAggregationSubqueryAnnotationExists(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		latest := orm.Query[agBook](db).Filter("publisher", orm.OuterRef("pk")).OrderBy("-pubdate").
+			Values("pubdate").Limit(1)
+		qs := orm.Query[agPublisher](db).Annotate(
+			"latest_book_pubdate", orm.Subquery(latest),
+			"count", orm.Count("book"),
+		)
+		exists, err := qs.Exists(context.Background())
+		if err != nil {
+			t.Fatalf("Exists: %v", err)
+		}
+		djangotest.AssertEqual(t, exists, true)
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_filter_exists
+//
+// Django inspects the GROUP BY of Query.exists() directly. The port reads it
+// from the statement of an Exists of the queryset.
 func TestAggregationAggregationFilterExists(t *testing.T) {
-	t.Skip("needs Exists and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		havingMoreThanOneBook := orm.Query[agBook](db).Values("publisher").
+			Annotate("cnt", orm.Count("isbn")).Filter("cnt__gt", 1)
+		qs := orm.Query[agPublisher](db).Filter(orm.Exists(havingMoreThanOneBook))
+		capture := djangotest.CaptureQueries(db)
+		n, err := qs.Count(context.Background())
+		capture.Stop()
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		djangotest.AssertEqual(t, n, int64(5))
+		sql := capture.Queries()[0].SQL
+		_, groupBy, ok := strings.Cut(sql, " GROUP BY ")
+		if !ok {
+			t.Fatalf("SQL has no GROUP BY: %s", sql)
+		}
+		groupBy, _, _ = strings.Cut(groupBy, " HAVING ")
+		djangotest.AssertEqual(t, len(strings.Split(groupBy, ", ")), 1)
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_exists_annotation
 func TestAggregationAggregationExistsAnnotation(t *testing.T) {
-	t.Skip("needs Exists and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		published := orm.Query[agBook](db).Filter("publisher", orm.OuterRef("pk"))
+		names, err := orm.Query[agPublisher](db).Annotate(
+			"published_book", orm.Exists(published),
+			"count", orm.Count("book"),
+		).ValuesList("name").Flat(context.Background())
+		if err != nil {
+			t.Fatalf("Flat: %v", err)
+		}
+		agAssertSameStrings(t, names, []string{
+			"Apress", "Morgan Kaufmann", "Jonno's House of Books", "Prentice Hall", "Sams",
+		})
+	})
+}
+
+// agAssertSameStrings checks that got holds the strings of want in any
+// order, Django's assertCountEqual.
+func agAssertSameStrings(t *testing.T, got []any, want []string) {
+	t.Helper()
+	strs := make([]string, len(got))
+	for i, v := range got {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("value %d is %#v, want a string", i, v)
+		}
+		strs[i] = s
+	}
+	slices.Sort(strs)
+	want = slices.Clone(want)
+	slices.Sort(want)
+	if !slices.Equal(strs, want) {
+		t.Errorf("got %q, want %q", strs, want)
+	}
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_subquery_annotation_values
 func TestAggregationAggregationSubqueryAnnotationValues(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		f := agSetUp(t, db)
+		// Subquery annotations and external aliases are excluded from the
+		// GROUP BY if they are not selected.
+		sameAge := orm.Query[agAuthor](db).Filter("age", orm.OuterRef("contact__friends__age")).
+			OrderBy("age").Values("id").Limit(1)
+		books := orm.Query[agBook](db).Annotate("first_author_the_same_age", orm.Subquery(sameAge)).
+			Filter("publisher", f.p1, "first_author_the_same_age__isnull", false).
+			Annotate("min_age", orm.Min("contact__friends__age")).
+			Values("name", "min_age").OrderBy("name")
+		assertValues(t, books, []map[string]any{
+			{"name": "Practical Django Projects", "min_age": int64(34)},
+			{"name": "The Definitive Guide to Django: Web Development Done Right", "min_age": int64(29)},
+		})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_subquery_annotation_values_collision
 func TestAggregationAggregationSubqueryAnnotationValuesCollision(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		rating := orm.Query[agBook](db).Filter("pk", orm.OuterRef("book")).Values("rating")
+		qs := orm.Query[agPublisher](db).Filter("book__contact__age__gt", 20).
+			Annotate("rating", orm.Subquery(rating)).
+			Values("rating").Annotate("total_count", orm.Count("*")).OrderBy("rating")
+		assertValues(t, qs, []map[string]any{
+			{"rating": 3.0, "total_count": int64(1)},
+			{"rating": 4.0, "total_count": int64(3)},
+			{"rating": 4.5, "total_count": int64(1)},
+			{"rating": 5.0, "total_count": int64(1)},
+		})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_subquery_annotation_multivalued
 func TestAggregationAggregationSubqueryAnnotationMultivalued(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		ctx := context.Background()
+		// Subquery annotations must be included in the GROUP BY if they use
+		// potentially multivalued relations (contain the lookup separator).
+		sub := orm.Query[agAuthor](db).Filter(
+			"pk", orm.OuterRef("pk"),
+			"book__name", orm.OuterRef("book__name"),
+		).Values("pk")
+		got, err := orm.Query[agAuthor](db).Annotate("subquery_id", orm.Subquery(sub)).
+			Annotate("count", orm.Count("book")).Count(ctx)
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		want, err := orm.Query[agAuthor](db).Count(ctx)
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		djangotest.AssertEqual(t, got, want)
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_order_by_not_selected_annotation_values
@@ -1440,13 +1572,55 @@ func TestAggregationAggregationOrderByNotSelectedAnnotationValues(t *testing.T) 
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_group_by_subquery_annotation
+//
+// Django also groups by the queryset and by its Query, which Python resolves
+// to the same subquery. A Go queryset becomes an expression through Subquery
+// only.
 func TestAggregationGroupBySubqueryAnnotation(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		// Subquery annotations are included in the GROUP BY if they are
+		// grouped against.
+		longBooksCount := orm.Query[agBook](db).Filter("publisher", orm.OuterRef("pk"), "pages__gt", 400).
+			Values("publisher").Annotate("count", orm.Count("pk")).Values("count")
+		breakdown := orm.Query[agPublisher](db).Annotate("long_books_count", orm.Subquery(longBooksCount)).
+			ValuesList("long_books_count").Annotate("total", orm.Count("*"))
+		agAssertBreakdown(t, breakdown, map[any]int64{nil: 1, int64(1): 4})
+	})
+}
+
+// agAssertBreakdown checks the rows of a ValuesList of a key and a count,
+// in any order, as Django compares dict() of them.
+func agAssertBreakdown(t *testing.T, vl *orm.ValuesListQuerySet, want map[any]int64) {
+	t.Helper()
+	rows, err := vl.All(context.Background())
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	got := make(map[any]int64, len(rows))
+	for _, row := range rows {
+		n, ok := row[1].(int64)
+		if !ok {
+			t.Fatalf("count %#v is not an int64", row[1])
+		}
+		got[row[0]] = n
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("breakdown = %v, want %v", got, want)
+	}
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_group_by_exists_annotation
 func TestAggregationGroupByExistsAnnotation(t *testing.T) {
-	t.Skip("needs Exists and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		// Exists annotations are included in the GROUP BY if they are grouped
+		// against.
+		longBooks := orm.Query[agBook](db).Filter("publisher", orm.OuterRef("pk"), "pages__gt", 800)
+		breakdown := orm.Query[agPublisher](db).Annotate("has_long_books", orm.Exists(longBooks)).
+			ValuesList("has_long_books").Annotate("total", orm.Count("*"))
+		agAssertBreakdown(t, breakdown, map[any]int64{true: 2, false: 3})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_group_by_nested_expression_with_params
@@ -1561,17 +1735,75 @@ func TestAggregationAnyValueAggregateClause(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_subquery_annotation_related_field
 func TestAggregationAggregationSubqueryAnnotationRelatedField(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		f := agSetUp(t, db)
+		ctx := context.Background()
+		publisher := create(t, db, &agPublisher{Name: f.a9.Name, NumAwards: 2})
+		book := &agBook{
+			Isbn: "159059999", Name: "Test book.", Pages: 819, Rating: 2.5, Price: orm.MustDecimal("14.44"),
+			Pubdate: orm.Date{Year: 2019, Month: 12, Day: 6},
+		}
+		book.Contact.SetPK(f.a9.ID)
+		book.Publisher.SetPK(publisher.ID)
+		create(t, db, book)
+		if err := orm.Many[agAuthor](db, book, "authors").Add(ctx, f.a5, f.a6, f.a7); err != nil {
+			t.Fatalf("add authors: %v", err)
+		}
+		contactPublisher := orm.Query[agPublisher](db).Filter(
+			"pk", orm.OuterRef("publisher"),
+			"name", orm.OuterRef("contact__name"),
+		).Values("name").Limit(1)
+		books := orm.Query[agBook](db).Annotate("contact_publisher", orm.Subquery(contactPublisher)).
+			Filter("contact_publisher__isnull", false).
+			Annotate("count", orm.Count("authors"))
+		capture := djangotest.CaptureQueries(db)
+		got, err := books.All(ctx)
+		capture.Stop()
+		if err != nil {
+			t.Fatalf("All: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != book.ID {
+			t.Fatalf("books = %v, want the test book", got)
+		}
+		djangotest.AssertEqual(t, capture.Len(), 1)
+		djangotest.AssertEqual(t, strings.Count(capture.Queries()[0].SQL, "SELECT"), 3)
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_nested_subquery_outerref
+//
+// Django's values(publisher_count=Count("id")) annotates and selects in one
+// call; the port calls Annotate and Values.
 func TestAggregationAggregationNestedSubqueryOuterref(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		sameName := orm.Query[agPublisher](db).Filter("id__in", orm.Subquery(
+			orm.Query[agPublisher](db).Filter("name", orm.OuterRef(orm.OuterRef("publisher__name"))).Values("id"),
+		)).Annotate("publisher_count", orm.Count("id")).Values("publisher_count").Limit(1)
+		breakdown := orm.Query[agBook](db).Annotate(
+			"publisher_count", orm.Subquery(sameName),
+			"authors_count", orm.Count("authors"),
+		).ValuesList("publisher_count")
+		assertFlat(t, breakdown, []any{int64(1), int64(1), int64(1), int64(1), int64(1), int64(1)})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_exists_multivalued_outeref
 func TestAggregationAggregationExistsMultivaluedOuteref(t *testing.T) {
-	t.Skip("needs Exists and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		ctx := context.Background()
+		got, err := orm.Query[agPublisher](db).Annotate(
+			"books_exists", orm.Exists(orm.Query[agBook](db).Filter("publisher", orm.OuterRef("book__publisher"))),
+			"books_count", orm.Count("book"),
+		).ValuesList("name").Flat(ctx)
+		if err != nil {
+			t.Fatalf("Flat: %v", err)
+		}
+		agAssertSameStrings(t, got, []string{
+			"Apress", "Morgan Kaufmann", "Jonno's House of Books", "Prentice Hall", "Sams",
+		})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_filter_in_subquery_or_aggregation
@@ -1942,7 +2174,17 @@ func TestAggregationAggregationDefaultNotInAggregate(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_exists_none_with_aggregate
 func TestAggregationExistsNoneWithAggregate(t *testing.T) {
-	t.Skip("needs Exists, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		books, err := orm.Query[agBook](db).Annotate(
+			"count", orm.Count("id"),
+			"exists", orm.Exists(orm.Query[agAuthor](db).None()),
+		).All(context.Background())
+		if err != nil {
+			t.Fatalf("All: %v", err)
+		}
+		djangotest.AssertEqual(t, len(books), 6)
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_alias_sql_injection
@@ -1957,7 +2199,7 @@ func TestAggregationAliasSQLInjection(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_exists_extra_where_with_aggregate
 func TestAggregationExistsExtraWhereWithAggregate(t *testing.T) {
-	t.Skip("needs Exists and extra(), which the ORM does not have")
+	t.Skip("needs extra(), which the ORM does not have")
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_multiple_aggregate_references
@@ -2080,7 +2322,16 @@ func TestAggregationStringAggFilter(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_string_agg_filter_outerref
 func TestAggregationStringAggFilterOuterref(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		names := orm.Query[agBook](db).Annotate("stringagg",
+			orm.StringAgg("name", orm.Value(";")).OrderBy(orm.OuterRef("num_awards")),
+		).Values("stringagg").Limit(1)
+		values := orm.Query[agPublisher](db).Annotate("stringagg", orm.Subquery(names)).
+			Values("stringagg").OrderBy("id")
+		row := map[string]any{"stringagg": "The Definitive Guide to Django: Web Development Done Right"}
+		assertValues(t, values, []map[string]any{row, row, row, row, row})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_string_agg_jsonfield_order_by
@@ -2090,12 +2341,51 @@ func TestAggregationStringAggJsonfieldOrderBy(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_string_agg_filter_in_subquery
 func TestAggregationStringAggFilterInSubquery(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		agg := orm.StringAgg("authors__name", orm.Value(";")).Filter(orm.Not(orm.Q("authors__name__startswith", "J")))
+		sub := orm.Query[agBook](db).Filter("pk", orm.OuterRef("pk")).Annotate("agg", agg).Values("agg")
+		values, err := orm.Query[agBook](db).Annotate("agg", orm.Subquery(sub)).ValuesList("agg").
+			Flat(context.Background())
+		if err != nil {
+			t.Fatalf("Flat: %v", err)
+		}
+		var nulls int
+		strs := make([]any, 0, len(values))
+		for _, v := range values {
+			if v == nil {
+				nulls++
+				continue
+			}
+			strs = append(strs, v)
+		}
+		djangotest.AssertEqual(t, nulls, 1)
+		agAssertSameStrings(t, strs, []string{
+			"Adrian Holovaty",
+			"Brad Dayley",
+			"Paul Bissex;Wesley J. Chun",
+			"Peter Norvig;Stuart Russell",
+			"Peter Norvig",
+		})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_order_by_in_subquery
 func TestAggregationOrderByInSubquery(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		agg := orm.StringAgg("authors__name", orm.Value(";")).OrderBy("authors__name")
+		sub := orm.Query[agBook](db).Filter("pk", orm.OuterRef("pk")).Annotate("agg", agg).Values("agg")
+		values := orm.Query[agBook](db).Annotate("agg", orm.Subquery(sub)).OrderBy("agg").ValuesList("agg")
+		assertFlat(t, values, []any{
+			"Adrian Holovaty;Jacob Kaplan-Moss",
+			"Brad Dayley",
+			"James Bennett",
+			"Jeffrey Forcier;Paul Bissex;Wesley J. Chun",
+			"Peter Norvig",
+			"Peter Norvig;Stuart Russell",
+		})
+	})
 }
 
 // agPruningFixture holds the rows of AggregateAnnotationPruningTests.setUpTestData.
@@ -2256,13 +2546,58 @@ func TestAggregateAnnotationPruningReferencedGroupByAnnotationKept(t *testing.T)
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateAnnotationPruningTests.test_referenced_subquery_requires_wrapping
+//
+// Django counts the books of an author on the through model of Book.authors,
+// which has no Go type; the port counts them on Author through the reverse
+// relation, which reads the same through table.
 func TestAggregateAnnotationPruningReferencedSubqueryRequiresWrapping(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agPruningSetUp(t, db)
+		totalBooks := orm.Query[agAuthor](db).Values("pk").Filter("pk", orm.OuterRef("pk")).
+			Annotate("total", orm.Count("book"))
+		qs := orm.Query[agAuthor](db).Annotate("total_books", orm.Subquery(totalBooks.Values("total"))).Values("pk", "total_books")
+		capture := djangotest.CaptureQueries(db)
+		aggregate, err := qs.Aggregate(context.Background(), "sum_total_books", orm.Sum("total_books"))
+		capture.Stop()
+		if err != nil {
+			t.Fatalf("Aggregate: %v", err)
+		}
+		djangotest.AssertEqual(t, capture.Len(), 1)
+		sql := strings.ToLower(capture.Queries()[0].SQL)
+		if n := strings.Count(sql, "select"); n != 3 {
+			t.Errorf("SQL has %d SELECTs, want 3 (subquery wrapping required): %s", n, sql)
+		}
+		agAssertMap(t, aggregate, map[string]any{"sum_total_books": int64(3)})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateAnnotationPruningTests.test_referenced_composed_subquery_requires_wrapping
+//
+// Django counts the books of an author on the through model of Book.authors,
+// which has no Go type; the port counts them on Author through the reverse
+// relation, which reads the same through table.
 func TestAggregateAnnotationPruningReferencedComposedSubqueryRequiresWrapping(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agPruningSetUp(t, db)
+		totalBooks := orm.Query[agAuthor](db).Values("pk").Filter("pk", orm.OuterRef("pk")).
+			Annotate("total", orm.Count("book"))
+		qs := orm.Query[agAuthor](db).Annotate(
+			"total_books", orm.Subquery(totalBooks.Values("total")),
+			"total_books_ref", orm.F("total_books").Div(1),
+		).Values("pk", "total_books_ref")
+		capture := djangotest.CaptureQueries(db)
+		aggregate, err := qs.Aggregate(context.Background(), "sum_total_books", orm.Sum("total_books_ref"))
+		capture.Stop()
+		if err != nil {
+			t.Fatalf("Aggregate: %v", err)
+		}
+		djangotest.AssertEqual(t, capture.Len(), 1)
+		sql := strings.ToLower(capture.Queries()[0].SQL)
+		if n := strings.Count(sql, "select"); n != 3 {
+			t.Errorf("SQL has %d SELECTs, want 3 (subquery wrapping required): %s", n, sql)
+		}
+		agAssertMap(t, aggregate, map[string]any{"sum_total_books": int64(3)})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateAnnotationPruningTests.test_referenced_window_requires_wrapping

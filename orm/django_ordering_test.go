@@ -604,8 +604,33 @@ func TestOrderingOrderByNullsFirst(t *testing.T) {
 }
 
 // Ported from Django: tests/ordering/tests.py::OrderingTests.test_orders_nulls_first_on_filtered_subquery
+//
+// Django gives the Subquery an output field; the port wraps it in
+// ExpressionWrapper, which does the same.
 func TestOrderingOrdersNullsFirstOnFilteredSubquery(t *testing.T) {
-	t.Skip("needs Subquery and OuterRef, which the ORM does not have")
+	djangotest.EachDB(t, ordModels(), func(t *testing.T, db *orm.DB) {
+		fx := ordSetUp(t, db)
+		ordSetAuthor(t, db, fx.a1, fx.author1)
+		ordSetAuthor(t, db, fx.a2, fx.author1)
+		ordSetAuthor(t, db, fx.a4, fx.author2)
+		// Django deletes the authors without a name, which the Go model stores
+		// as an empty string.
+		unnamed := []int64{fx.unnamed1.ID, fx.unnamed2.ID}
+		if _, err := orm.Query[ordAuthor](db).Filter("pk__in", unnamed).Delete(context.Background()); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		author3 := create(t, db, &ordAuthor{Name: "Name 3"})
+		lastDate := orm.Query[ordArticle](db).Filter("author", orm.OuterRef("pk"), "headline__icontains", "Article").
+			OrderBy().Values("author").Annotate("last_date", orm.Max("pub_date")).Values("last_date")
+		qs := orm.Query[ordAuthor](db).Annotate("last_date",
+			orm.ExpressionWrapper(orm.Subquery(lastDate), orm.Field{Kind: orm.KindDateTime}),
+		).OrderBy(orm.F("last_date").Asc().NullsFirst()).Distinct()
+		id := func(a ordAuthor) int64 { return a.ID }
+		ids := []int64{author3.ID, fx.author1.ID, fx.author2.ID}
+		djangotest.AssertQuerySetEqual(t, qs, ids, id)
+		slices.Reverse(ids)
+		djangotest.AssertQuerySetEqual(t, qs.Reverse(), ids, id)
+	})
 }
 
 // Ported from Django: tests/ordering/tests.py::OrderingTests.test_no_reordering_after_slicing

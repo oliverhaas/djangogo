@@ -885,6 +885,28 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - ORM: `QuerySet.RefreshFromDB(ctx, &obj, keys...)`, Django's
   `refresh_from_db()` with the queryset as `from_queryset`, such as
   `orm.Query[Article](db).SelectForUpdate().RefreshFromDB(ctx, &a)`.
+- ORM: `orm.Subquery`, `orm.Exists` and `orm.OuterRef`, Django's
+  `Subquery`, `Exists` and `OuterRef`. A subquery is an annotation, a term
+  of `OrderBy`, an operand of arithmetic, the value of a lookup or of
+  `Update`, and the value of an `in` lookup:
+  `Annotate("newest", orm.Subquery(orm.Query[Comment](db).Filter("post",
+  orm.OuterRef("pk")).OrderBy("-created").Values("email").Limit(1)))`.
+  `OuterRef(orm.OuterRef("pk"))` reads the query two levels out. A query
+  that holds an `OuterRef` fails when it runs on its own. `Exists` of a
+  query that matches no row, such as one of `None`, is false without a
+  statement. `Aggregate` over an annotation that holds a subquery runs over
+  a derived table, as in Django. A constraint that holds a subquery fails
+  with "uses a subquery". `orm.AnyQuerySet` is the type of the queryset that
+  `Subquery` and `Exists` take.
+- ORM: `Filter`, `Exclude`, `Get` and `orm.Q` take a boolean expression as
+  a condition, such as `Filter(orm.Exists(...))`,
+  `Exclude(orm.Exists(...).Not())` or
+  `orm.Q(orm.Exists(...)).Or(orm.Q("draft", true))`. Any other expression
+  fails with "cannot filter against a non-conditional expression".
+- ORM: `ValuesQuerySet.Values` selects other keys of a `Values` queryset.
+  After an aggregate the rows stay grouped by the keys of the earlier
+  `Values`, as in Django:
+  `Values("publisher").Annotate("n", orm.Count("pk")).Values("n")`.
 
 ### Changed
 

@@ -314,9 +314,12 @@ func (c *compiler) addQ(cond Cond, currentNegated bool) (*whereNode, []*join, er
 			inner []*join
 			err   error
 		)
-		if ch.sub != nil {
+		switch {
+		case ch.sub != nil:
 			child, inner, err = c.addQ(*ch.sub, currentNegated)
-		} else {
+		case ch.expr != nil:
+			child, err = c.buildExprFilter(*ch.expr)
+		default:
 			child, inner, err = c.buildFilter(ch.key, ch.value, currentNegated)
 		}
 		if err != nil {
@@ -326,6 +329,21 @@ func (c *compiler) addQ(cond Cond, currentNegated bool) (*whereNode, []*join, er
 		node.add(child)
 	}
 	return node, promoter.update(c.joins), nil
+}
+
+// buildExprFilter resolves a boolean expression used as a condition, such as
+// Exists. It casts no vote on the joins, as Django's build_filter returns no
+// used joins for one.
+func (c *compiler) buildExprFilter(e Expr) (*whereNode, error) {
+	n, err := c.resolveExpr(e)
+	if err != nil {
+		return nil, err
+	}
+	if n.vtype() != typeBool {
+		return nil, errors.New("orm: cannot filter against a non-conditional expression")
+	}
+	pred := &predicate{lookup: lookupExpr, lhs: n}
+	return &whereNode{conn: connAnd, children: []whereChild{{pred: pred}}}, nil
 }
 
 // annotationField returns the field that a value compared with the

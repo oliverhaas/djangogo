@@ -30,6 +30,9 @@ const (
 	lookupRegex       = "regex"
 	lookupIRegex      = "iregex"
 	lookupExists      = "exists"
+	// lookupExpr is a boolean expression used as a condition, such as
+	// Exists: its lhs is the whole predicate.
+	lookupExpr = "expr"
 )
 
 // comparisonOps maps the comparison lookups to their SQL operator.
@@ -227,6 +230,8 @@ func (p *predicate) render(w *sqlWriter) {
 		w.write("EXISTS(")
 		p.sub.render(w)
 		w.write(")")
+	case lookupExpr:
+		p.lhs.render(w)
 	case lookupIsNull:
 		p.lhs.render(w)
 		if p.flag {
@@ -310,7 +315,7 @@ func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, valu
 	if lookup == lookupRange {
 		return p, c.buildRange(p, field, value, expectedModel)
 	}
-	if sq, ok := value.(subqueryer); ok {
+	if sq, ok := value.(AnyQuerySet); ok {
 		if lookup != lookupExact {
 			return nil, fmt.Errorf("orm: the %s lookup does not take a queryset", lookup)
 		}
@@ -339,6 +344,7 @@ func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, valu
 		param, ok := rhs.(paramNode)
 		if !ok {
 			p.rhs = []sqlNode{exprPattern(lookup, rhs)}
+			p.empty = emptySubquery(rhs)
 			return p, nil
 		}
 		text := fmt.Sprint(param.value)
@@ -363,7 +369,15 @@ func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, valu
 		return p, nil
 	}
 	p.rhs = []sqlNode{rhs}
+	p.empty = emptySubquery(rhs)
 	return p, nil
+}
+
+// emptySubquery reports whether n is a Subquery that matches no row, which
+// makes a comparison with it match no row, as Django's EmptyResultSet does.
+func emptySubquery(n sqlNode) bool {
+	sq, ok := n.(subqueryNode)
+	return ok && sq.stmt == nil
 }
 
 // exprPattern returns the pattern of a pattern lookup whose value is the
@@ -404,11 +418,17 @@ func likePattern(lookup, s string) string {
 }
 
 // buildIn fills p for an "in" lookup. value is a slice or array, whose nil
-// elements are dropped since NULL is never equal to anything, or a queryset,
-// which becomes a subquery.
+// elements are dropped since NULL is never equal to anything, or a queryset
+// or Subquery, which becomes a subquery.
 func (c *compiler) buildIn(p *predicate, field *Field, value any, expectedModel *Model) error {
-	if sq, ok := value.(subqueryer); ok {
+	if sq, ok := value.(AnyQuerySet); ok {
 		return c.setSubquery(p, sq.subquery(), "'in'")
+	}
+	if e, ok := value.(Expr); ok && e.kind == exprSubquery && !e.exists && e.sub != nil {
+		return c.setSubquery(p, e.sub, "'in'")
+	}
+	if e, ok := value.(*Expr); ok && e != nil && e.kind == exprSubquery && !e.exists && e.sub != nil {
+		return c.setSubquery(p, e.sub, "'in'")
 	}
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() || (rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array) {
@@ -430,13 +450,14 @@ func (c *compiler) buildIn(p *predicate, field *Field, value any, expectedModel 
 }
 
 // setSubquery makes the single column that sub selects the right-hand side of
-// p. lookup names the lookup in the error for a queryset that selects several
+// p. sub is a subquery of the query of c, whose fields its OuterRef reads.
+// lookup names the lookup in the error for a queryset that selects several
 // columns. A subquery that can match no row makes the predicate empty.
 func (c *compiler) setSubquery(p *predicate, sub *query, lookup string) error {
 	if sub.db != c.q.db {
 		return errors.New("orm: subqueries aren't allowed across different databases")
 	}
-	stmt, err := sub.subselect(lookup)
+	stmt, _, err := sub.subselect(c, lookup)
 	switch {
 	case errors.Is(err, errEmptyResultSet):
 		p.empty = true
@@ -466,12 +487,6 @@ func (c *compiler) buildRange(p *predicate, field *Field, value any, expectedMod
 		p.rhs = append(p.rhs, n)
 	}
 	return nil
-}
-
-// subqueryer is implemented by the queryset types, so that a queryset can be
-// the value of an "in" lookup.
-type subqueryer interface {
-	subquery() *query
 }
 
 // prepValue turns a filter value into its SQL node: an Expr is resolved

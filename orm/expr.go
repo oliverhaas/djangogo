@@ -38,6 +38,12 @@ const (
 	// exprWrap reads its argument as a value of another type, Django's
 	// ExpressionWrapper.
 	exprWrap
+	// exprSubquery is the value of a query, Subquery, or whether it matches
+	// any row, Exists.
+	exprSubquery
+	// exprOuterRef references a field of the query that a subquery is part
+	// of, OuterRef.
+	exprOuterRef
 )
 
 // Expr is an SQL value expression: a field reference (F), a literal (Value),
@@ -45,8 +51,10 @@ const (
 // Sum, Avg, Min, Max, StdDev, Variance, AnyValue, StringAgg), a text function
 // (Lower, Upper, Length, Trim, LTrim, RTrim, Concat), Abs, Coalesce,
 // Greatest, Least, Cast, a conditional expression (Case), the negation of a
-// boolean expression (Not) or an expression of a given type
-// (ExpressionWrapper). It is immutable; every method returns a new Expr.
+// boolean expression (Not), an expression of a given type
+// (ExpressionWrapper), the value of a query (Subquery, Exists) or a field of
+// the query a subquery is part of (OuterRef). It is immutable; every method
+// returns a new Expr.
 //
 // An Expr can be the value of a filter, so a column is compared with another
 // column or with a computed value:
@@ -58,10 +66,14 @@ const (
 //
 //	Update(ctx, "views", orm.F("views").Add(1))
 //
-// or an annotation or aggregate:
+// an annotation or aggregate:
 //
 //	Annotate("n", orm.Count("id"))
 //	Aggregate(ctx, "avg_age", orm.Avg("age"))
+//
+// or, when it is boolean, a condition of Filter, Exclude or Q:
+//
+//	Filter(orm.Exists(orm.Query[Book](db).Filter("author", orm.OuterRef("pk"))))
 type Expr struct {
 	kind     exprKind
 	key      string
@@ -93,6 +105,9 @@ type Expr struct {
 	// order holds the terms of an aggregate's OrderBy, in the forms
 	// QuerySet.OrderBy takes.
 	order []any
+	// sub is the query of an exprSubquery, and exists reports an Exists.
+	sub    *query
+	exists bool
 }
 
 // F references a model field by key, like Django's F(): F("views") or, across
