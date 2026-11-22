@@ -1,6 +1,7 @@
 package forms
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -150,7 +151,11 @@ func (bf *BoundField) widget(w Widget) Widget {
 	}
 	if cf, ok := bf.field.(choiceField); ok {
 		if cw, ok := w.(ChoiceWidget); ok {
-			return cw.WithChoices(cf.widgetChoices())
+			choices, err := cf.widgetChoices(bf.form.Context())
+			if err != nil {
+				bf.form.fail(fmt.Errorf("forms: field %q: %w", bf.Name, err))
+			}
+			return cw.WithChoices(choices)
 		}
 	}
 	return w

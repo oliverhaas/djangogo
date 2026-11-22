@@ -1247,6 +1247,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   was configured, for example on an `AdminSite` outside an application. It
   now sets the variable to an empty string, as for any name that does not
   reverse.
+- Forms: a `ModelChoiceField` or `ModelMultipleChoiceField` kept the rows of
+  its first query for the life of the form, so a second render of the same
+  form did not show a row created in between, and validation loaded every row
+  of the queryset. Each render now queries the options, and validation
+  queries only the submitted keys, as in Django. A submitted key with spaces
+  around an integer, such as " 5 ", now selects its row as in Django.
+  `WithContext` no longer queries the database.
 
 ### Security
 

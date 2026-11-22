@@ -230,9 +230,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   `SelectRelated` or `PrefetchRelated`.
 - **Forms:** no file fields, no localization and no custom
   renderers. A model formset has no to_field relations.
-  `ModelChoiceField` and `ModelMultipleChoiceField` load their options once
-  per form, where Django loads them on each render, and their widget options
-  do not carry the model instance.
+  The widget options of `ModelChoiceField` and `ModelMultipleChoiceField` do
+  not carry the model instance, and a `limit_choices_to` function runs on each
+  query of the options, where Django runs it once per form.
 - **Admin:** a registered model needs an integer primary key. An
   inline cannot edit the auto-created through model of a many-to-many field.
   The `FormClass` of `FormfieldOverrides` does not apply to a relation, which

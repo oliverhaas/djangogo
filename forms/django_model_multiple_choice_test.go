@@ -245,16 +245,17 @@ func TestModelMultipleChoiceShowHiddenInitial(t *testing.T) {
 
 // Ported from Django: tests/model_forms/tests.py::ModelMultipleChoiceFieldTests.test_model_multiple_choice_field_22745
 //
-// The Go form loads the rows once when the field is first used, and renders
-// the bound field directly instead of through a template.
+// #22745 -- Make sure that ModelMultipleChoiceField with
+// CheckboxSelectMultiple widget doesn't produce unnecessary db queries when
+// accessing its BoundField's attrs.
 func TestModelMultipleChoiceField22745(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		multiCategories(t, db)
 		form := forms.New(forms.F("categories", forms.NewModelMultipleChoiceField(db, orm.Query[Category](db),
 			forms.UseWidget(forms.CheckboxSelectMultiple{}))))
+		field := form.Field("categories")
 		djangotest.AssertNumQueries(t, db, 1, func() {
-			field := form.Field("categories")
-			_ = field.Name + field.String() + field.HelpText()
+			renderTemplate(t, "{{ field.name }}{{ field }}{{ field.help_text }}", map[string]any{"field": field})
 		})
 	})
 }
@@ -266,9 +267,8 @@ func TestModelMultipleChoiceShowHiddenInitialChangedQueriesEfficiently(t *testin
 
 // Ported from Django: tests/model_forms/tests.py::ModelMultipleChoiceFieldTests.test_clean_does_deduplicate_values
 //
-// The Go field selects the rows it has loaded, so the check is that 50 copies
-// of one key clean to one row without a query, where Django checks that the
-// query has one parameter.
+// Django reads the parameters of the returned queryset; the Go field returns
+// the rows, so the test reads the parameters of the query that clean runs.
 func TestModelMultipleChoiceCleanDoesDeduplicateValues(t *testing.T) {
 	eachMF(t, func(t *testing.T, db *orm.DB) {
 		person1 := &Person{Name: "Person 1"}
@@ -282,13 +282,17 @@ func TestModelMultipleChoiceCleanDoesDeduplicateValues(t *testing.T) {
 		for i := range keys {
 			keys[i] = choiceID(person1.ID)
 		}
-		djangotest.AssertNumQueries(t, db, 0, func() {
-			got, err := field.Clean(keys)
-			if err != nil {
-				t.Fatal(err)
-			}
-			equal(t, len(got.([]*Person)), 1)
-		})
+		qc := djangotest.CaptureQueries(db)
+		_, err := field.Clean(keys)
+		qc.Stop()
+		if err != nil {
+			t.Fatal(err)
+		}
+		queries := qc.Queries()
+		if len(queries) != 1 {
+			t.Fatalf("clean ran %d queries, want 1", len(queries))
+		}
+		equal(t, len(queries[0].Args), 1)
 	})
 }
 

@@ -464,20 +464,17 @@ func (mf *ModelForm[T]) manyInitial(obj *T) func(ctx context.Context, f *Form) e
 }
 
 // keyedInitial replaces the initial primary keys of the many-to-many field
-// with the keys of a form field that has ToFieldName. It loads the form field
-// to map them and keeps the loaded field, so that the form does not load it
-// again.
+// with the keys of a form field that has ToFieldName, which it queries.
 func keyedInitial(ctx context.Context, f *Form, field *orm.Field, pks []any) error {
 	mf, ok := f.fields[field.Attr].(*ModelMultipleChoiceField)
 	if !ok || mf.toFieldName == "" {
 		return nil
 	}
-	loaded, err := mf.WithContext(ctx)
+	keys, err := mf.keysOfPKs(ctx, field.Rel.Target, pks)
 	if err != nil {
 		return fmt.Errorf("forms: initial value of %s: %w", field.Attr, err)
 	}
-	f.fields[field.Attr] = loaded
-	f.Initial[field.Attr] = loaded.(*ModelMultipleChoiceField).keysOfPKs(field.Rel.Target, pks)
+	f.Initial[field.Attr] = keys
 	return nil
 }
 

@@ -4,15 +4,18 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
 
 // choiceField is implemented by the fields that hand choices to a ChoiceWidget.
 type choiceField interface {
-	// widgetChoices returns the options the widget offers.
-	widgetChoices() []Choice
+	// widgetChoices returns the options the widget offers. A model choice
+	// field queries them with ctx.
+	widgetChoices(ctx context.Context) ([]Choice, error)
 	// setChoices replaces the options.
 	setChoices(choices []Choice)
 }
@@ -38,7 +41,7 @@ func NewChoiceField(opts ...FieldOption) *ChoiceField {
 }
 
 // widgetChoices implements choiceField.
-func (f *ChoiceField) widgetChoices() []Choice { return f.Choices }
+func (f *ChoiceField) widgetChoices(context.Context) ([]Choice, error) { return f.Choices, nil }
 
 // setChoices implements choiceField.
 func (f *ChoiceField) setChoices(choices []Choice) { f.Choices = choices }
@@ -282,14 +285,24 @@ type modelRow struct {
 	value any // the cleaned value: the object or its primary key
 }
 
-// ContextField is implemented by a field that needs a database to know its
-// options. A form calls WithContext once before it renders or validates and
-// uses the returned field from then on.
+// ContextField is implemented by a field that queries a database to clean a
+// value. A form calls WithContext before it validates and uses the returned
+// field from then on.
 type ContextField interface {
 	Field
-	// WithContext returns a copy of the field with its data loaded.
+	// WithContext returns a copy of the field whose queries run with ctx.
 	WithContext(ctx context.Context) (Field, error)
 }
+
+// queryError is a database failure while a field cleans a value. A form
+// records it as a failure, see Form.Err, and not as a validation error.
+type queryError struct{ err error }
+
+// Error returns the message of the database error.
+func (e *queryError) Error() string { return e.err.Error() }
+
+// Unwrap returns the database error.
+func (e *queryError) Unwrap() error { return e.err }
 
 // ModelChoiceField is a field whose options are the rows of a model, the
 // counterpart of Django's ModelChoiceField. It renders as a <select> with an
@@ -309,14 +322,23 @@ type ModelChoiceField struct {
 	// field.
 	Blank bool
 
-	rows    []modelRow
-	loaded  bool
-	charKey bool
+	// rows are the options of SetChoices, for a field without a loader.
+	rows []modelRow
+	// key is the field whose value the field submits, nil without a model.
+	key *orm.Field
 	// toFieldName is the attribute of ToFieldName, empty for the primary key.
 	toFieldName string
-	load        func(ctx context.Context) ([]modelRow, error)
+	// load returns every option. Each render calls it, so that the options
+	// are the rows of the moment, as with Django's ModelChoiceIterator.
+	load func(ctx context.Context) ([]modelRow, error)
+	// find returns the options whose field attr, "pk" or the key field, has
+	// one of values. Cleaning calls it with the submitted keys, one query as
+	// Django's queryset.get.
+	find func(ctx context.Context, attr string, values []any) ([]modelRow, error)
 	// keyOf returns the submitted key of an initial value that is an object.
 	keyOf func(value any) (string, bool)
+	// ctx is the context of WithContext for the queries of cleaning.
+	ctx context.Context
 }
 
 // keyField returns the field of m whose value a model choice field submits:
@@ -365,16 +387,16 @@ func newModelChoiceField(o *fieldOptions) *ModelChoiceField {
 // options it reads EmptyLabel, NoEmptyLabel, ToFieldName and
 // LabelFromInstance.
 //
-// The rows are loaded when the form renders or validates, with the context
-// given to Form.SetContext.
+// Each render queries the rows, and cleaning queries the submitted one, with
+// the context given to Form.SetContext.
 func NewModelChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ...FieldOption) *ModelChoiceField {
 	o := collectOptions(opts)
 	f := newModelChoiceField(o)
 	model, _ := db.Registry().ModelOf(new(T))
 	key := keyField(model, o.toFieldName)
-	f.charKey, f.toFieldName = isStringField(key), o.toFieldName
+	f.key, f.toFieldName = key, o.toFieldName
 	f.keyOf = func(value any) (string, bool) { return instanceKey(model, key, value) }
-	f.load = queryRows(db, qs, model, key, labelFunc[T](o))
+	f.load, f.find = queryRows(db, qs, model, key, labelFunc[T](o))
 	return f
 }
 
@@ -391,15 +413,19 @@ func labelFunc[T any](o *fieldOptions) func(*T) string {
 	return fn
 }
 
-// queryRows returns the loader of the rows of qs, or of every row of T when
-// qs is nil, whose cleaned values are the objects (*T). The key of a row is
-// the value of key, and its label comes from labelOf or, when it is nil, the
-// model's String method.
-func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model, key *orm.Field, labelOf func(*T) string) func(context.Context) ([]modelRow, error) {
+// queryRows returns the load and find functions of a field over the rows of
+// qs, or of every row of T when qs is nil, whose cleaned values are the
+// objects (*T). The key of a row is the value of key. Its label comes from
+// labelOf or, when it is nil, the model's String method; the rows of find
+// have no label.
+func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model, key *orm.Field, labelOf func(*T) string) (
+	load func(context.Context) ([]modelRow, error),
+	find func(context.Context, string, []any) ([]modelRow, error),
+) {
 	if qs == nil {
 		qs = orm.Query[T](db)
 	}
-	return func(ctx context.Context) ([]modelRow, error) {
+	rowsOf := func(ctx context.Context, qs *orm.QuerySet[T], labels bool) ([]modelRow, error) {
 		objs, err := qs.All(ctx)
 		if err != nil {
 			return nil, err
@@ -409,15 +435,24 @@ func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model, key *or
 			obj := &objs[i]
 			k, _ := instanceKey(model, key, obj)
 			var label string
-			if labelOf != nil {
+			switch {
+			case !labels:
+			case labelOf != nil:
 				label = labelOf(obj)
-			} else if label, err = orm.LabelContext(ctx, db, model, obj); err != nil {
-				return nil, err
+			default:
+				if label, err = orm.LabelContext(ctx, db, model, obj); err != nil {
+					return nil, err
+				}
 			}
 			rows[i] = modelRow{key: k, label: label, value: obj}
 		}
 		return rows, nil
 	}
+	load = func(ctx context.Context) ([]modelRow, error) { return rowsOf(ctx, qs, true) }
+	find = func(ctx context.Context, attr string, values []any) ([]modelRow, error) {
+		return rowsOf(ctx, qs.Filter(attr+"__in", values), false)
+	}
+	return load, find
 }
 
 // newRelatedChoiceField returns the field of the foreign key rel. With a
@@ -427,25 +462,31 @@ func queryRows[T any](db *orm.DB, qs *orm.QuerySet[T], model *orm.Model, key *or
 func newRelatedChoiceField(db *orm.DB, rel *orm.Relation, o *fieldOptions) *ModelChoiceField {
 	f := newModelChoiceField(o)
 	target := rel.Target
-	f.charKey = isStringField(keyField(target, ""))
+	f.key = keyField(target, "")
 	f.keyOf = func(value any) (string, bool) { return instancePK(target, value) }
 	if db != nil && target != nil {
-		f.load = relatedRows(db, rel)
+		f.load, f.find = relatedRows(db, rel)
 	}
 	return f
 }
 
-// relatedRows returns the loader of the options of a relation field: the rows
-// of the target of rel that match its LimitChoicesTo, which is evaluated on
-// each load.
-func relatedRows(db *orm.DB, rel *orm.Relation) func(context.Context) ([]modelRow, error) {
-	return func(ctx context.Context) ([]modelRow, error) {
-		pairs, err := orm.LabeledRowsWhere(ctx, db, rel.Target, rel.LimitChoicesTo(), nil, nil)
+// relatedRows returns the load and find functions of a relation field over
+// the rows of the target of rel that match its LimitChoicesTo, which is
+// evaluated on each query. The key of a row is its primary key.
+func relatedRows(db *orm.DB, rel *orm.Relation) (
+	load func(context.Context) ([]modelRow, error),
+	find func(context.Context, string, []any) ([]modelRow, error),
+) {
+	rowsOf := func(ctx context.Context, pks []any) ([]modelRow, error) {
+		pairs, err := orm.LabeledRowsWhere(ctx, db, rel.Target, rel.LimitChoicesTo(), nil, pks)
 		if err != nil {
 			return nil, err
 		}
 		return pairRows(pairs), nil
 	}
+	load = func(ctx context.Context) ([]modelRow, error) { return rowsOf(ctx, nil) }
+	find = func(ctx context.Context, _ string, pks []any) ([]modelRow, error) { return rowsOf(ctx, pks) }
+	return load, find
 }
 
 // pairRows converts (primary key, label) pairs to rows whose cleaned value is
@@ -495,32 +536,96 @@ func instanceKey(m *orm.Model, key *orm.Field, value any) (string, bool) {
 	return pyString(v), true
 }
 
-// WithContext implements ContextField: it returns a copy with the rows loaded.
+// WithContext implements ContextField: it returns a copy whose queries of
+// cleaning run with ctx. It queries nothing itself.
 func (f *ModelChoiceField) WithContext(ctx context.Context) (Field, error) {
-	if f.load == nil || f.loaded {
-		return f, nil
-	}
-	rows, err := f.load(ctx)
-	if err != nil {
-		return f, err
-	}
 	clone := *f
 	clone.self = &clone
-	clone.rows, clone.loaded = rows, true
+	clone.ctx = ctx
 	return &clone, nil
 }
 
+// queryContext returns the context of WithContext, context.Background
+// without one.
+func (f *ModelChoiceField) queryContext() context.Context {
+	if f.ctx == nil {
+		return context.Background()
+	}
+	return f.ctx
+}
+
 // widgetChoices implements choiceField: the empty option, then one option per
-// row.
-func (f *ModelChoiceField) widgetChoices() []Choice {
-	out := make([]Choice, 0, len(f.rows)+1)
+// row. A field with a loader queries the rows on each call.
+func (f *ModelChoiceField) widgetChoices(ctx context.Context) ([]Choice, error) {
+	rows := f.rows
+	if f.load != nil {
+		var err error
+		if rows, err = f.load(ctx); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]Choice, 0, len(rows)+1)
 	if f.hasEmptyOption() {
 		out = append(out, Choice{Value: "", Label: *f.EmptyLabel})
 	}
-	for _, r := range f.rows {
+	for _, r := range rows {
 		out = append(out, Choice{Value: r.key, Label: r.label})
 	}
-	return out
+	return out, nil
+}
+
+// keyAttr returns the attribute that the submitted keys are values of: the
+// field of ToFieldName or "pk".
+func (f *ModelChoiceField) keyAttr() string {
+	if f.toFieldName != "" {
+		return f.toFieldName
+	}
+	return "pk"
+}
+
+// rowsOfKeys returns the options whose keys are among keys, with values the
+// keys converted by keyValue: with one query of find, else from the rows of
+// SetChoices. A database error comes back as a *queryError.
+func (f *ModelChoiceField) rowsOfKeys(keys []string, values []any) ([]modelRow, error) {
+	if f.find == nil {
+		var out []modelRow
+		for _, r := range f.rows {
+			if slices.Contains(keys, r.key) {
+				out = append(out, r)
+			}
+		}
+		return out, nil
+	}
+	rows, err := f.find(f.queryContext(), f.keyAttr(), values)
+	if err != nil {
+		return nil, &queryError{err}
+	}
+	return rows, nil
+}
+
+// keyValue converts a submitted key to a value of the key field f for a
+// query: an integer for an integer field and a UUID for a UUID field. The
+// second result is false when key is no such value, where Django's lookup
+// fails. A relation field takes the type of the primary key of its target,
+// and any other field the text.
+func keyValue(f *orm.Field, key string) (any, bool) {
+	if f != nil && f.Rel != nil && f.Rel.Target != nil {
+		f = f.Rel.Target.PrimaryKey()
+	}
+	if f == nil {
+		return key, true
+	}
+	switch f.Kind {
+	case orm.KindAuto, orm.KindInt, orm.KindSmallInt, orm.KindBigInt,
+		orm.KindPositiveSmallInt, orm.KindPositiveInt, orm.KindPositiveBigInt:
+		n, err := strconv.ParseInt(strings.TrimSpace(key), 10, 64)
+		return n, err == nil
+	case orm.KindUUID:
+		u, err := orm.ParseUUID(key)
+		return u, err == nil
+	default:
+		return key, true
+	}
 }
 
 // hasEmptyOption reports whether the field offers the empty option, the rule
@@ -547,7 +652,8 @@ func unwrapWidget(w Widget) Widget {
 }
 
 // setChoices implements choiceField: the choices become the rows, and an
-// empty-valued choice is dropped because the field adds its own.
+// empty-valued choice is dropped because the field adds its own. The field
+// queries no rows from then on.
 func (f *ModelChoiceField) setChoices(choices []Choice) {
 	pairs := make([][2]string, 0, len(choices))
 	for _, c := range choices {
@@ -555,7 +661,7 @@ func (f *ModelChoiceField) setChoices(choices []Choice) {
 			pairs = append(pairs, [2]string{c.Value, c.Label})
 		}
 	}
-	f.rows, f.loaded = pairRows(pairs), true
+	f.rows, f.load, f.find = pairRows(pairs), nil, nil
 }
 
 // PrepareValue returns the submitted key of an object, its primary key or the
@@ -569,31 +675,50 @@ func (f *ModelChoiceField) PrepareValue(value any) any {
 	return value
 }
 
-// ToGo returns the cleaned value of the row whose key was submitted.
+// ToGo returns the cleaned value of the row whose key was submitted, queried
+// as Django's queryset.get. A key that converts to no value of the key field
+// or selects no row is invalid_choice.
 func (f *ModelChoiceField) ToGo(value any) (any, error) {
 	if isEmpty(value) {
 		return nil, nil
 	}
 	key := pyString(f.PrepareValue(value))
-	if f.charKey {
+	if isStringField(f.key) {
 		if err := ProhibitNullCharactersValidator(key); err != nil {
 			return nil, err
 		}
 	}
-	for _, r := range f.rows {
-		if r.key == key {
-			return r.value, nil
-		}
+	v, ok := keyValue(f.key, key)
+	if !ok {
+		return nil, f.Error("invalid_choice", map[string]any{"value": key})
 	}
-	return nil, f.Error("invalid_choice", map[string]any{"value": key})
+	rows, err := f.rowsOfKeys([]string{key}, []any{v})
+	if err != nil {
+		return nil, err
+	}
+	switch len(rows) {
+	case 0:
+		return nil, f.Error("invalid_choice", map[string]any{"value": key})
+	case 1:
+		return rows[0].value, nil
+	default:
+		return nil, &queryError{fmt.Errorf("%w: %d rows have the key %q", orm.ErrMultipleObjectsReturned, len(rows), key)}
+	}
 }
 
-// keysOfPKs returns the keys of the loaded rows of target whose primary keys
-// are pks, in the order of pks. A primary key without a loaded row is left
-// out.
-func (f *ModelChoiceField) keysOfPKs(target *orm.Model, pks []any) []any {
-	byPK := make(map[string]string, len(f.rows))
-	for _, r := range f.rows {
+// keysOfPKs returns the keys of the rows of target whose primary keys are
+// pks, in the order of pks, queried with ctx. A primary key without a row
+// among the options is left out.
+func (f *ModelChoiceField) keysOfPKs(ctx context.Context, target *orm.Model, pks []any) ([]any, error) {
+	rows := f.rows
+	if f.find != nil {
+		var err error
+		if rows, err = f.find(ctx, "pk", pks); err != nil {
+			return nil, err
+		}
+	}
+	byPK := make(map[string]string, len(rows))
+	for _, r := range rows {
 		if pk, ok := instancePK(target, r.value); ok {
 			byPK[pk] = r.key
 		}
@@ -604,7 +729,7 @@ func (f *ModelChoiceField) keysOfPKs(target *orm.Model, pks []any) []any {
 			out = append(out, key)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // HasChanged compares the submitted key with the key of the initial value.

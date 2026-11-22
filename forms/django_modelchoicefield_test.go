@@ -357,8 +357,25 @@ func TestModelChoiceFieldDeepcopiesWidget(t *testing.T) {
 }
 
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_result_cache_not_shared
+//
+// Django checks that the queryset of the second form has no result cache. A
+// Go field keeps no rows, so the test checks that the second form queries the
+// rows itself.
 func TestModelChoiceFieldResultCacheNotShared(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: a queryset has no _result_cache to inspect, Django: the second form's queryset has an empty result cache")
+	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
+		c1, c2, c3 := choiceCategories(t, db)
+		field := forms.NewModelChoiceField(db, orm.Query[ChoiceCategory](db))
+		form1 := forms.New(forms.F("category", field))
+		choices := form1.Choices("category")[1:]
+		values := make([]string, 0, len(choices))
+		for _, c := range choices {
+			values = append(values, c.Value)
+		}
+		djangotest.AssertSequenceEqual(t, values,
+			[]string{choiceID(c1.ID), choiceID(c2.ID), choiceID(c3.ID)}, djangotest.Unordered())
+		form2 := forms.New(forms.F("category", field))
+		djangotest.AssertNumQueries(t, db, 1, func() { form2.Choices("category") })
+	})
 }
 
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_queryset_none
@@ -376,15 +393,14 @@ func TestModelChoiceFieldQuerysetNone(t *testing.T) {
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_no_extra_query_when_accessing_attrs
 //
 // ModelChoiceField with RadioSelect widget doesn't produce unnecessary db
-// queries when accessing its BoundField's attrs. The Go form loads the rows
-// when the bound field is taken, so the block covers that step too.
+// queries when accessing its BoundField's attrs.
 func TestModelChoiceFieldNoExtraQueryWhenAccessingAttrs(t *testing.T) {
 	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
 		choiceCategories(t, db)
 		form := forms.New(forms.F("category",
 			forms.NewModelChoiceField(db, orm.Query[ChoiceCategory](db), forms.UseWidget(forms.RadioSelect{}))))
+		field := form.Field("category")
 		djangotest.AssertNumQueries(t, db, 1, func() {
-			field := form.Field("category")
 			renderTemplate(t, "{{ field.name }}{{ field }}{{ field.help_text }}", map[string]any{"field": field})
 		})
 	})
@@ -501,14 +517,11 @@ func TestModelChoiceFieldCustomChoiceIteratorPassesModelToWidget(t *testing.T) {
 }
 
 // Ported from Django: tests/model_forms/test_modelchoicefield.py::ModelChoiceFieldTests.test_choices_not_fetched_when_not_rendering
-//
-// Django cleans with one query for the selected row. The Go field cleans
-// against the rows it loaded, so its one query loads them all.
 func TestModelChoiceFieldChoicesNotFetchedWhenNotRendering(t *testing.T) {
 	djangotest.EachDB(t, choiceModels(), func(t *testing.T, db *orm.DB) {
 		c1, _, _ := choiceCategories(t, db)
 		djangotest.AssertNumQueries(t, db, 1, func() {
-			field := choiceLoaded(t, forms.NewModelChoiceField(db, orm.Query[ChoiceCategory](db).OrderBy("-name")))
+			field := forms.NewModelChoiceField(db, orm.Query[ChoiceCategory](db).OrderBy("-name"))
 			got, err := field.Clean(c1.ID)
 			if err != nil {
 				t.Fatal(err)

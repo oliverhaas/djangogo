@@ -4,8 +4,6 @@ import (
 	"context"
 	"maps"
 	"reflect"
-	"strconv"
-	"strings"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -24,9 +22,6 @@ type ModelMultipleChoiceField struct {
 
 	// collect returns the cleaned value of the selected rows.
 	collect func(rows []modelRow) any
-	// keyValid reports whether a submitted key can be a value of the key field
-	// at all; nil accepts any key.
-	keyValid func(key string) bool
 }
 
 // newModelMultipleChoiceField returns a ModelMultipleChoiceField without a
@@ -54,17 +49,16 @@ func rowValues(rows []modelRow) any {
 // every row of T when qs is nil. The cleaned value is a []*T of the selected
 // rows. Beside the common options it reads ToFieldName and LabelFromInstance.
 //
-// The rows are loaded when the form renders or validates, with the context
-// given to Form.SetContext.
+// Each render queries the rows, and cleaning queries the submitted ones, with
+// the context given to Form.SetContext.
 func NewModelMultipleChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ...FieldOption) *ModelMultipleChoiceField {
 	o := collectOptions(opts)
 	f := newModelMultipleChoiceField(o)
 	model, _ := db.Registry().ModelOf(new(T))
 	key := keyField(model, o.toFieldName)
-	f.charKey, f.toFieldName = isStringField(key), o.toFieldName
-	f.keyValid = keyValidator(key)
+	f.key, f.toFieldName = key, o.toFieldName
 	f.keyOf = func(value any) (string, bool) { return instanceKey(model, key, value) }
-	f.load = queryRows(db, qs, model, key, labelFunc[T](o))
+	f.load, f.find = queryRows(db, qs, model, key, labelFunc[T](o))
 	f.collect = func(rows []modelRow) any {
 		out := make([]*T, len(rows))
 		for i, r := range rows {
@@ -82,46 +76,20 @@ func NewModelMultipleChoiceField[T any](db *orm.DB, qs *orm.QuerySet[T], opts ..
 func newRelatedMultipleChoiceField(db *orm.DB, rel *orm.Relation, o *fieldOptions) *ModelMultipleChoiceField {
 	f := newModelMultipleChoiceField(o)
 	target := rel.Target
-	f.charKey = isStringField(keyField(target, ""))
-	f.keyValid = keyValidator(keyField(target, ""))
+	f.key = keyField(target, "")
 	f.keyOf = func(value any) (string, bool) { return instancePK(target, value) }
 	if db != nil && target != nil {
-		f.load = relatedRows(db, rel)
+		f.load, f.find = relatedRows(db, rel)
 	}
 	return f
 }
 
-// keyValidator returns the check of Django's invalid_pk_value for the key
-// field f: the key of an integer field must parse as an integer. It is nil for
-// any other field.
-func keyValidator(f *orm.Field) func(string) bool {
-	if f == nil {
-		return nil
-	}
-	switch f.Kind {
-	case orm.KindAuto, orm.KindInt, orm.KindSmallInt, orm.KindBigInt,
-		orm.KindPositiveSmallInt, orm.KindPositiveInt, orm.KindPositiveBigInt:
-		return func(key string) bool {
-			_, err := strconv.ParseInt(strings.TrimSpace(key), 10, 64)
-			return err == nil
-		}
-	default:
-		return nil
-	}
-}
-
-// WithContext implements ContextField: it returns a copy with the rows loaded.
+// WithContext implements ContextField: it returns a copy whose queries of
+// cleaning run with ctx. It queries nothing itself.
 func (f *ModelMultipleChoiceField) WithContext(ctx context.Context) (Field, error) {
-	if f.load == nil || f.loaded {
-		return f, nil
-	}
-	rows, err := f.load(ctx)
-	if err != nil {
-		return f, err
-	}
 	clone := *f
 	clone.self = &clone
-	clone.rows, clone.loaded = rows, true
+	clone.ctx = ctx
 	return &clone, nil
 }
 
@@ -204,17 +172,24 @@ func (f *ModelMultipleChoiceField) Clean(value any) (any, error) {
 			keys = append(keys, key)
 		}
 	}
-	for _, key := range keys {
+	values := make([]any, len(keys))
+	for i, key := range keys {
 		if err := ProhibitNullCharactersValidator(key); err != nil {
 			return nil, err
 		}
-		if f.keyValid != nil && !f.keyValid(key) {
+		v, ok := keyValue(f.key, key)
+		if !ok {
 			return nil, f.Error("invalid_pk_value", map[string]any{"pk": key})
 		}
+		values[i] = v
+	}
+	rows, err := f.rowsOfKeys(keys, values)
+	if err != nil {
+		return nil, err
 	}
 	var chosen []modelRow
 	found := make(map[string]bool, len(keys))
-	for _, r := range f.rows {
+	for _, r := range rows {
 		if wanted[r.key] {
 			chosen = append(chosen, r)
 			found[r.key] = true

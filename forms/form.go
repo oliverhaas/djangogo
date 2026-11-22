@@ -2,6 +2,7 @@ package forms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -228,7 +229,8 @@ func (f *Form) fail(err error) {
 	}
 }
 
-// resolve loads the data of the fields that need a database, once.
+// resolve hands the context of the form to the fields that query a
+// database, once.
 func (f *Form) resolve() {
 	if f.resolved {
 		return
@@ -401,6 +403,10 @@ func (f *Form) fullClean() {
 			raw = bf.Initial()
 		}
 		value, err := field.Clean(raw)
+		if qe := (*queryError)(nil); errors.As(err, &qe) {
+			f.fail(fmt.Errorf("forms: field %q: %w", name, qe.err))
+			continue
+		}
 		if err == nil {
 			f.cleaned[name] = value
 			if hook, ok := f.fieldCleaners[name]; ok {
@@ -509,13 +515,18 @@ func (f *Form) SetChoices(name string, choices [][2]string) {
 
 // Choices returns the options of a choice field with their option groups,
 // Django's field.choices. A model choice field returns its empty first option
-// and the rows it has loaded. An unknown name or a field without choices
-// returns nil.
+// and its rows, queried on each call. An unknown name or a field without
+// choices returns nil.
 func (f *Form) Choices(name string) []Choice {
-	if cf, ok := f.fields[name].(choiceField); ok {
-		return cf.widgetChoices()
+	cf, ok := f.fields[name].(choiceField)
+	if !ok {
+		return nil
 	}
-	return nil
+	choices, err := cf.widgetChoices(f.Context())
+	if err != nil {
+		f.fail(fmt.Errorf("forms: field %q: %w", name, err))
+	}
+	return choices
 }
 
 // IsMultipart reports whether the form needs multipart encoding. No widget of

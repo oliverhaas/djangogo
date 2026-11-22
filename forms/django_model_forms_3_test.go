@@ -534,12 +534,7 @@ func TestModelFormBasicRuntimeChoicefieldPopulated(t *testing.T) {
 		ctx := context.Background()
 		d := createBasicData(t, db)
 		f := articleForm(db, true)
-		render := func() string {
-			// The form loads the options when it renders.
-			f.SetContext(ctx)
-			return f.AsUL()
-		}
-		assertHTMLEqual(t, render(),
+		assertHTMLEqual(t, f.AsUL(),
 			`<li>Headline: <input type="text" name="headline" maxlength="50" required></li>`+
 				`<li>Slug: <input type="text" name="slug" maxlength="50" required></li>`+
 				`<li>Pub date: <input type="text" name="pub_date" required></li>`+
@@ -555,10 +550,7 @@ func TestModelFormBasicRuntimeChoicefieldPopulated(t *testing.T) {
 		if err := orm.Query[Category](db).Create(ctx, &Category{Name: "Fourth", URL: "4th"}); err != nil {
 			t.Fatal(err)
 		}
-		got := render()
-		if !strings.Contains(got, "Carl Bernstein") {
-			t.Skip("FIXME-PORT: Go: a form loads the options of a foreign key once, so a writer created after the first render is missing, Django: the choices are evaluated on every render")
-		}
+		got := f.AsUL()
 		bob, carl, mike := strings.Index(got, "Bob Woodward"), strings.Index(got, "Carl Bernstein"), strings.Index(got, "Mike Royko")
 		if bob < 0 || carl < 0 || mike < 0 {
 			t.Fatalf("the writer select lacks a writer: %s", got)

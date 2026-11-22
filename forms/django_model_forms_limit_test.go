@@ -155,7 +155,8 @@ func TestLimitChoicesToFieldsForModel(t *testing.T) {
 
 // Ported from Django: tests/model_forms/tests.py::LimitChoicesToTests.test_callable_called_each_time_form_is_instantiated
 //
-// A Go form evaluates the limit when it loads its options, once per form.
+// Django evaluates the limit when it builds the form. A Go form evaluates it
+// each time it queries the options, here once per render of each form.
 func TestLimitChoicesToCallableCalledEachTime(t *testing.T) {
 	eachLimit(t, func(t *testing.T, db *orm.DB, _, _ *Character) {
 		before := todayCalls.Load()

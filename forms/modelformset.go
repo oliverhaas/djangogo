@@ -371,10 +371,30 @@ func (s *ModelFormSet[T]) pkField(mf *ModelForm[T], required bool) Field {
 	}
 	field := newModelChoiceField(collectOptions(opts))
 	model := s.model
-	field.charKey = isStringField(keyField(model, ""))
+	field.key = keyField(model, "")
 	field.keyOf = func(value any) (string, bool) { return instancePK(model, value) }
 	field.load = s.loadPKRows
+	field.find = s.findPKRows
 	return field
+}
+
+// findPKRows returns the rows of loadPKRows whose primary keys are pks, the
+// find function of the hidden primary key fields.
+func (s *ModelFormSet[T]) findPKRows(ctx context.Context, _ string, pks []any) ([]modelRow, error) {
+	rows, err := s.loadPKRows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []modelRow
+	for _, r := range rows {
+		for _, pk := range pks {
+			if r.key == pyString(pk) {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 // loadPKRows returns the rows the hidden primary key fields accept, loaded
