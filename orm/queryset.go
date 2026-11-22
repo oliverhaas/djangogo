@@ -135,10 +135,27 @@ func (qs *QuerySet[T]) OrderBy(terms ...any) *QuerySet[T] {
 
 // Ordering returns the terms the rows are ordered by, in the form OrderBy
 // takes them: a key, "-" and a key, "?" or an OrderExpr. They are the terms of
-// OrderBy, or the default ordering of the model when OrderBy was not called.
-// It is empty for an unordered queryset, Django's qs.ordered being false.
+// OrderBy, or the default ordering of the model when OrderBy was not called
+// and no aggregate annotation groups the rows. It is empty for an unordered
+// queryset.
 func (qs *QuerySet[T]) Ordering() []any {
 	return orderArgs(qs.q.effectiveOrders())
+}
+
+// Ordered reports whether the rows come in a defined order, Django's
+// qs.ordered: Ordering is not empty, or the queryset is one of None, which
+// has no rows to order.
+func (qs *QuerySet[T]) Ordered() bool {
+	return qs.q.ordered()
+}
+
+// None returns a clone that matches no row, Django's none(). Reading it runs
+// no statement: All returns no rows, Count zero, Exists false, Update and
+// Delete change nothing, and Aggregate returns the value of each aggregate
+// over no rows. Filters, ordering and the other builders apply to it as to
+// any queryset, and it stays empty.
+func (qs *QuerySet[T]) None() *QuerySet[T] {
+	return &QuerySet[T]{q: qs.q.setNone()}
 }
 
 // TotallyOrdered reports whether the ordering decides the position of every

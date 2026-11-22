@@ -517,8 +517,7 @@ func TestMinNum(t *testing.T) {
 		formSet := func(minNum, extra int) *forms.ModelFormSet[Author] {
 			fs := forms.NewModelFormSet[Author](db)
 			fs.MinNum, fs.Extra = minNum, extra
-			// Author.objects.none()
-			fs.QuerySet = orm.Query[Author](db).Filter("pk__in", []any{})
+			fs.QuerySet = orm.Query[Author](db).None()
 			return fs
 		}
 		djangotest.AssertEqual(t, len(formSet(0, 0).Forms()), 0)

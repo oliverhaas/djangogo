@@ -281,6 +281,11 @@ func (c *compiler) addFilters() error {
 		root.add(node)
 		c.joins.demote(existing)
 	}
+	if c.q.none {
+		// Resolve the filters first, so that None reports an invalid one, as
+		// Django's set_empty adds its NothingNode next to them.
+		root.children = append(root.children, whereChild{pred: &predicate{empty: true}})
+	}
 	switch root.simplify() {
 	case matchNone:
 		// A statement that has to run all the same (an aggregate whose value over

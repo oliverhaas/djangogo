@@ -154,6 +154,17 @@ func (vs *ValuesQuerySet) Annotate(args ...any) *ValuesQuerySet {
 	return &ValuesQuerySet{q: vs.q.annotate(args)}
 }
 
+// Ordered reports whether the rows come in a defined order; see
+// QuerySet.Ordered.
+func (vs *ValuesQuerySet) Ordered() bool {
+	return vs.q.ordered()
+}
+
+// None returns a clone that matches no row; see QuerySet.None.
+func (vs *ValuesQuerySet) None() *ValuesQuerySet {
+	return &ValuesQuerySet{q: vs.q.setNone()}
+}
+
 // Distinct returns a clone that removes duplicate rows.
 func (vs *ValuesQuerySet) Distinct() *ValuesQuerySet {
 	cp := vs.q.clone()
@@ -234,6 +245,17 @@ func (vl *ValuesListQuerySet) OrderBy(terms ...any) *ValuesListQuerySet {
 // ValuesQuerySet.Annotate.
 func (vl *ValuesListQuerySet) Annotate(args ...any) *ValuesListQuerySet {
 	return &ValuesListQuerySet{q: vl.q.annotate(args)}
+}
+
+// Ordered reports whether the rows come in a defined order; see
+// QuerySet.Ordered.
+func (vl *ValuesListQuerySet) Ordered() bool {
+	return vl.q.ordered()
+}
+
+// None returns a clone that matches no row; see QuerySet.None.
+func (vl *ValuesListQuerySet) None() *ValuesListQuerySet {
+	return &ValuesListQuerySet{q: vl.q.setNone()}
 }
 
 // Distinct returns a clone that removes duplicate rows.

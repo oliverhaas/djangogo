@@ -337,7 +337,7 @@ func inlineQuerySet[T any](db *orm.DB, ordering []string, none bool) *orm.QueryS
 		qs = qs.OrderBy(key)
 	}
 	if none {
-		qs = qs.Filter("pk__in", []any{})
+		qs = qs.None()
 	}
 	return qs
 }

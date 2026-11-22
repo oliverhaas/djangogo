@@ -1607,13 +1607,12 @@ func TestAggregationOrderByAggregateDefaultAlias(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_empty_result_optimization
 //
-// There is no none(); a filter on an empty list is the queryset that is known
-// to be empty. An arithmetic expression stands in for the Func whose value
-// over no rows Django cannot tell.
+// An arithmetic expression stands in for the Func whose value over no rows
+// Django cannot tell.
 func TestAggregationEmptyResultOptimization(t *testing.T) {
 	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
 		agSetUp(t, db)
-		none := orm.Query[agPublisher](db).Filter("pk__in", []int64{})
+		none := orm.Query[agPublisher](db).None()
 
 		djangotest.AssertNumQueries(t, db, 0, func() {
 			vals := agAggregate(t, none, "sum_awards", orm.Sum("num_awards"), "books_count", orm.Count("book"),
@@ -1637,13 +1636,12 @@ func TestAggregationEmptyResultOptimization(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_coalesced_empty_result_set
 //
-// There is no none(); a filter on an empty list is the queryset that is known
-// to be empty. The last part of the Django test needs RawSQL, which the ORM
-// does not have; TestAggregationEmptyResultOptimization covers an expression
-// that forces the query to run.
+// The last part of the Django test needs RawSQL, which the ORM does not have;
+// TestAggregationEmptyResultOptimization covers an expression that forces the
+// query to run.
 func TestAggregationCoalescedEmptyResultSet(t *testing.T) {
 	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
-		none := orm.Query[agPublisher](db).Filter("pk__in", []int64{})
+		none := orm.Query[agPublisher](db).None()
 		for _, tc := range []struct {
 			name string
 			expr orm.Expr
@@ -1901,7 +1899,7 @@ func TestAggregationAggregationDefaultNotInAggregate(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_exists_none_with_aggregate
 func TestAggregationExistsNoneWithAggregate(t *testing.T) {
-	t.Skip("needs Exists and none(), which the ORM does not have")
+	t.Skip("needs Exists, which the ORM does not have")
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_alias_sql_injection

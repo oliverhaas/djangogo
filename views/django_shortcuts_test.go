@@ -260,7 +260,7 @@ func TestGetObjectOr404(t *testing.T) {
 		_, err = views.GetObjectOr404(ctx, orm.Query[GetAuthor](db))
 		djangotest.AssertErrorIs(t, err, orm.ErrMultipleObjectsReturned)
 		// Using an empty QuerySet raises an Http404 error.
-		_, err = views.GetObjectOr404(ctx, articles.Filter("id", -1), "title__contains", "Run")
+		_, err = views.GetObjectOr404(ctx, articles.None(), "title__contains", "Run")
 		djangotest.AssertErrorIs(t, err, views.ErrNotFound)
 
 		// get_list_or_404 can be used to get lists of objects

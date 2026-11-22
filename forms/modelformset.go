@@ -151,19 +151,19 @@ func (s *ModelFormSet[T]) GetQuerySet() *orm.QuerySet[T] {
 	if in := s.inline; in != nil {
 		switch {
 		case !in.parentHasPK():
-			// A parent without a primary key has no rows, Django's
-			// queryset.none(); a filter on a null key would match the
-			// rows without a parent.
-			qs = qs.Filter("pk__in", []any{})
+			// A parent without a primary key has no rows; a filter on a
+			// null key would match the rows without a parent.
+			qs = qs.None()
 		case in.fk != nil:
 			qs = qs.Filter(in.fk.Attr, in.parentPKValue())
 		default:
 			rows, err := in.genericRows(s.context(), s.db)
 			if err != nil {
 				s.fail(err)
-				rows = orm.Q("pk__in", []any{})
+				qs = qs.None()
+			} else {
+				qs = qs.Filter(rows)
 			}
-			qs = qs.Filter(rows)
 		}
 	}
 	if !qs.TotallyOrdered() {

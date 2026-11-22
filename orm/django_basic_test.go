@@ -246,6 +246,55 @@ func TestBasicMultipleObjectsMaxNumFetched(t *testing.T) {
 	})
 }
 
+// No Go counterpart: tests/basic/tests.py::ModelTest.test_emptyqs checks that
+// none() returns an instance of the Python class EmptyQuerySet. A Go queryset
+// has no separate type for None.
+
+// Ported from Django: tests/basic/tests.py::ModelTest.test_emptyqs_values
+func TestBasicEmptyQuerySetValues(t *testing.T) {
+	djangotest.EachDB(t, basModels(), func(t *testing.T, db *orm.DB) {
+		create(t, db, &basArticle{Headline: "foo", PubDate: time.Now()})
+		djangotest.AssertNumQueries(t, db, 0, func() {
+			rows, err := orm.Query[basArticle](db).None().ValuesList("pk").All(context.Background())
+			if err != nil {
+				t.Fatalf("All: %v", err)
+			}
+			djangotest.AssertEqual(t, len(rows), 0)
+		})
+	})
+}
+
+// No Go counterpart: tests/basic/tests.py::ModelTest.test_emptyqs_customqs
+// swaps the Python class of a queryset for a subclass with an extra method.
+
+// Ported from Django: tests/basic/tests.py::ModelTest.test_emptyqs_values_order
+func TestBasicEmptyQuerySetValuesOrder(t *testing.T) {
+	djangotest.EachDB(t, basModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		create(t, db, &basArticle{Headline: "foo", PubDate: time.Now()})
+		articles := orm.Query[basArticle](db)
+		djangotest.AssertNumQueries(t, db, 0, func() {
+			rows, err := articles.None().ValuesList("id").OrderBy("id").All(ctx)
+			if err != nil {
+				t.Fatalf("All: %v", err)
+			}
+			djangotest.AssertEqual(t, len(rows), 0)
+		})
+		djangotest.AssertNumQueries(t, db, 0, func() {
+			rows, err := articles.None().Filter("id__in", articles.ValuesList("id")).All(ctx)
+			if err != nil {
+				t.Fatalf("All: %v", err)
+			}
+			djangotest.AssertEqual(t, len(rows), 0)
+		})
+	})
+}
+
+// Ported from Django: tests/basic/tests.py::ModelTest.test_emptyqs_distinct
+func TestBasicEmptyQuerySetDistinct(t *testing.T) {
+	t.Skip("needs Distinct on fields, which the ORM does not have")
+}
+
 // Ported from Django: tests/basic/tests.py::ModelLookupTest.test_all_lookup
 func TestBasicAllLookup(t *testing.T) {
 	djangotest.EachDB(t, basModels(), func(t *testing.T, db *orm.DB) {

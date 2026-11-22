@@ -566,6 +566,37 @@ func TestLookupExclude(t *testing.T) {
 	})
 }
 
+// Ported from Django: tests/lookup/tests.py::LookupTests.test_none
+//
+// The ORM has no iterator(); All stands in for it.
+func TestLookupNone(t *testing.T) {
+	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {
+		lkSetUp(t, db)
+		ctx := context.Background()
+		// None returns a queryset that behaves like any other queryset.
+		djangotest.AssertQuerySetEqual(t, lkArticles(db).None(), []int64{}, lkID)
+		djangotest.AssertQuerySetEqual(t,
+			lkArticles(db).None().Filter("headline__startswith", "Article"), []int64{}, lkID)
+		djangotest.AssertQuerySetEqual(t,
+			lkArticles(db).Filter("headline__startswith", "Article").None(), []int64{}, lkID)
+		n, err := lkArticles(db).None().Count(ctx)
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		djangotest.AssertEqual(t, n, int64(0))
+		n, err = lkArticles(db).None().Update(ctx, "headline", "This should not take effect")
+		if err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		djangotest.AssertEqual(t, n, int64(0))
+		rows, err := lkArticles(db).None().All(ctx)
+		if err != nil {
+			t.Fatalf("All: %v", err)
+		}
+		djangotest.AssertEqual(t, len(rows), 0)
+	})
+}
+
 // Ported from Django: tests/lookup/tests.py::LookupTests.test_in
 func TestLookupIn(t *testing.T) {
 	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {

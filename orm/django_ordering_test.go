@@ -511,7 +511,10 @@ func TestTotallyOrderedAliasSelfRelation(t *testing.T) {
 
 // Ported from Django: tests/ordering/tests.py::TotallyOrderedTests.test_totally_ordered_none
 func TestTotallyOrderedNone(t *testing.T) {
-	t.Skip("needs none(), which the ORM does not have")
+	djangotest.EachDB(t, ordTotallyOrderedModels(), func(t *testing.T, db *orm.DB) {
+		djangotest.AssertEqual(t, orm.Query[ordAuthor](db).OrderBy().None().TotallyOrdered(), false)
+		djangotest.AssertEqual(t, orm.Query[ordAuthor](db).OrderBy("pk").None().TotallyOrdered(), true)
+	})
 }
 
 // Ordering returns the terms of OrderBy, or Meta.Ordering without them, with

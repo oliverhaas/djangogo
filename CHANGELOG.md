@@ -845,6 +845,15 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   expression annotation, such as `orm.F("pages").Mod(10)`, groups by the
   expression, and `OrderBy` takes an annotation followed by a transform, such
   as `"sum_pages__mod100"`.
+- ORM: `QuerySet.None`, Django's `none()`, returns a queryset that matches no
+  row and runs no statement: `All` returns no rows, `Count` 0, `Exists`
+  false, `Update` and `Delete` change nothing, and `Aggregate` returns the
+  value of each aggregate over no rows. The values querysets have it too.
+  `Ordered` reports Django's `qs.ordered`. A queryset with an aggregate
+  annotation drops the default ordering of the model, as Django does for any
+  `GROUP BY`. Model formsets and inline formsets of the admin use `None` for a
+  parent without a primary key and an inline without the view or change
+  permission.
 
 ### Changed
 

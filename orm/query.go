@@ -30,6 +30,9 @@ type query struct {
 	offset          int // 0 means no offset
 	distinct        bool
 	forUpdate       bool
+	// none reports a queryset of None, which matches no row and runs no
+	// statement.
+	none bool
 	// against replaces the columns of the model's own table with the values
 	// of one instance, for checking a constraint against it.
 	against map[*Field]*instanceValue
@@ -147,19 +150,31 @@ func parseOrderTerms(fields []string) []orderTerm {
 
 // effectiveOrders returns the ordering terms that apply to q: the explicit
 // OrderBy terms when OrderBy was called, or the model's Meta.Ordering
-// otherwise. Default Meta.Ordering is omitted for GROUP BY queries produced by
-// Values().Annotate(), matching Django.
+// otherwise. A query with an aggregate annotation groups its rows and drops
+// Meta.Ordering, as Django's compiler does for any GROUP BY.
 func (q *query) effectiveOrders() []orderTerm {
 	if q.explicitOrder {
 		return q.orders
 	}
-	if q.values != nil && q.values.groups && q.hasAggregates() {
+	if q.hasAggregates() {
 		return nil
 	}
 	if q.model != nil && len(q.model.ordering) > 0 {
 		return q.model.ordering
 	}
 	return nil
+}
+
+// ordered implements QuerySet.Ordered.
+func (q *query) ordered() bool {
+	return q.none || len(q.effectiveOrders()) > 0
+}
+
+// setNone returns a clone that matches no row, Django's set_empty.
+func (q *query) setNone() *query {
+	cp := q.clone()
+	cp.none = true
+	return cp
 }
 
 // orderBy returns a clone with the given keys appended to the explicit
