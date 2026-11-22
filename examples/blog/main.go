@@ -97,10 +97,8 @@ func openDB(dsn string) (*orm.DB, error) {
 	db := orm.NewDB(sdb, sqlite.New(), reg)
 
 	ctx := context.Background()
-	for _, m := range reg.Models() {
-		if err := db.CreateTable(ctx, m); err != nil {
-			return nil, fmt.Errorf("create table %s: %w", m.Table(), err)
-		}
+	if err := db.CreateTables(ctx, reg.Models()...); err != nil {
+		return nil, fmt.Errorf("create tables: %w", err)
 	}
 	return db, nil
 }

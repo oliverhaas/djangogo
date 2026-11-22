@@ -686,6 +686,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   reads "N static files symlinked" and adds ", M copied" for the embedded
   files. In Go, `staticfiles.CollectOptions.Link` selects it and
   `CollectResult.Linked` lists the links.
+- ORM: `DB.CreateTables` creates the tables of several models in an order
+  that works, including two models with foreign keys to each other on
+  PostgreSQL. A table that refers to a table created later gets its foreign
+  keys once every table exists, as Django's schema editor does. The test
+  databases of `djangotest` use it, so mutual foreign keys work in tests on
+  PostgreSQL too. A dialect provides this through `orm.ForeignKeyDialect`.
 
 ### Changed
 

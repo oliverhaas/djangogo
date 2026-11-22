@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -149,53 +148,17 @@ func EachDB(t *testing.T, models []any, fn func(t *testing.T, db *orm.DB)) {
 	})
 }
 
-// createTables creates the table of every registered model, referenced tables
-// before the tables that reference them. One transaction holds them all, so
-// PostgreSQL commits the schema once instead of once per statement.
+// createTables creates the table of every registered model with
+// orm.DB.CreateTables. One transaction holds them all, so PostgreSQL commits
+// the schema once instead of once per statement.
 func createTables(t testing.TB, db *orm.DB) {
 	t.Helper()
 	err := db.Atomic(context.Background(), func(ctx context.Context) error {
-		for _, m := range creationOrder(db.Registry().Models()) {
-			if err := db.CreateTable(ctx, m); err != nil {
-				return fmt.Errorf("create table for %s: %w", m.Label(), err)
-			}
-		}
-		return nil
+		return db.CreateTables(ctx, db.Registry().Models()...)
 	})
 	if err != nil {
-		t.Fatalf("djangotest: %v", err)
+		t.Fatalf("djangotest: create tables: %v", err)
 	}
-}
-
-// creationOrder sorts models so that a model follows every model its foreign
-// keys reference, keeping registration order otherwise. A reference cycle (or a
-// self reference) cannot be ordered; its members keep registration order.
-func creationOrder(models []*orm.Model) []*orm.Model {
-	out := make([]*orm.Model, 0, len(models))
-	state := make(map[*orm.Model]int, len(models)) // 0 new, 1 visiting, 2 done
-	var visit func(m *orm.Model)
-	visit = func(m *orm.Model) {
-		if state[m] != 0 {
-			return
-		}
-		state[m] = 1
-		for _, f := range m.Fields() {
-			if f.Rel != nil && f.Rel.Target != nil {
-				visit(f.Rel.Target)
-			}
-		}
-		for _, f := range m.ManyToMany() {
-			if f.Rel != nil && f.Rel.AutoCreated && f.Rel.Target != nil {
-				visit(f.Rel.Target)
-			}
-		}
-		state[m] = 2
-		out = append(out, m)
-	}
-	for _, m := range models {
-		visit(m)
-	}
-	return out
 }
 
 // schemaDSN returns dsn with the connection's search_path set to schema, so

@@ -35,6 +35,19 @@ type FeatureDialect interface {
 	Features() Features
 }
 
+// ForeignKeyDialect is an optional capability of a Dialect whose CREATE TABLE
+// cannot refer to a table that does not exist yet, as PostgreSQL's cannot.
+// DB.CreateTables creates such a table without its foreign keys when it
+// refers to a table created later, and adds them once every table exists.
+type ForeignKeyDialect interface {
+	// CreateTableNoForeignKeysSQL returns CreateTableSQL without the
+	// FOREIGN KEY constraints.
+	CreateTableNoForeignKeysSQL(m *Model) string
+	// AddForeignKeySQL returns the statement that adds the FOREIGN KEY
+	// constraint of the field f of m.
+	AddForeignKeySQL(m *Model, f *Field) string
+}
+
 // LiteralDialect is an optional capability of a Dialect that cannot tell the
 // type of a bound parameter where the statement gives no hint, as in
 // "SELECT MAX($1)". LiteralSQL returns the SQL for the placeholder of a

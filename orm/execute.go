@@ -10,13 +10,61 @@ import (
 
 // CreateTable creates the table for m using the dialect's DDL, along with its
 // field indexes, Meta.Indexes, Meta.UniqueTogether, Meta.Constraints, and any
-// auto-created M2M join tables declared on m.
+// auto-created M2M join tables declared on m. The tables that m references
+// must exist on PostgreSQL; CreateTables creates several tables in an order
+// that works.
 func (db *DB) CreateTable(ctx context.Context, m *Model) error {
+	return db.createTable(ctx, m, nil, nil)
+}
+
+// CreateTables creates the tables of models as CreateTable does, a table
+// after the tables it references. On a ForeignKeyDialect, a table that refers
+// to a table created later, as in a cycle of foreign keys, is created without
+// its foreign keys, which are added once every table exists, as Django's
+// schema editor does with its deferred SQL. Tables that exist already are an
+// error.
+func (db *DB) CreateTables(ctx context.Context, models ...*Model) error {
+	created := make(map[*Model]bool, len(models))
+	var later []deferredFK
+	for _, m := range creationOrder(models) {
+		if err := db.createTable(ctx, m, created, &later); err != nil {
+			return err
+		}
+	}
+	// later holds fields only on a ForeignKeyDialect.
+	fk, _ := db.dialect.(ForeignKeyDialect)
+	for _, l := range later {
+		if _, err := db.conn(ctx).ExecContext(ctx, fk.AddForeignKeySQL(l.model, l.field)); err != nil {
+			return fmt.Errorf("orm: add foreign key %s.%s: %w", l.model.Table(), l.field.Column, err)
+		}
+	}
+	return nil
+}
+
+// deferredFK is a foreign key field together with its model.
+type deferredFK struct {
+	model *Model
+	field *Field
+}
+
+// createTable creates the table of m. With created, which holds the models
+// whose tables CreateTables has created, a ForeignKeyDialect creates the
+// table without its foreign keys when one refers to a table that does not
+// exist yet, and the foreign keys go to later.
+func (db *DB) createTable(ctx context.Context, m *Model, created map[*Model]bool, later *[]deferredFK) error {
 	defs, stmts, err := db.constraintsDDL(m)
 	if err != nil {
 		return err
 	}
 	ddl := db.dialect.CreateTableSQL(m)
+	if fk, ok := db.dialect.(ForeignKeyDialect); ok && created != nil && refersAhead(m, created) {
+		ddl = fk.CreateTableNoForeignKeysSQL(m)
+		for _, f := range m.Fields() {
+			if f.Rel != nil && f.Rel.Target != nil {
+				*later = append(*later, deferredFK{model: m, field: f})
+			}
+		}
+	}
 	if len(defs) > 0 {
 		// Add the table constraints to the column definitions.
 		ddl = strings.TrimSuffix(ddl, ")") + ", " + strings.Join(defs, ", ") + ")"
@@ -32,14 +80,60 @@ func (db *DB) CreateTable(ctx context.Context, m *Model) error {
 			return fmt.Errorf("orm: create table %s: %w", m.Table(), err)
 		}
 	}
+	if created != nil {
+		created[m] = true
+	}
 	for _, f := range m.m2mFields {
 		if f.Rel != nil && f.Rel.AutoCreated && f.Rel.Through != nil {
-			if err := db.CreateTable(ctx, f.Rel.Through); err != nil {
+			if err := db.createTable(ctx, f.Rel.Through, created, later); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// refersAhead reports whether a foreign key of m refers to another model
+// whose table is not in created.
+func refersAhead(m *Model, created map[*Model]bool) bool {
+	for _, f := range m.Fields() {
+		if f.Rel != nil && f.Rel.Target != nil && f.Rel.Target != m && !created[f.Rel.Target] {
+			return true
+		}
+	}
+	return false
+}
+
+// creationOrder sorts models so that a model follows every model its foreign
+// keys and auto-created many-to-many tables reference, keeping the given
+// order otherwise. The members of a reference cycle, and a model that refers
+// to itself, keep the given order among themselves.
+func creationOrder(models []*Model) []*Model {
+	out := make([]*Model, 0, len(models))
+	state := make(map[*Model]int, len(models)) // 0 new, 1 visiting, 2 done
+	var visit func(m *Model)
+	visit = func(m *Model) {
+		if state[m] != 0 {
+			return
+		}
+		state[m] = 1
+		for _, f := range m.Fields() {
+			if f.Rel != nil && f.Rel.Target != nil {
+				visit(f.Rel.Target)
+			}
+		}
+		for _, f := range m.ManyToMany() {
+			if f.Rel != nil && f.Rel.AutoCreated && f.Rel.Target != nil {
+				visit(f.Rel.Target)
+			}
+		}
+		state[m] = 2
+		out = append(out, m)
+	}
+	for _, m := range models {
+		visit(m)
+	}
+	return out
 }
 
 // Annotated is a model row together with the values of the queryset's

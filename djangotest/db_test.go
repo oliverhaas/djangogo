@@ -26,15 +26,6 @@ type shelfBook struct {
 // in registration order would fail on PostgreSQL.
 var shelfModels = []any{App("shelf", &shelfBook{}, &shelfAuthor{})}
 
-// modelNames returns the names of the models, in order.
-func modelNames(models []*orm.Model) []string {
-	names := make([]string, len(models))
-	for i, m := range models {
-		names[i] = m.Name()
-	}
-	return names
-}
-
 func TestAppRegistersModelsUnderLabel(t *testing.T) {
 	reg := NewRegistry(t, shelfModels...)
 	models := reg.AppModels("shelf")
@@ -60,27 +51,6 @@ func TestNewRegistryBareModelHasNoAppLabel(t *testing.T) {
 	if models[0].App() != "" {
 		t.Errorf("a bare model is in app %q, want none", models[0].App())
 	}
-}
-
-func TestCreationOrderPutsReferencedModelsFirst(t *testing.T) {
-	reg := NewRegistry(t, shelfModels...)
-	registered := modelNames(reg.Models())
-	AssertSequenceEqual(t, registered, []string{"shelfBook", "shelfAuthor"})
-
-	ordered := modelNames(creationOrder(reg.Models()))
-	AssertSequenceEqual(t, ordered, []string{"shelfAuthor", "shelfBook"})
-}
-
-// selfRef references itself, which no creation order can satisfy.
-type selfRef struct {
-	ID     int64
-	Parent orm.FK[selfRef] `orm:"null"`
-}
-
-func TestCreationOrderKeepsSelfReference(t *testing.T) {
-	reg := NewRegistry(t, &selfRef{}, &shelfAuthor{})
-	ordered := modelNames(creationOrder(reg.Models()))
-	AssertSequenceEqual(t, ordered, []string{"selfRef", "shelfAuthor"})
 }
 
 // roundTrip creates an author and a book and reads the book back through the

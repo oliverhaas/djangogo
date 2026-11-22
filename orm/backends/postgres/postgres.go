@@ -130,6 +130,26 @@ func (d Dialect) ColumnType(f *orm.Field) string {
 // order. Each resolved foreign-key field also emits a table-level FOREIGN KEY
 // constraint after the column definitions.
 func (d Dialect) CreateTableSQL(m *orm.Model) string {
+	return d.createTableSQL(m, true)
+}
+
+// CreateTableNoForeignKeysSQL returns CreateTableSQL without the FOREIGN KEY
+// constraints, which AddForeignKeySQL adds once the referenced tables exist:
+// PostgreSQL refuses a reference to a table that does not exist yet.
+func (d Dialect) CreateTableNoForeignKeysSQL(m *orm.Model) string {
+	return d.createTableSQL(m, false)
+}
+
+// AddForeignKeySQL returns the ALTER TABLE statement that adds the FOREIGN KEY
+// constraint of the field f of m. The constraint gets the name PostgreSQL
+// gives the one of CreateTableSQL.
+func (d Dialect) AddForeignKeySQL(m *orm.Model, f *orm.Field) string {
+	return "ALTER TABLE " + d.Quote(m.Table()) + " ADD " + d.foreignKey(f)
+}
+
+// createTableSQL returns the CREATE TABLE statement of m, with the FOREIGN
+// KEY constraints when foreignKeys is true.
+func (d Dialect) createTableSQL(m *orm.Model, foreignKeys bool) string {
 	fields := m.Fields()
 	defs := make([]string, 0, len(fields))
 
@@ -137,15 +157,21 @@ func (d Dialect) CreateTableSQL(m *orm.Model) string {
 		defs = append(defs, d.Quote(f.Column)+" "+d.ColumnType(f))
 	}
 	for _, f := range fields {
-		if f.Rel != nil && f.Rel.Target != nil {
-			target := f.Rel.Target
-			defs = append(defs, "FOREIGN KEY ("+d.Quote(f.Column)+") REFERENCES "+
-				d.Quote(target.Table())+" ("+d.Quote(target.PrimaryKey().Column)+")"+
-				f.Rel.OnDelete.Clause())
+		if foreignKeys && f.Rel != nil && f.Rel.Target != nil {
+			defs = append(defs, d.foreignKey(f))
 		}
 	}
 
 	return "CREATE TABLE " + d.Quote(m.Table()) + " (" + strings.Join(defs, ", ") + ")"
+}
+
+// foreignKey returns the FOREIGN KEY constraint of a field with a resolved
+// relation.
+func (d Dialect) foreignKey(f *orm.Field) string {
+	target := f.Rel.Target
+	return "FOREIGN KEY (" + d.Quote(f.Column) + ") REFERENCES " +
+		d.Quote(target.Table()) + " (" + d.Quote(target.PrimaryKey().Column) + ")" +
+		f.Rel.OnDelete.Clause()
 }
 
 // Open opens a PostgreSQL database at dsn using the pgx stdlib driver and
