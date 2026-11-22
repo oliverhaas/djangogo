@@ -450,14 +450,20 @@ func (c *compiler) lookupOf(rest []string, path *fieldPath) (string, []string, e
 	}
 }
 
-// relationFieldName returns the name of the Django field class of the
-// relation a path ends on, for error messages.
+// relationFieldName returns the name of the Django class of the field a path
+// ends on, for error messages. Django names the field of the last join: a
+// many-to-many path in either direction ends on a foreign key of the through
+// table, and a reverse path on the ManyToOneRel or OneToOneRel of the foreign
+// key.
 func relationFieldName(path *fieldPath) string {
 	switch {
 	case path.m2m || (path.reverse != nil && path.reverse.Kind == RelM2M):
-		return "ManyToManyField"
-	case (path.reverse != nil && path.reverse.Kind == RelO2O) ||
-		(path.reverse == nil && path.field != nil && path.field.Rel != nil && path.field.Rel.Kind == RelO2O):
+		return "ForeignKey"
+	case path.reverse != nil && path.reverse.Kind == RelO2O:
+		return "OneToOneRel"
+	case path.reverse != nil:
+		return "ManyToOneRel"
+	case path.field != nil && path.field.Rel != nil && path.field.Rel.Kind == RelO2O:
 		return "OneToOneField"
 	default:
 		return "ForeignKey"

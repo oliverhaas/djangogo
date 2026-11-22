@@ -963,6 +963,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   are permitted)", as in Django, instead of "cannot resolve keyword". An
   `Update` on a queryset ordered by an aggregate annotation fails with a
   `FieldError`, as in Django; before, it ignored the order.
+- ORM: the "unsupported lookup" error of a key that goes on after a relation
+  names the field class Django names: `ForeignKey` for a many-to-many
+  relation in either direction, `ManyToOneRel` for a reverse foreign key and
+  `OneToOneRel` for a reverse one-to-one relation. Before, it named
+  `ManyToManyField` and `OneToOneField`, or `ForeignKey` for a reverse
+  foreign key.
 
 ### Fixed
 

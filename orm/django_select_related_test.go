@@ -11,8 +11,9 @@ import (
 )
 
 // The models of Django's select_related test app: a taxonomy tree where every
-// level has a forward foreign key to the level above. Topping, Pizza,
-// TaggedItem and Bookmark need M2M and generic relations and are left out.
+// level has a forward foreign key to the level above. TaggedItem and
+// Bookmark, which need the contenttypes package, are in
+// contenttypes/django_select_related_test.go.
 
 type selDomain struct {
 	ID   int64
@@ -89,18 +90,37 @@ func (selSpecies) Meta() orm.Meta { return orm.Meta{Table: "select_related_speci
 type selHybridSpecies struct {
 	ID       int64
 	Name     string             `orm:"max_length=50"`
-	Parent_1 orm.FK[selSpecies] `orm:"column=parent_1_id"` //nolint:revive,staticcheck // the name must snake-case to Django's parent_1
-	Parent_2 orm.FK[selSpecies] `orm:"column=parent_2_id"` //nolint:revive,staticcheck // the name must snake-case to Django's parent_2
+	Parent_1 orm.FK[selSpecies] `orm:"column=parent_1_id;related_name=child_1"` //nolint:revive,staticcheck // the name must snake-case to Django's parent_1
+	Parent_2 orm.FK[selSpecies] `orm:"column=parent_2_id;related_name=child_2"` //nolint:revive,staticcheck // the name must snake-case to Django's parent_2
 }
 
 // Meta names the table as Django does.
 func (selHybridSpecies) Meta() orm.Meta { return orm.Meta{Table: "select_related_hybridspecies"} }
 
+// selTopping is Topping of Django's select_related test app.
+type selTopping struct {
+	ID   int64
+	Name string `orm:"max_length=30"`
+}
+
+// Meta names the table as Django does.
+func (selTopping) Meta() orm.Meta { return orm.Meta{Table: "select_related_topping"} }
+
+// selPizza is Pizza of Django's select_related test app.
+type selPizza struct {
+	ID       int64
+	Name     string `orm:"max_length=100"`
+	Toppings orm.M2M[selTopping]
+}
+
+// Meta names the table as Django does.
+func (selPizza) Meta() orm.Meta { return orm.Meta{Table: "select_related_pizza"} }
+
 // selModels returns the models of Django's select_related test app.
 func selModels() []any {
 	return []any{djangotest.App("select_related",
 		&selDomain{}, &selKingdom{}, &selPhylum{}, &selKlass{}, &selOrder{},
-		&selFamily{}, &selGenus{}, &selSpecies{}, &selHybridSpecies{})}
+		&selFamily{}, &selGenus{}, &selSpecies{}, &selHybridSpecies{}, &selTopping{}, &selPizza{})}
 }
 
 // selLevel gets the row of a tree level by name or starts a new one, lets set
@@ -404,9 +424,31 @@ func TestSelectRelatedChaining(t *testing.T) {
 	})
 }
 
+// Django also checks that the genus caches no reverse relation. A Go model
+// has no such cache: RelatedSet runs its query on each call.
+//
 // Ported from Django: tests/select_related/tests.py::SelectRelatedTests.test_reverse_relation_caching
 func TestSelectRelatedReverseRelationCaching(t *testing.T) {
-	t.Skip("needs the reverse relation species_set; the ORM has no reverse relations")
+	djangotest.EachDB(t, selModels(), func(t *testing.T, db *orm.DB) {
+		selSetUp(t, db)
+		ctx := context.Background()
+		species, err := orm.Query[selSpecies](db).SelectRelated("genus").Filter("name", "melanogaster").First(ctx)
+		if err != nil {
+			t.Fatalf("First: %v", err)
+		}
+		var genus *selGenus
+		djangotest.AssertNumQueries(t, db, 0, func() {
+			genus = selFetch(t, db, &species.Genus)
+			djangotest.AssertEqual(t, genus.Name, "Drosophila")
+		})
+		djangotest.AssertNumQueries(t, db, 1, func() {
+			first, err := orm.RelatedSet[selSpecies](db, genus, "selspecies_set").First(ctx)
+			if err != nil {
+				t.Fatalf("First: %v", err)
+			}
+			djangotest.AssertEqual(t, first.Name, "melanogaster")
+		})
+	})
 }
 
 // Ported from Django: tests/select_related/tests.py::SelectRelatedTests.test_select_related_after_values
@@ -470,12 +512,11 @@ func TestSelectRelatedNonRelationalFieldNested(t *testing.T) {
 
 // Ported from Django: tests/select_related/tests.py::SelectRelatedValidationTests.test_many_to_many_field
 func TestSelectRelatedManyToManyField(t *testing.T) {
-	t.Skip("needs ManyToManyField")
+	djangotest.EachDB(t, selModels(), func(t *testing.T, db *orm.DB) {
+		selAssertSelectRelatedError[selPizza](t, db, "toppings", selInv("toppings", "(none)"))
+	})
 }
 
-// Go has no related_name accessor, so child_1 is an unknown name; the message
-// is the same as Django's.
-//
 // Ported from Django: tests/select_related/tests.py::SelectRelatedValidationTests.test_reverse_relational_field
 func TestSelectRelatedReverseRelationalField(t *testing.T) {
 	djangotest.EachDB(t, selModels(), func(t *testing.T, db *orm.DB) {
@@ -491,9 +532,4 @@ func TestSelectRelatedInvalidField(t *testing.T) {
 			selInv("related_invalid_field", "family"))
 		selAssertSelectRelatedError[selDomain](t, db, "invalid_field", selInv("invalid_field", "(none)"))
 	})
-}
-
-// Ported from Django: tests/select_related/tests.py::SelectRelatedValidationTests.test_generic_relations
-func TestSelectRelatedGenericRelations(t *testing.T) {
-	t.Skip("needs generic relations")
 }

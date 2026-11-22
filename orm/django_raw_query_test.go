@@ -36,11 +36,11 @@ type rawBook struct {
 // Meta names the table as Django does.
 func (rawBook) Meta() orm.Meta { return orm.Meta{Table: "raw_query_book"} }
 
-// rawCoffee is Django's raw_query.Coffee without its price: the ORM has no
-// decimal kind.
+// rawCoffee is Django's raw_query.Coffee.
 type rawCoffee struct {
 	ID    int64
-	Brand string `orm:"max_length=255;column=name"`
+	Brand string      `orm:"max_length=255;column=name"`
+	Price orm.Decimal `orm:"max_digits=10;decimal_places=2;default=0"`
 }
 
 // Meta names the table as Django does.
@@ -56,11 +56,20 @@ func (rawMixedCaseIDColumn) Meta() orm.Meta {
 	return orm.Meta{Table: "raw_query_mixedcaseidcolumn"}
 }
 
-// rawModels returns the models of Django's raw_query test app. BookFkAsPk,
-// Reviewer and FriendlyAuthor are left out: see the skipped tests.
+// rawReviewer is Django's raw_query.Reviewer.
+type rawReviewer struct {
+	ID       int64
+	Reviewed orm.M2M[rawBook]
+}
+
+// Meta names the table as Django does.
+func (rawReviewer) Meta() orm.Meta { return orm.Meta{Table: "raw_query_reviewer"} }
+
+// rawModels returns the models of Django's raw_query test app. BookFkAsPk and
+// FriendlyAuthor are left out: see the skipped tests.
 func rawModels() []any {
 	return []any{djangotest.App("raw_query",
-		&rawAuthor{}, &rawBook{}, &rawCoffee{}, &rawMixedCaseIDColumn{})}
+		&rawAuthor{}, &rawBook{}, &rawCoffee{}, &rawMixedCaseIDColumn{}, &rawReviewer{})}
 }
 
 // rawFixture is the data of Django's RawQueryTests.
@@ -69,7 +78,7 @@ type rawFixture struct {
 	b1, b2, b3, b4 *rawBook
 }
 
-// rawSetUp creates the RawQueryTests fixture (without its reviewers).
+// rawSetUp creates the RawQueryTests fixture.
 func rawSetUp(t *testing.T, db *orm.DB) rawFixture {
 	t.Helper()
 	var f rawFixture
@@ -97,6 +106,11 @@ func rawSetUp(t *testing.T, db *orm.DB) rawFixture {
 	})
 	create(t, db, &rawCoffee{Brand: "dunkin doughnuts"})
 	create(t, db, &rawCoffee{Brand: "starbucks"})
+	r1 := create(t, db, &rawReviewer{})
+	create(t, db, &rawReviewer{})
+	if err := orm.Many[rawBook](db, r1, "reviewed").Add(context.Background(), f.b2, f.b3, f.b4); err != nil {
+		t.Fatalf("add the reviewed books: %v", err)
+	}
 	return f
 }
 
@@ -194,8 +208,6 @@ func TestRawQueryFkFetchModeRaise(t *testing.T) {
 	t.Skip("needs fetch modes, which the ORM does not have")
 }
 
-// Coffee.price is left out: there is no decimal kind.
-//
 // Ported from Django: tests/raw_query/tests.py::RawQueryTests.test_db_column_handler
 func TestRawQueryDbColumnHandler(t *testing.T) {
 	djangotest.EachDB(t, rawModels(), func(t *testing.T, db *orm.DB) {
@@ -296,7 +308,10 @@ func TestRawQueryQueryRepresentation(t *testing.T) {
 
 // Ported from Django: tests/raw_query/tests.py::RawQueryTests.test_many_to_many
 func TestRawQueryManyToMany(t *testing.T) {
-	t.Skip("needs M2M[T], which belongs to the relations work package")
+	djangotest.EachDB(t, rawModels(), func(t *testing.T, db *orm.DB) {
+		rawSetUp(t, db)
+		rawCheck[rawReviewer](t, db, "SELECT * FROM raw_query_reviewer ORDER BY id")
+	})
 }
 
 // Ported from Django: tests/raw_query/tests.py::RawQueryTests.test_extra_conversions
@@ -438,7 +453,18 @@ func TestRawQueryDbColumnNameIsUsedInRawQuery(t *testing.T) {
 
 // Ported from Django: tests/raw_query/tests.py::RawQueryTests.test_decimal_parameter
 func TestRawQueryDecimalParameter(t *testing.T) {
-	t.Skip("needs DecimalField, which belongs to the field kinds work package")
+	djangotest.EachDB(t, rawModels(), func(t *testing.T, db *orm.DB) {
+		rawSetUp(t, db)
+		c := create(t, db, &rawCoffee{Brand: "starbucks", Price: orm.MustDecimal("20.5")})
+		qs := orm.Raw[rawCoffee](db, "SELECT * FROM raw_query_coffee WHERE price >= ?", orm.DecimalFromInt(20))
+		// Compare with the stored row: it reads the price with two decimal
+		// places, as the raw query does.
+		want, err := orm.Query[rawCoffee](db).Get(context.Background(), "pk", c.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		rawSameRows(t, rawAll(t, qs), []rawCoffee{want})
+	})
 }
 
 // In Go the slice from one All call is the cache: one query.

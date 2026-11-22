@@ -19,16 +19,33 @@ type lkAuthor struct {
 	Bio   string `orm:"type=text;null"`
 }
 
-// lkArticle is Article of Django's tests/lookup/models.py. Its Meta ordering
-// ("-pub_date", "headline") is not available yet, so the ports order
-// explicitly through lkArticles.
+// Meta orders the authors as Django's Author.Meta does.
+func (lkAuthor) Meta() orm.Meta { return orm.Meta{Ordering: []string{"name"}} }
+
+// lkArticle is Article of Django's tests/lookup/models.py. The reverse query
+// name of its author is Django's "article", which the Go type name does not
+// give.
 type lkArticle struct {
 	ID       int64
 	Headline string `orm:"max_length=100"`
 	PubDate  time.Time
-	Author   orm.FK[lkAuthor] `orm:"null;blank;on_delete=set_null"`
-	Slug     string           `orm:"unique;blank;null"`
+	Author   orm.FK[lkAuthor] `orm:"null;blank;on_delete=set_null;related_query_name=article"`
+	Slug     string           `orm:"type=slug;unique;blank;null"`
 }
+
+// Meta orders the articles as Django's Article.Meta does.
+func (lkArticle) Meta() orm.Meta { return orm.Meta{Ordering: []string{"-pub_date", "headline"}} }
+
+// lkTag is Tag of Django's tests/lookup/models.py, with Django's reverse query
+// name "tag".
+type lkTag struct {
+	ID       int64
+	Articles orm.M2M[lkArticle] `orm:"related_query_name=tag"`
+	Name     string             `orm:"max_length=100"`
+}
+
+// Meta orders the tags as Django's Tag.Meta does.
+func (lkTag) Meta() orm.Meta { return orm.Meta{Ordering: []string{"name"}} }
 
 // lkSeason is Season of Django's tests/lookup/models.py, without the fields
 // that only its custom lookups use.
@@ -44,16 +61,16 @@ type lkPlayer struct {
 	Name string `orm:"max_length=100"`
 }
 
-// lkFixture is the data of LookupTests.setUpTestData. The tags are left out:
-// they hang on a many-to-many relation.
+// lkFixture is the data of LookupTests.setUpTestData.
 type lkFixture struct {
 	au1, au2                   *lkAuthor
 	a1, a2, a3, a4, a5, a6, a7 *lkArticle
+	t1, t2, t3                 *lkTag
 }
 
 // lkModels returns the models of the lookup app.
 func lkModels() []any {
-	return []any{djangotest.App("lookup", &lkAuthor{}, &lkArticle{}, &lkSeason{}, &lkPlayer{})}
+	return []any{djangotest.App("lookup", &lkAuthor{}, &lkArticle{}, &lkTag{}, &lkSeason{}, &lkPlayer{})}
 }
 
 // lkSetNull stores NULL in one column of one row. A plain Go field cannot
@@ -84,18 +101,26 @@ func lkSetUp(t *testing.T, db *orm.DB) lkFixture {
 	f.a5 = article("Article 5", time.Date(2005, 8, 1, 9, 0, 0, 0, time.UTC), f.au2, "a5")
 	f.a6 = article("Article 6", time.Date(2005, 8, 1, 8, 0, 0, 0, time.UTC), f.au2, "a6")
 	f.a7 = article("Article 7", day(2005, 7, 27), f.au2, "a7")
+	tag := func(name string, articles ...*lkArticle) *lkTag {
+		tg := create(t, db, &lkTag{Name: name})
+		if err := orm.Many[lkArticle](db, tg, "articles").Add(context.Background(), articles...); err != nil {
+			t.Fatalf("add the articles of %s: %v", name, err)
+		}
+		return tg
+	}
+	f.t1 = tag("Tag 1", f.a1, f.a2, f.a3)
+	f.t2 = tag("Tag 2", f.a3, f.a4, f.a5)
+	f.t3 = tag("Tag 3", f.a5, f.a6, f.a7)
 	return f
 }
 
-// lkArticles returns the articles in the model's default order.
-func lkArticles(db *orm.DB) *orm.QuerySet[lkArticle] {
-	return orm.Query[lkArticle](db).OrderBy("-pub_date", "headline")
-}
+// lkArticles returns the articles in the model's default order, Django's
+// Article.objects.
+func lkArticles(db *orm.DB) *orm.QuerySet[lkArticle] { return orm.Query[lkArticle](db) }
 
-// lkAuthors returns the authors in the model's default order.
-func lkAuthors(db *orm.DB) *orm.QuerySet[lkAuthor] {
-	return orm.Query[lkAuthor](db).OrderBy("name")
-}
+// lkAuthors returns the authors in the model's default order, Django's
+// Author.objects.
+func lkAuthors(db *orm.DB) *orm.QuerySet[lkAuthor] { return orm.Query[lkAuthor](db) }
 
 // lkID is the transform of the ports that compare model instances.
 func lkID(a lkArticle) int64 { return a.ID }
@@ -348,15 +373,12 @@ func TestLookupValuesTwoFields(t *testing.T) {
 }
 
 // Ported from Django: tests/lookup/tests.py::LookupTests.test_values_relations
-//
-// Only the forward relation is ported. The other two assertions of the Django
-// test select through the reverse foreign key and the many-to-many relation,
-// which the ORM does not have yet.
 func TestLookupValuesRelations(t *testing.T) {
 	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {
 		f := lkSetUp(t, db)
 
-		// You can specify fields from forward relations, just like Filter.
+		// You can specify fields from forward and reverse relations, just
+		// like Filter.
 		assertValues(t, lkArticles(db).Values("headline", "author__name"), []map[string]any{
 			{"headline": f.a5.Headline, "author__name": f.au2.Name},
 			{"headline": f.a6.Headline, "author__name": f.au2.Name},
@@ -366,6 +388,32 @@ func TestLookupValuesRelations(t *testing.T) {
 			{"headline": f.a7.Headline, "author__name": f.au2.Name},
 			{"headline": f.a1.Headline, "author__name": f.au1.Name},
 		})
+		assertValues(t, lkAuthors(db).Values("name", "article__headline").OrderBy("name", "article__headline"),
+			[]map[string]any{
+				{"name": f.au1.Name, "article__headline": f.a1.Headline},
+				{"name": f.au1.Name, "article__headline": f.a2.Headline},
+				{"name": f.au1.Name, "article__headline": f.a3.Headline},
+				{"name": f.au1.Name, "article__headline": f.a4.Headline},
+				{"name": f.au2.Name, "article__headline": f.a5.Headline},
+				{"name": f.au2.Name, "article__headline": f.a6.Headline},
+				{"name": f.au2.Name, "article__headline": f.a7.Headline},
+			})
+		row := func(au *lkAuthor, a *lkArticle, tg *lkTag) map[string]any {
+			return map[string]any{"name": au.Name, "article__headline": a.Headline, "article__tag__name": tg.Name}
+		}
+		assertValues(t, lkAuthors(db).Values("name", "article__headline", "article__tag__name").
+			OrderBy("name", "article__headline", "article__tag__name"),
+			[]map[string]any{
+				row(f.au1, f.a1, f.t1),
+				row(f.au1, f.a2, f.t1),
+				row(f.au1, f.a3, f.t1),
+				row(f.au1, f.a3, f.t2),
+				row(f.au1, f.a4, f.t2),
+				row(f.au2, f.a5, f.t2),
+				row(f.au2, f.a5, f.t3),
+				row(f.au2, f.a6, f.t3),
+				row(f.au2, f.a7, f.t3),
+			})
 	})
 }
 
@@ -441,7 +489,28 @@ func TestLookupValuesListFlatOrderBy(t *testing.T) {
 
 // Ported from Django: tests/lookup/tests.py::LookupTests.test_values_list_relations
 func TestLookupValuesListRelations(t *testing.T) {
-	t.Skip("selects through a reverse foreign key and a many-to-many relation, which the ORM does not have yet")
+	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {
+		f := lkSetUp(t, db)
+		args := []string{"name", "article__headline", "article__tag__name"}
+		rows, err := lkAuthors(db).ValuesList(args...).OrderBy(args...).All(context.Background())
+		if err != nil {
+			t.Fatalf("ValuesList: %v", err)
+		}
+		row := func(au *lkAuthor, a *lkArticle, tg *lkTag) []any {
+			return []any{au.Name, a.Headline, tg.Name}
+		}
+		djangotest.AssertEqual(t, rows, [][]any{
+			row(f.au1, f.a1, f.t1),
+			row(f.au1, f.a2, f.t1),
+			row(f.au1, f.a3, f.t1),
+			row(f.au1, f.a3, f.t2),
+			row(f.au1, f.a4, f.t2),
+			row(f.au2, f.a5, f.t2),
+			row(f.au2, f.a5, f.t3),
+			row(f.au2, f.a6, f.t3),
+			row(f.au2, f.a7, f.t3),
+		})
+	})
 }
 
 // Ported from Django: tests/lookup/tests.py::LookupTests.test_values_list_flat_more_than_one_field
@@ -586,15 +655,12 @@ func TestLookupInSelectMismatch(t *testing.T) {
 }
 
 // Ported from Django: tests/lookup/tests.py::LookupTests.test_error_messages
-//
-// The choices do not list "tag": the reverse name of a many-to-many relation
-// does not exist yet.
 func TestLookupErrorMessages(t *testing.T) {
 	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {
 		// Programming errors are pointed out with nice error messages.
 		_, err := orm.Query[lkArticle](db).Filter("pub_date_year", "2005").Count(context.Background())
 		assertFieldError(t, err, "cannot resolve keyword 'pub_date_year' into field. Choices are: "+
-			"author, author_id, headline, id, pub_date, slug")
+			"author, author_id, headline, id, pub_date, slug, tag")
 	})
 }
 
@@ -630,21 +696,45 @@ func TestLookupUnsupportedLookups(t *testing.T) {
 }
 
 // Ported from Django: tests/lookup/tests.py::LookupTests.test_relation_nested_lookup_error
-//
-// The second assertion of the Django test filters through a many-to-many
-// relation, which the ORM does not have yet.
 func TestLookupRelationNestedLookupError(t *testing.T) {
 	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {
 		// An invalid nested lookup on a related field raises a useful error.
 		_, err := orm.Query[lkArticle](db).Filter("author__editor__name", "James").All(context.Background())
 		assertFieldError(t, err,
 			"unsupported lookup 'editor__name' for ForeignKey or join on the field not permitted.")
+		_, err = orm.Query[lkTag](db).Filter("articles__foo", "bar").All(context.Background())
+		assertFieldError(t, err,
+			"unsupported lookup 'foo' for ForeignKey or join on the field not permitted.")
 	})
 }
 
 // Ported from Django: tests/lookup/tests.py::LookupTests.test_unsupported_lookup_reverse_foreign_key
 func TestLookupUnsupportedLookupReverseForeignKey(t *testing.T) {
-	t.Skip("filters through a reverse foreign key, which the ORM does not have yet")
+	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {
+		_, err := orm.Query[lkAuthor](db).Filter("article__title", "Article 1").All(context.Background())
+		assertFieldError(t, err,
+			"unsupported lookup 'title' for ManyToOneRel or join on the field not permitted.")
+	})
+}
+
+// Ported from Django: tests/lookup/tests.py::LookupTests.test_unsupported_lookups_custom_lookups
+func TestLookupUnsupportedLookupsCustomLookups(t *testing.T) {
+	djangotest.EachDB(t, lkModels(), func(t *testing.T, db *orm.DB) {
+		t.Cleanup(orm.RegisterTransform(orm.KindSlug, "length", orm.Length))
+		_, err := orm.Query[lkArticle](db).Filter("slug__lengtp", 20).All(context.Background())
+		assertFieldError(t, err, "unsupported lookup 'lengtp' for SlugField or join on the field not "+
+			"permitted, perhaps you meant length?")
+	})
+}
+
+// Ported from Django: tests/lookup/tests.py::LookupTests.test_unsupported_lookup_reverse_foreign_key_custom_lookups
+func TestLookupUnsupportedLookupReverseForeignKeyCustomLookups(t *testing.T) {
+	t.Skip("needs RegisterTransform on a relation field, which the ORM does not have")
+}
+
+// Ported from Django: tests/lookup/tests.py::LookupTests.test_filter_by_reverse_related_field_transform
+func TestLookupFilterByReverseRelatedFieldTransform(t *testing.T) {
+	t.Skip("needs RegisterTransform on a relation field, which the ORM does not have")
 }
 
 // lkRegexSetUp replaces the articles with the first set of headlines of
@@ -801,7 +891,7 @@ func TestLookupNonfieldLookups(t *testing.T) {
 			"unsupported lookup 'blahblah__exact' for CharField or join on the field not permitted.")
 		_, err = orm.Query[lkArticle](db).Filter("blahblah", 99).All(ctx)
 		assertFieldError(t, err, "cannot resolve keyword 'blahblah' into field. Choices are: "+
-			"author, author_id, headline, id, pub_date, slug")
+			"author, author_id, headline, id, pub_date, slug, tag")
 	})
 }
 

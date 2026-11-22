@@ -30,8 +30,8 @@ type expCompany struct {
 	Name           string `orm:"max_length=100"`
 	NumEmployees   int64
 	NumChairs      int64
-	CEO            orm.FK[expEmployee] `orm:"on_delete=cascade"`
-	PointOfContact orm.FK[expEmployee] `orm:"null;on_delete=set_null"`
+	CEO            orm.FK[expEmployee] `orm:"on_delete=cascade;related_name=company_ceo_set"`
+	PointOfContact orm.FK[expEmployee] `orm:"null;on_delete=set_null;related_name=company_point_of_contact_set"`
 	BasedInEU      bool                `orm:"default=false"`
 }
 
@@ -534,14 +534,14 @@ func TestExpressionsTicket18375KwargOrdering2(t *testing.T) {
 	})
 }
 
-// Django expects 2 joins because a chained filter on a multi-valued reverse
-// relation starts a new join. Without reverse relations the port cannot build
-// that query, and a chained filter on the single-valued forward relation
-// reuses its join.
-//
 // Ported from Django: tests/expressions/tests.py::BasicExpressionsTests.test_ticket_18375_chained_filters
 func TestExpressionsTicket18375ChainedFilters(t *testing.T) {
-	t.Skip("needs the reverse relation company_ceo_set; the ORM has no reverse relations")
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		// F() expressions do not reuse joins from previous filter.
+		qs := orm.Query[expEmployee](db).Filter("company_ceo_set__num_employees", orm.F("pk")).
+			Filter("company_ceo_set__num_employees", orm.F("company_ceo_set__num_employees"))
+		djangotest.AssertEqual(t, expCountJoins(t, qs), 2)
+	})
 }
 
 // Ported from Django: tests/expressions/tests.py::BasicExpressionsTests.test_incorrect_field_in_F_expression

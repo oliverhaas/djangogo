@@ -247,13 +247,15 @@ func TestExpressionsLefthandBitwiseOr(t *testing.T) {
 	})
 }
 
-// Django registers the Length transform on CharField and annotates
-// F("lastname__length").bitor(48). The ORM has the date and time transforms
-// only.
-//
 // Ported from Django: tests/expressions/tests.py::ExpressionOperatorTests.test_lefthand_transformed_field_bitwise_or
 func TestExpressionsLefthandTransformedFieldBitwiseOr(t *testing.T) {
-	t.Skip("needs the Length transform; the ORM has the date and time transforms only")
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		expSetUpOps(t, db)
+		create(t, db, &expEmployee{Firstname: "Max", Lastname: "Mustermann"})
+		t.Cleanup(orm.RegisterTransform(orm.KindChar, "length", orm.Length))
+		qs := orm.Query[expEmployee](db).Annotate("bitor", orm.F("lastname__length").BitOr(48))
+		assertValues(t, qs.Values("bitor"), []map[string]any{{"bitor": int64(58)}})
+	})
 }
 
 // Django also raises the float to the power 1.5, which has no kind here.
