@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"time"
+
+	"github.com/oliverhaas/djangogo/internal/autoreload"
 )
 
 // DBShellArgs exposes dbshellArgs to the external tests, the counterpart of
@@ -26,6 +28,14 @@ func SetRunserverHooks(ctx context.Context, app *Application, ready func(net.Add
 	cmd, _ := app.Commands.Get("runserver")
 	c := cmd.(*runserverCommand)
 	c.ctx, c.ready, c.now = ctx, ready, now
+}
+
+// SetRunserverSupervisor makes runserver of app take its auto-reloader from
+// newSupervisor instead of autoreload.NewSupervisor, which refuses to run in
+// a test binary.
+func SetRunserverSupervisor(app *Application, newSupervisor func() (*autoreload.Supervisor, error)) {
+	cmd, _ := app.Commands.Get("runserver")
+	cmd.(*runserverCommand).newSupervisor = newSupervisor
 }
 
 // CheckMigrations runs the unapplied-migrations notice of runserver of app.

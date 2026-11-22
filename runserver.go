@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/oliverhaas/djangogo/internal/autoreload"
 	"github.com/oliverhaas/djangogo/manage"
 	"github.com/oliverhaas/djangogo/middleware"
 	"github.com/oliverhaas/djangogo/migrations"
@@ -56,10 +57,14 @@ func defaultHandler() http.Handler {
 // or SIGTERM, with the request log of Django's development server and, with
 // Debug on, the static files under StaticURL.
 //
-// There is no auto-reloader; --noreload and --nothreading are accepted and
-// do nothing, as a Go server neither reloads nor runs on one thread. Without
-// an addrport argument the server listens on Settings.Host and Settings.Port,
-// where Django takes 127.0.0.1:8000.
+// Unless --noreload is given, the server runs under the auto-reloader of
+// package autoreload: this process starts the server in a child process,
+// builds the program again when a source file changes and restarts the child
+// with the new binary. When the program cannot be built again, for example
+// without the go command, a notice says so and the server runs in this
+// process. --nothreading is accepted and does nothing, as a Go server does
+// not run on one thread. Without an addrport argument the server listens on
+// Settings.Host and Settings.Port, where Django takes 127.0.0.1:8000.
 type runserverCommand struct {
 	app *Application
 
@@ -72,6 +77,9 @@ type runserverCommand struct {
 	ready func(addr net.Addr)
 	// now, when set, gives the time of the banner.
 	now func() time.Time
+	// newSupervisor, when set, replaces autoreload.NewSupervisor, so that a
+	// test binary can run the reloader.
+	newSupervisor func() (*autoreload.Supervisor, error)
 }
 
 // Name returns the command name.
@@ -95,14 +103,15 @@ func (c *runserverCommand) Flags(fs *flag.FlagSet) {
 	fs.BoolVar(&c.useIPv6, "ipv6", false, ipv6Help)
 	fs.BoolVar(&c.useIPv6, "6", false, ipv6Help)
 	fs.BoolVar(&c.noThreading, "nothreading", false, "Accepted for compatibility; does nothing.")
-	fs.BoolVar(&c.noReload, "noreload", false, "Accepted for compatibility; there is no auto-reloader.")
+	fs.BoolVar(&c.noReload, "noreload", false, "Tells Djan-Go-Go to NOT use the auto-reloader.")
 	fs.BoolVar(&c.noStatic, "nostatic", false,
 		"Tells Djan-Go-Go to NOT automatically serve static files at STATIC_URL.")
 	fs.BoolVar(&c.insecure, "insecure", false, "Allows serving static files even if DEBUG is False.")
 	fs.BoolVar(&c.skipChecks, "skip-checks", false, "Skip system checks.")
 }
 
-// Run validates the address, runs the checks and serves until stopped.
+// Run validates the address, starts the auto-reloader or runs the checks, and
+// serves until stopped.
 func (c *runserverCommand) Run(args []string) error {
 	a := c.app
 	if len(args) > 1 {
@@ -126,6 +135,12 @@ func (c *runserverCommand) Run(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if !c.noReload && !autoreload.IsChild() {
+		if reloaded, err := c.reload(ctx); reloaded {
+			return err
+		}
+	}
 
 	if !c.skipChecks {
 		_, _ = fmt.Fprint(a.out(), "Performing system checks...\n\n")
@@ -153,6 +168,32 @@ func (c *runserverCommand) Run(args []string) error {
 			c.ready(ln.Addr())
 		}
 	})
+}
+
+// reload runs the server under the auto-reloader until ctx is done and
+// reports whether it did (Django's run_with_reloader). It returns false after
+// a notice when the program cannot be built again here; the caller then
+// serves in this process. A test binary serves in its process without the
+// notice.
+func (c *runserverCommand) reload(ctx context.Context) (bool, error) {
+	newSupervisor := autoreload.NewSupervisor
+	if c.newSupervisor != nil {
+		newSupervisor = c.newSupervisor
+	}
+	var unavailable *autoreload.UnavailableError
+	s, err := newSupervisor()
+	if err == nil {
+		s.Out = c.app.errOut()
+		err = s.Run(ctx)
+	}
+	switch {
+	case errors.Is(err, autoreload.ErrTestBinary):
+		return false, nil
+	case errors.As(err, &unavailable):
+		_, _ = fmt.Fprintf(c.app.errOut(), "Autoreload is off: %v.\n", err)
+		return false, nil
+	}
+	return true, err
 }
 
 // listenAddr resolves the addrport argument as Django's runserver does and
@@ -306,6 +347,16 @@ func (e *serverError) Unwrap() error { return e.err }
 
 // Formatted returns the line runserver prints.
 func (e *serverError) Formatted() string { return "Error: " + e.text + "\n" }
+
+// ExitCode returns 1, as Django's runserver exits after a socket error. A
+// server process of the auto-reloader returns autoreload.StopCode, which
+// tells the reloader to exit with 1 as well instead of waiting for a change.
+func (e *serverError) ExitCode() int {
+	if autoreload.IsChild() {
+		return autoreload.StopCode
+	}
+	return 1
+}
 
 // listenError words a failure to listen with Django's texts for the common
 // causes.

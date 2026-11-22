@@ -759,6 +759,15 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   deletes the expired files. `New` fails with Django's `ImproperlyConfigured`
   text when the directory does not exist. `sessions.NewFileStore` creates the
   store outside an application.
+- Commands: `runserver` restarts the server when a source file changes, as
+  Django's auto-reloader does. The command starts the server in a child
+  process, checks the files of the packages of the main module, of local
+  replacements and of a workspace once per second, and on a change runs
+  `go build` with the build settings of the running program and restarts the
+  child. When the build fails, the old server keeps running and the build
+  errors are printed. `--noreload` turns the reloader off. A program built
+  from a list of files (`go run main.go`) or on a machine without the `go`
+  command serves without the reloader, after a notice.
 
 ### Changed
 

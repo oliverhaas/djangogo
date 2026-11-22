@@ -245,8 +245,9 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   on first access. A message added after the response
   headers are written is lost, and reading `messages` in a template, also in
   `{% if messages %}`, marks them as read.
-- **Commands:** `runserver` has no autoreload, and `shell` is a query shell over
-  the models, not a Go REPL. `collectstatic` has no post-processing (manifest
+- **Commands:** the auto-reloader of `runserver` needs the `go` command and
+  the source of the program; it rebuilds the whole program on each change.
+  `shell` is a query shell over the models, not a Go REPL. `collectstatic` has no post-processing (manifest
   or hashed names), and `collectstatic --link` copies the embedded static
   files of the apps, which have no path to link to. A `startproject` or `startapp`
   template is a Go `text/template` with the delimiters `[[` and `]]`, not a
