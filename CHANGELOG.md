@@ -1142,6 +1142,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - **BREAKING**: `QuerySet.OrderBy` takes `...any`, so that it accepts
   expressions. Code that passes a `[]string` with `...` must convert it to
   `[]any` first.
+- Foreign key constraints are `DEFERRABLE INITIALLY DEFERRED`, as in Django,
+  so a transaction can insert rows that refer to each other in any order.
+  Inside `Atomic`, the commit reports a broken reference with an error that
+  matches `ErrForeignKeyViolation`; before, the `INSERT` or `UPDATE` reported
+  it. Tables created before the upgrade keep their constraints until a
+  migration recreates them.
 
 ### Fixed
 

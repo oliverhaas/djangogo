@@ -56,9 +56,8 @@ type SecretHideout struct {
 
 func (h SecretHideout) String() string { return h.Location }
 
-// CyclicOne is Django's admin_views.CyclicOne. Two is nullable here: the
-// foreign keys of the ORM are not deferrable, so the cycle is built in two
-// steps.
+// CyclicOne is Django's admin_views.CyclicOne. Two is nullable here, so the
+// test builds the cycle in two steps.
 type CyclicOne struct {
 	ID   int64
 	Name string            `orm:"max_length=25"`

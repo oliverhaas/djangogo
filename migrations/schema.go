@@ -119,8 +119,8 @@ func (e *SchemaEditor) bareType(f FieldState) string {
 	return e.dialect.ColumnType(of)
 }
 
-// referencesClause returns `REFERENCES "table" ("pk") ON DELETE ...` for a
-// foreign-key field.
+// referencesClause returns `REFERENCES "table" ("pk") ON DELETE ...
+// DEFERRABLE INITIALLY DEFERRED` for a foreign-key field.
 func (e *SchemaEditor) referencesClause(state *ProjectState, f FieldState) (string, error) {
 	target, err := state.relatedTo(f)
 	if err != nil {
@@ -130,7 +130,7 @@ func (e *SchemaEditor) referencesClause(state *ProjectState, f FieldState) (stri
 	if pk == nil {
 		return "", fmt.Errorf("migrations: model %s has no primary key to refer to", target.Label())
 	}
-	return "REFERENCES " + e.q(target.Table) + " (" + e.q(pk.Column) + ")" + f.RelOnDelete.Clause(), nil
+	return "REFERENCES " + e.q(target.Table) + " (" + e.q(pk.Column) + ")" + f.RelOnDelete.Clause() + orm.DeferredClause, nil
 }
 
 // createTableSQL renders CREATE TABLE named table for the fields of ms, with

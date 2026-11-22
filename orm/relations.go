@@ -118,6 +118,12 @@ func (od OnDelete) Clause() string {
 	}
 }
 
+// DeferredClause ends every FOREIGN KEY constraint that the dialects and the
+// schema editor create, as Django's PostgreSQL and SQLite backends do: the
+// database checks a reference when the transaction commits, so a transaction
+// can insert rows that refer to each other in any order.
+const DeferredClause = " DEFERRABLE INITIALLY DEFERRED"
+
 // String returns the on_delete tag name for od (e.g. "cascade").
 func (od OnDelete) String() string {
 	switch od {

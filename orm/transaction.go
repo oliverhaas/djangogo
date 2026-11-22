@@ -283,7 +283,7 @@ func (db *DB) atomicBegin(ctx context.Context, fn func(ctx context.Context) erro
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("orm: commit transaction: %w", err)
+		return fmt.Errorf("orm: commit transaction: %w", db.classify(err))
 	}
 	return runCommitHooks(ctx, st.takeHooks())
 }

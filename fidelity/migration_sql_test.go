@@ -43,10 +43,11 @@ var migrationSQLDivergences = map[dialectCaseKey]string{
 	{dialect: "postgres", name: "create_model_all_kinds"}: "PostgreSQL CreateModel uses BIGSERIAL PRIMARY KEY, BIGINT for KindInt, TIMESTAMPTZ synonym, and omits varchar_pattern_ops _like indexes",
 
 	// Foreign-key DDL style: Djan-Go-Go enforces ON DELETE in SQL (inline table
-	// FOREIGN KEY in CreateModel, inline REFERENCES in AddField); Django uses
-	// DEFERRABLE INITIALLY DEFERRED without ON DELETE and defers PG FKs.
-	{dialect: "*", name: "create_model_fk_and_meta"}: "Djan-Go-Go emits inline table FOREIGN KEY with SQL ON DELETE clauses and orders unique_together after indexes; Django uses DEFERRABLE INITIALLY DEFERRED without ON DELETE",
-	{dialect: "*", name: "add_field_fk"}:             "Djan-Go-Go emits REFERENCES with SQL ON DELETE and omits implicit NULL; Django emits DEFERRABLE INITIALLY DEFERRED (and SET CONSTRAINTS IMMEDIATE on PG)",
+	// FOREIGN KEY in CreateModel, inline REFERENCES in AddField); Django
+	// enforces on_delete in Python and defers PG FKs. Both emit DEFERRABLE
+	// INITIALLY DEFERRED.
+	{dialect: "*", name: "create_model_fk_and_meta"}: "Djan-Go-Go emits inline table FOREIGN KEY with SQL ON DELETE clauses and orders unique_together after indexes; Django emits the constraint without ON DELETE",
+	{dialect: "*", name: "add_field_fk"}:             "Djan-Go-Go emits REFERENCES with SQL ON DELETE and omits implicit NULL; Django emits no ON DELETE (and SET CONSTRAINTS IMMEDIATE on PG)",
 
 	// Implicit NULL on nullable columns: Django writes explicit NULL; Djan-Go-Go omits it.
 	{dialect: "*", name: "add_field_nullable"}: "Django writes explicit NULL on nullable columns; Djan-Go-Go omits implicit NULL",

@@ -171,7 +171,7 @@ func (d Dialect) foreignKey(f *orm.Field) string {
 	target := f.Rel.Target
 	return "FOREIGN KEY (" + d.Quote(f.Column) + ") REFERENCES " +
 		d.Quote(target.Table()) + " (" + d.Quote(target.PrimaryKey().Column) + ")" +
-		f.Rel.OnDelete.Clause()
+		f.Rel.OnDelete.Clause() + orm.DeferredClause
 }
 
 // Open opens a PostgreSQL database at dsn using the pgx stdlib driver and

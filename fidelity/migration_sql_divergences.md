@@ -80,7 +80,7 @@ Django so stale entries are caught and removed.
 
 | Cases | Django 6.0.3 | Djan-Go-Go |
 | --- | --- | --- |
-| `create_model_fk_and_meta`, `add_field_fk` | Emits `DEFERRABLE INITIALLY DEFERRED` with no `ON DELETE` clause (on PG, defers `ADD CONSTRAINT ... FOREIGN KEY` or appends `SET CONSTRAINTS ... IMMEDIATE`); enforces `on_delete` in Python | Emits inline table `FOREIGN KEY (...) REFERENCES ... ON DELETE ...` (in `CreateModel`) or inline `REFERENCES ... ON DELETE ...` (in `AddField`) so the database enforces `on_delete`; emits `unique_together` after indexes |
+| `create_model_fk_and_meta`, `add_field_fk` | Emits `DEFERRABLE INITIALLY DEFERRED` with no `ON DELETE` clause (on PG, defers `ADD CONSTRAINT ... FOREIGN KEY` or appends `SET CONSTRAINTS ... IMMEDIATE`); enforces `on_delete` in Python | Emits inline table `FOREIGN KEY (...) REFERENCES ... ON DELETE ... DEFERRABLE INITIALLY DEFERRED` (in `CreateModel`) or inline `REFERENCES ... ON DELETE ... DEFERRABLE INITIALLY DEFERRED` (in `AddField`) so the database enforces `on_delete`; emits `unique_together` after indexes |
 | `add_field_nullable` | Writes explicit `NULL` (`ADD COLUMN "subtitle" varchar(120) NULL`) | Omits implicit `NULL` (`ADD COLUMN "subtitle" VARCHAR(120)`) |
 | `rename_model_with_fk` | Emits only `ALTER TABLE "migfid_article" RENAME TO "migfid_post"` | Also renames derived indexes (`DROP INDEX` + `CREATE INDEX` on SQLite; `ALTER INDEX ... RENAME TO ...` on PG) so later operations find them without introspection |
 
