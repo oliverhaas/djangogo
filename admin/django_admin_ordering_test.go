@@ -178,12 +178,12 @@ func TestInlineModelAdminOrderingSpecifiedOrdering(t *testing.T) {
 
 // checkOrderingOfFieldChoices checks that the band and other_interpreters
 // fields of the add page of AOSong offer the bands in the order of want, with
-// AOBand registered under bandAdmin when it is not nil, Django's
-// TestRelatedFieldsAdminOrdering.check_ordering_of_field_choices.
-func checkOrderingOfFieldChoices(t *testing.T, db *orm.DB, bandAdmin *admin.ModelAdmin, want ...*AOBand) {
+// AOSong registered under songAdmin and AOBand under bandAdmin when it is not
+// nil, Django's TestRelatedFieldsAdminOrdering.check_ordering_of_field_choices.
+func checkOrderingOfFieldChoices(t *testing.T, db *orm.DB, songAdmin admin.ModelAdmin, bandAdmin *admin.ModelAdmin, want ...*AOBand) {
 	t.Helper()
 	env := newAdminTestEnv(t, db, func(site *admin.AdminSite) {
-		admin.Register[AOSong](site, admin.ModelAdmin{})
+		admin.Register[AOSong](site, songAdmin)
 		if bandAdmin != nil {
 			admin.Register[AOBand](site, *bandAdmin)
 		}
@@ -210,7 +210,7 @@ func createAORelatedBands(t *testing.T, db *orm.DB) (b1, b2 *AOBand) {
 func TestRelatedFieldsAdminOrderingNoAdminFallbackToModelOrdering(t *testing.T) {
 	djangotest.EachDB(t, adminOrderingModels(), func(t *testing.T, db *orm.DB) {
 		b1, b2 := createAORelatedBands(t, db)
-		checkOrderingOfFieldChoices(t, db, nil, b2, b1)
+		checkOrderingOfFieldChoices(t, db, admin.ModelAdmin{}, nil, b2, b1)
 	})
 }
 
@@ -218,7 +218,7 @@ func TestRelatedFieldsAdminOrderingNoAdminFallbackToModelOrdering(t *testing.T) 
 func TestRelatedFieldsAdminOrderingAdminWithNoOrderingFallbackToModelOrdering(t *testing.T) {
 	djangotest.EachDB(t, adminOrderingModels(), func(t *testing.T, db *orm.DB) {
 		b1, b2 := createAORelatedBands(t, db)
-		checkOrderingOfFieldChoices(t, db, &admin.ModelAdmin{}, b2, b1)
+		checkOrderingOfFieldChoices(t, db, admin.ModelAdmin{}, &admin.ModelAdmin{}, b2, b1)
 	})
 }
 
@@ -226,11 +226,23 @@ func TestRelatedFieldsAdminOrderingAdminWithNoOrderingFallbackToModelOrdering(t 
 func TestRelatedFieldsAdminOrderingAdminOrderingBeatsModelOrdering(t *testing.T) {
 	djangotest.EachDB(t, adminOrderingModels(), func(t *testing.T, db *orm.DB) {
 		b1, b2 := createAORelatedBands(t, db)
-		checkOrderingOfFieldChoices(t, db, &admin.ModelAdmin{Ordering: []string{"rank"}}, b1, b2)
+		checkOrderingOfFieldChoices(t, db, admin.ModelAdmin{}, &admin.ModelAdmin{Ordering: []string{"rank"}}, b1, b2)
 	})
 }
 
 // Ported from Django: tests/admin_ordering/tests.py::TestRelatedFieldsAdminOrdering.test_custom_queryset_still_wins
 func TestRelatedFieldsAdminOrderingCustomQuerysetStillWins(t *testing.T) {
-	t.Skip("needs the queryset argument of formfield_for_foreignkey and formfield_for_manytomany, which the admin does not have")
+	djangotest.EachDB(t, adminOrderingModels(), func(t *testing.T, db *orm.DB) {
+		_, b2 := createAORelatedBands(t, db)
+		songAdmin := admin.ModelAdmin{
+			// Exclude one of the two bands from the querysets.
+			FormfieldQuerySet: func(_ *http.Request, f *orm.Field) orm.AnyQuerySet {
+				if f.Attr == "band" || f.Attr == "other_interpreters" {
+					return orm.Query[AOBand](db).Filter("rank__gt", 2)
+				}
+				return nil
+			},
+		}
+		checkOrderingOfFieldChoices(t, db, songAdmin, &admin.ModelAdmin{Ordering: []string{"rank"}}, b2)
+	})
 }

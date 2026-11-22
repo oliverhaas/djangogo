@@ -230,9 +230,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
 - **Admin:** a registered model needs an integer primary key. An
   inline cannot edit the auto-created through model of a many-to-many field.
   The `FormClass` of `FormfieldOverrides` does not apply to a relation, which
-  keeps its choice field. No hook replaces the rows that a relation field
-  offers, Django's `queryset` argument of `formfield_for_foreignkey`: use
-  `limit_choices_to`. The scripts and
+  keeps its choice field. The scripts and
   pages are in English only. The date
   hierarchy reads a datetime in UTC. A search field with `@` uses
   `icontains`, not full-text search. A template option such as

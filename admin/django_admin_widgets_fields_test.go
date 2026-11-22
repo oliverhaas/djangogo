@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -551,4 +552,93 @@ func TestAdminRadioFieldsOptionGroups(t *testing.T) {
 			`class="radiolist" id="id_kind_2_0"> DVD</label></div></div></div>`,
 			djangotest.HTML())
 	})
+}
+
+// WidgetCar is tests/admin_widgets/models.py::Car.
+type WidgetCar struct {
+	ID    int64
+	Owner orm.FK[auth.User] `orm:"on_delete=cascade"`
+	Make  string            `orm:"max_length=30"`
+	Model string            `orm:"max_length=30"`
+}
+
+// String returns the make and the model.
+func (c WidgetCar) String() string { return c.Make + " " + c.Model }
+
+// WidgetCarTire is tests/admin_widgets/models.py::CarTire, a single car tire,
+// to test that a user can only select their own cars.
+type WidgetCarTire struct {
+	ID  int64
+	Car orm.FK[WidgetCar] `orm:"on_delete=cascade"`
+}
+
+// carTireAdmin is tests/admin_widgets/widgetadmin.py::CarTireAdmin: the car
+// field offers the cars of the user of the request.
+func carTireAdmin(db *orm.DB) admin.ModelAdmin {
+	return admin.ModelAdmin{
+		FormfieldQuerySet: func(r *http.Request, f *orm.Field) orm.AnyQuerySet {
+			if f.Attr != "car" {
+				return nil
+			}
+			u, _ := auth.CurrentUser(r.Context())
+			return orm.Query[WidgetCar](db).Filter("owner", u.ID)
+		},
+	}
+}
+
+// carTireEnv creates the users and cars of Django's TestDataMixin, registers
+// WidgetCarTire under ma and logs the superuser in. It returns the cars of
+// the superuser and of the other user.
+func carTireEnv(t *testing.T, db *orm.DB, ma admin.ModelAdmin) (env *adminTestEnv, own, other *WidgetCar) {
+	t.Helper()
+	super := createTestUser(t, db, "super", "secret", true, true)
+	u2 := createTestUser(t, db, "testser", "secret", false, false)
+	own = &WidgetCar{Make: "Volkswagen", Model: "Passat"}
+	own.Owner.SetPK(super.ID)
+	other = &WidgetCar{Make: "BMW", Model: "M3"}
+	other.Owner.SetPK(u2.ID)
+	mustCreate(t, db, own)
+	mustCreate(t, db, other)
+	env = newAdminTestEnv(t, db, func(site *admin.AdminSite) {
+		admin.Register[WidgetCarTire](site, ma)
+	})
+	env.client.ForceLogin(super)
+	return env, own, other
+}
+
+// carTireModels returns the models of the CarTire tests.
+func carTireModels() []any {
+	return []any{auth.App{}, contenttypes.App{}, admin.App{}, djangotest.App("admin_widgets", &WidgetCar{}, &WidgetCarTire{})}
+}
+
+// Ported from Django: tests/admin_widgets/tests.py::AdminFormfieldForDBFieldWithRequestTests.test_filter_choices_by_request_user
+func TestAdminFormfieldForDBFieldWithRequestFilterChoicesByRequestUser(t *testing.T) {
+	djangotest.EachDB(t, carTireModels(), func(t *testing.T, db *orm.DB) {
+		env, _, _ := carTireEnv(t, db, carTireAdmin(db))
+		resp := env.client.Get(mustReverse(t, env.router, "admin:admin_widgets_widgetcartire_add"))
+		djangotest.AssertNotContains(t, resp, "BMW M3")
+		djangotest.AssertContains(t, resp, "Volkswagen Passat")
+	})
+}
+
+// No Django test exists: Django's ModelChoiceField looks the submitted key up
+// in the queryset of formfield_for_foreignkey, so a row outside it is an
+// invalid choice, also in a raw-id field.
+func TestAdminFormfieldQuerySetValidates(t *testing.T) {
+	for _, rawID := range []bool{false, true} {
+		t.Run(fmt.Sprintf("raw id %v", rawID), func(t *testing.T) {
+			djangotest.EachDB(t, carTireModels(), func(t *testing.T, db *orm.DB) {
+				ma := carTireAdmin(db)
+				if rawID {
+					ma.RawIDFields = []string{"car"}
+				}
+				env, own, other := carTireEnv(t, db, ma)
+				add := mustReverse(t, env.router, "admin:admin_widgets_widgetcartire_add")
+				resp := env.client.Post(add, url.Values{"car": {strconv.FormatInt(other.ID, 10)}})
+				djangotest.AssertContains(t, resp, "Select a valid choice. That choice is not one of the available choices.")
+				resp = env.client.Post(add, url.Values{"car": {strconv.FormatInt(own.ID, 10)}})
+				djangotest.AssertStatus(t, resp, http.StatusFound)
+			})
+		})
+	}
 }

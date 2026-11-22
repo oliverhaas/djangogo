@@ -609,6 +609,24 @@ type ModelAdmin struct {
 	// GetQuerysetFilter returns an extra orm.Cond applied to the base
 	// changelist queryset for r (the Go analog of overriding ModelAdmin.get_queryset).
 	GetQuerysetFilter func(r *http.Request) orm.Cond
+	// FormfieldQuerySet returns the rows that a foreign key or many-to-many
+	// field of the form offers for r, the queryset argument of Django's
+	// formfield_for_foreignkey and formfield_for_manytomany:
+	//
+	//	FormfieldQuerySet: func(r *http.Request, f *orm.Field) orm.AnyQuerySet {
+	//		if f.Attr != "car" {
+	//			return nil
+	//		}
+	//		u, _ := auth.CurrentUser(r.Context())
+	//		return orm.Query[Car](db).Filter("owner", u.ID)
+	//	},
+	//
+	// The queryset selects rows of the related model. They come in its
+	// ordering, else in the ordering of the related model, and the
+	// LimitChoicesTo of the relation applies to them. A submitted row outside
+	// the queryset is an invalid choice. nil keeps the rows of the related
+	// model in the ordering of its admin.
+	FormfieldQuerySet func(r *http.Request, field *orm.Field) orm.AnyQuerySet
 	// GetActions filters or customizes the resolved action list for r.
 	GetActions func(r *http.Request, actions []Action) []Action
 	// SaveModel replaces how the add and change pages, and the changelist

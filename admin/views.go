@@ -229,13 +229,29 @@ func (s *AdminSite) relationChoices(r *http.Request, e *entry, form *forms.Form,
 		if mf.Rel == nil || mf.Rel.Target == nil || !present[mf.Attr] || mf.Attr == skip || slices.Contains(limited, mf) {
 			continue
 		}
-		opts, err := orm.LabeledRowsWhere(r.Context(), s.db, mf.Rel.Target, mf.Rel.LimitChoicesTo(), s.relatedOrdering(r, mf.Rel.Target), nil)
+		opts, err := s.relatedRows(r, e, mf, nil)
 		if err != nil {
 			continue
 		}
 		out[mf.Attr] = opts
 	}
 	return out
+}
+
+// relatedRows returns the (primary key, label) rows that the relation field
+// mf of the form of e offers for r, among those that match the
+// LimitChoicesTo of the relation: the rows of the queryset of
+// FormfieldQuerySet, else the rows of the related model in the ordering of
+// its admin. When keys is not nil, only the rows with those primary keys
+// are returned.
+func (s *AdminSite) relatedRows(r *http.Request, e *entry, mf *orm.Field, keys []any) ([][2]string, error) {
+	target := mf.Rel.Target
+	if hook := e.admin.FormfieldQuerySet; hook != nil {
+		if qs := hook(r, mf); qs != nil {
+			return orm.LabeledQuerySetRows(r.Context(), target, qs, mf.Rel.LimitChoicesTo(), keys)
+		}
+	}
+	return orm.LabeledRowsWhere(r.Context(), s.db, target, mf.Rel.LimitChoicesTo(), s.relatedOrdering(r, target), keys)
 }
 
 // relatedOrdering returns the ordering of the admin of the related model

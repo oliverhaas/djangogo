@@ -182,3 +182,51 @@ func TestLabeledRowsContextLabeler(t *testing.T) {
 		t.Errorf("LabelContext = %q, want %q", label, "c of 2")
 	}
 }
+
+// No Django test exists: Django's ModelChoiceField iterates its queryset,
+// which LabeledQuerySetRows does for code that knows the model only at run
+// time, such as the admin's FormfieldQuerySet.
+func TestLabeledQuerySetRows(t *testing.T) {
+	db, labeled, _ := newLabeledRowsDB(t)
+	ctx := context.Background()
+	for _, name := range []string{"Beta", "Alpha", "Gamma"} {
+		if err := orm.Query[labeledThing](db).Create(ctx, &labeledThing{Name: name}); err != nil {
+			t.Fatalf("Create(%s): %v", name, err)
+		}
+	}
+	qs := orm.Query[labeledThing](db).Exclude("name", "Gamma")
+	tests := []struct {
+		name  string
+		qs    orm.AnyQuerySet
+		where orm.Cond
+		pks   []any
+		want  [][2]string
+	}{
+		{"primary key order", qs, orm.Cond{}, nil, [][2]string{{"1", "Beta"}, {"2", "Alpha"}}},
+		{"queryset order", qs.OrderBy("name"), orm.Cond{}, nil, [][2]string{{"2", "Alpha"}, {"1", "Beta"}}},
+		{"where", qs, orm.Q("name__startswith", "A"), nil, [][2]string{{"2", "Alpha"}}},
+		{"keys", qs, orm.Cond{}, []any{int64(1), int64(3)}, [][2]string{{"1", "Beta"}}},
+		{"no keys", qs, orm.Cond{}, []any{}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := orm.LabeledQuerySetRows(ctx, labeled, tt.qs, tt.where, tt.pks)
+			if err != nil {
+				t.Fatalf("LabeledQuerySetRows: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("LabeledQuerySetRows = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	for name, other := range map[string]orm.AnyQuerySet{
+		"other model": orm.Query[plainThing](db),
+		"values":      qs.Values("name"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := orm.LabeledQuerySetRows(ctx, labeled, other, orm.Cond{}, nil); err == nil {
+				t.Error("LabeledQuerySetRows succeeded, want an error")
+			}
+		})
+	}
+}

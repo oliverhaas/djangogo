@@ -79,24 +79,46 @@ func LabeledRowsOrdered(ctx context.Context, db *DB, m *Model, ordering []any, p
 // such as the LimitChoicesTo of a relation to m. A row that matches through
 // several related rows is returned once.
 func LabeledRowsWhere(ctx context.Context, db *DB, m *Model, where Cond, ordering []any, pks []any) ([][2]string, error) {
-	pk := m.PrimaryKey()
-	if pk == nil {
+	q := newQuery(db, m)
+	if len(ordering) > 0 {
+		q = q.orderByArgs(ordering)
+	}
+	return labeledRows(ctx, q, where, pks)
+}
+
+// LabeledQuerySetRows is LabeledRowsWhere for the rows of qs, a queryset of
+// the rows of m, such as the queryset of a ModelChoiceField. The rows come in
+// the ordering of qs, else in m.Ordering(), else by primary key. It fails
+// when qs is a queryset of another model or of Values.
+func LabeledQuerySetRows(ctx context.Context, m *Model, qs AnyQuerySet, where Cond, pks []any) ([][2]string, error) {
+	var q *query
+	if qs != nil {
+		q = qs.subquery()
+	}
+	if q == nil || q.model != m || q.values != nil {
+		return nil, fmt.Errorf("orm: labeled rows %s: the queryset does not select rows of %s", m.Name(), m.Name())
+	}
+	return labeledRows(ctx, q, where, pks)
+}
+
+// labeledRows returns the (primary key, label) pairs of the rows of q that
+// match where, for LabeledRowsWhere and LabeledQuerySetRows. When pks is not
+// nil, only the rows whose primary key is in pks are returned.
+func labeledRows(ctx context.Context, q *query, where Cond, pks []any) ([][2]string, error) {
+	db, m := q.db, q.model
+	if m.PrimaryKey() == nil {
 		return nil, fmt.Errorf("orm: model %s has no primary key", m.Name())
 	}
 	if pks != nil && len(pks) == 0 {
 		return nil, nil
 	}
-	q := newQuery(db, m)
 	if pks != nil {
 		q = q.filter([]any{"pk__in", pks}, false)
 	}
 	if !where.empty() || where.err != nil {
 		q = q.filter([]any{"pk__in", newQuery(db, m).filter([]any{where}, false)}, false)
 	}
-	switch {
-	case len(ordering) > 0:
-		q = q.orderByArgs(ordering)
-	case len(m.Ordering()) == 0:
+	if !q.explicitOrder && len(m.Ordering()) == 0 {
 		q = q.orderBy([]string{"pk"})
 	}
 	c, err := q.compile()

@@ -140,6 +140,9 @@ type InlineModelAdmin struct {
 	// GetExclude returns the fields that the forms leave out, Django's
 	// get_exclude. It replaces ExcludeFields.
 	GetExclude func(r *http.Request, obj any) []string
+	// FormfieldQuerySet returns the rows that a foreign key or many-to-many
+	// field of the forms offers, as ModelAdmin.FormfieldQuerySet does.
+	FormfieldQuerySet func(r *http.Request, field *orm.Field) orm.AnyQuerySet
 
 	// HasAddPermission overrides the "<app>.add_<model>" check.
 	HasAddPermission func(r *http.Request, obj any) bool
@@ -367,6 +370,7 @@ func (c InlineModelAdmin) modelAdmin() ModelAdmin {
 		GetReadonlyFields:            c.GetReadonlyFields,
 		GetPrepopulatedFields:        c.GetPrepopulatedFields,
 		GetExclude:                   c.GetExclude,
+		FormfieldQuerySet:            c.FormfieldQuerySet,
 	}
 }
 

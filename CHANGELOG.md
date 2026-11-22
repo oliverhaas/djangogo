@@ -922,6 +922,14 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   response. The form of the `_source_model`'s admin needs a choice field
   named after the plural name of the added model, whose groups hold a
   choice labeled as the new object.
+- Admin: a foreign key or many-to-many field of the form can offer only some
+  rows of the related model, such as the cars of the logged-in user. The new
+  `ModelAdmin.FormfieldQuerySet` and `InlineModelAdmin.FormfieldQuerySet`
+  return a queryset per request and field, Django's `queryset` argument of
+  `formfield_for_foreignkey` and `formfield_for_manytomany`. The rows come in
+  the ordering of the queryset, and a submitted row outside it is an invalid
+  choice, also in a raw-id or autocomplete field. The new
+  `orm.LabeledQuerySetRows` returns the labeled rows of a queryset.
 
 ### Changed
 

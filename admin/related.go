@@ -133,18 +133,17 @@ func syncAutocompleteRequired(form *forms.Form) {
 
 // loadSelectedChoices sets the choices of the raw-id and autocomplete fields
 // of form to the related rows whose keys the fields show: the submitted
-// values of a bound form, else the initial ones, among the rows that match
-// the relation's LimitChoicesTo. A key that names no such row has no choice,
-// so validation rejects it with Django's invalid_choice message.
+// values of a bound form, else the initial ones, among the rows that
+// relatedRows offers. A key that names no such row has no choice, so
+// validation rejects it with Django's invalid_choice message.
 func (s *AdminSite) loadSelectedChoices(r *http.Request, e *entry, form *forms.Form) error {
 	present := formFieldNames(form)
 	for _, f := range e.limitedFields(r) {
 		if f.Rel == nil || f.Rel.Target == nil || !present[f.Attr] {
 			continue
 		}
-		target := f.Rel.Target
-		keys := relatedKeys(target, keyTexts(form.Field(f.Attr).Value()))
-		rows, err := orm.LabeledRowsWhere(r.Context(), s.db, target, f.Rel.LimitChoicesTo(), s.relatedOrdering(r, target), keys)
+		keys := relatedKeys(f.Rel.Target, keyTexts(form.Field(f.Attr).Value()))
+		rows, err := s.relatedRows(r, e, f, keys)
 		if err != nil {
 			return err
 		}
