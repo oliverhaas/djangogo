@@ -20,7 +20,7 @@ var binaryMethods = map[string]string{
 var functionNames = map[string]string{
 	"LOWER": "Lower", "UPPER": "Upper", "LENGTH": "Length",
 	"TRIM": "Trim", "LTRIM": "LTrim", "RTRIM": "RTrim",
-	"COALESCE": "Coalesce", fnConcat: "Concat",
+	"COALESCE": "Coalesce", fnConcat: "Concat", "ABS": "Abs",
 }
 
 // ConstraintSource returns Go source code that builds c, such as
@@ -248,6 +248,12 @@ func (g sourceWriter) expr(e Expr) (string, error) {
 		return "orm.Cast(" + arg + ", " + castFieldSource(e.castTo) + ")", nil
 	case exprCase:
 		return g.caseExpr(e)
+	case exprNot:
+		arg, err := g.expr(*e.arg)
+		if err != nil {
+			return "", err
+		}
+		return arg + ".Not()", nil
 	}
 	return "", fmt.Errorf("orm: an aggregate or bound expression (kind %d) has no Go source", e.kind)
 }

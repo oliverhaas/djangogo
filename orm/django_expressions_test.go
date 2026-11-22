@@ -2,6 +2,7 @@ package orm_test
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -865,5 +866,75 @@ func TestExpressionsMultipleTransformsInValues(t *testing.T) {
 		expFieldTransformSetUp(t, db)
 		assertValues(t, orm.Query[expExperiment](db).Values("end__date__month"),
 			[]map[string]any{{"end__date__month": int64(6)}})
+	})
+}
+
+// expSetUpNegated creates the NegatedExpressionTests fixture: a company based
+// in the EU and one that is not.
+func expSetUpNegated(t *testing.T, db *orm.DB) (eu, nonEU *expCompany) {
+	t.Helper()
+	ceo := create(t, db, &expEmployee{Firstname: "Joe", Lastname: "Smith", Salary: 10})
+	eu = create(t, db, &expCompany{
+		Name: "Example Inc.", NumEmployees: 2300, NumChairs: 5, CEO: fkTo[expEmployee](ceo.ID), BasedInEU: true,
+	})
+	nonEU = create(t, db, &expCompany{
+		Name: "Foobar Ltd.", NumEmployees: 3, NumChairs: 4, CEO: fkTo[expEmployee](ceo.ID),
+	})
+	return eu, nonEU
+}
+
+// Django compares the expression objects. Go compares the values of Expr.
+//
+// Ported from Django: tests/expressions/tests.py::NegatedExpressionTests.test_invert
+func TestNegatedExpressionInvert(t *testing.T) {
+	f := orm.F("field")
+	if reflect.DeepEqual(f.Not(), f) {
+		t.Errorf("F.Not() equals F")
+	}
+	if !reflect.DeepEqual(f.Not(), orm.F("field").Not()) {
+		t.Errorf("two negations of the same F differ")
+	}
+	if !reflect.DeepEqual(f.Not().Not(), f) {
+		t.Errorf("F.Not().Not() = %+v, want F", f.Not().Not())
+	}
+}
+
+// Filter takes no boolean expression as a condition, so the first assertion,
+// filter(~F("based_in_eu")), is ported with the condition based_in_eu=False.
+//
+// Ported from Django: tests/expressions/tests.py::NegatedExpressionTests.test_filter
+func TestNegatedExpressionFilter(t *testing.T) {
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		eu, nonEU := expSetUpNegated(t, db)
+		ids := func(qs *orm.QuerySet[expCompany]) []int64 {
+			rows := mustAll(t, qs)
+			out := make([]int64, 0, len(rows))
+			for _, c := range rows {
+				out = append(out, c.ID)
+			}
+			return out
+		}
+		djangotest.AssertEqual(t, ids(orm.Query[expCompany](db).Filter("based_in_eu", false)), []int64{nonEU.ID})
+		qs := func() *orm.QuerySet[expCompany] {
+			return orm.Query[expCompany](db).Annotate("eu_required", orm.Value(false).Not())
+		}
+		djangotest.AssertEqual(t, ids(qs().Filter("based_in_eu", orm.F("eu_required")).OrderBy("eu_required")),
+			[]int64{eu.ID})
+		djangotest.AssertEqual(t, ids(qs().Filter("based_in_eu", orm.F("eu_required").Not().Not())), []int64{eu.ID})
+		djangotest.AssertEqual(t, ids(qs().Filter("based_in_eu", orm.F("eu_required").Not())), []int64{nonEU.ID})
+		djangotest.AssertEqual(t, len(ids(qs().Filter("based_in_eu", orm.F("based_in_eu").Not()))), 0)
+	})
+}
+
+// Ported from Django: tests/expressions/tests.py::NegatedExpressionTests.test_values
+func TestNegatedExpressionValues(t *testing.T) {
+	djangotest.EachDB(t, expModels(), func(t *testing.T, db *orm.DB) {
+		expSetUpNegated(t, db)
+		rows, err := orm.Query[expCompany](db).Annotate("negated", orm.F("based_in_eu").Not()).
+			ValuesList("name", "negated").OrderBy("name").All(context.Background())
+		if err != nil {
+			t.Fatalf("ValuesList: %v", err)
+		}
+		djangotest.AssertEqual(t, rows, [][]any{{"Example Inc.", false}, {"Foobar Ltd.", true}})
 	})
 }

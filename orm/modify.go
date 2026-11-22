@@ -75,6 +75,16 @@ func (q *query) updateSQL(pairs []any) (string, []any, error) {
 	if q.sliced() {
 		return "", nil, errUpdateSliced
 	}
+	for _, o := range q.orders {
+		for _, a := range q.annotations {
+			if a.name == o.key && a.expr.containsAggregate() {
+				return "", nil, &FieldError{
+					Model:   q.model.Name(),
+					Message: "cannot update when ordering by an aggregate: " + a.name,
+				}
+			}
+		}
+	}
 	type assignment struct {
 		field *Field
 		value sqlNode
@@ -87,6 +97,12 @@ func (q *query) updateSQL(pairs []any) (string, []any, error) {
 		}
 		f, ok := lookupField(q.model, key)
 		if !ok {
+			if rel, found := nonConcreteField(q.model, key); found {
+				return "", nil, &FieldError{
+					Model:   q.model.Name(),
+					Message: "cannot update model field " + rel + " (only concrete fields are permitted)",
+				}
+			}
 			return "", nil, &FieldError{
 				Model:   q.model.Name(),
 				Message: "cannot resolve keyword '" + key + "' into field. Choices are: " + fieldChoices(q.model, nil),
@@ -118,6 +134,29 @@ func (q *query) updateSQL(pairs []any) (string, []any, error) {
 		return "", nil, err
 	}
 	return w.String(), w.args, nil
+}
+
+// nonConcreteField describes the many-to-many field or the reverse relation of
+// m that key names, in the form of Django's repr in its FieldError: a field
+// as <ManyToManyField: tags>, a reverse relation as <ManyToOneRel:
+// app.model> with the model that declares the relation. It reports false
+// when key names neither.
+func nonConcreteField(m *Model, key string) (string, bool) {
+	if f, ok := m.ManyToManyField(key); ok {
+		return "<ManyToManyField: " + f.Attr + ">", true
+	}
+	rev, ok := m.lookupReverseQuery(key)
+	if !ok {
+		return "", false
+	}
+	kind := "ManyToOneRel"
+	switch rev.Kind {
+	case RelO2O:
+		kind = "OneToOneRel"
+	case RelM2M:
+		kind = "ManyToManyRel"
+	}
+	return "<" + kind + ": " + rev.Source.LabelLower() + ">", true
 }
 
 // assignedValue resolves the value an UPDATE assigns to field f. An

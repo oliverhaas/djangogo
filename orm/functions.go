@@ -46,6 +46,10 @@ func LTrim(arg any) Expr { return function("LTRIM", arg, 0, false) }
 // RTrim returns arg without trailing spaces, Django's RTrim.
 func RTrim(arg any) Expr { return function("RTRIM", arg, 0, false) }
 
+// Abs returns the absolute value of arg, Django's Abs. The value has the kind
+// of arg, and is nil when arg is NULL.
+func Abs(arg any) Expr { return function("ABS", arg, 0, false) }
+
 // fnConcat marks the exprCall of Concat, which is written with || and not as
 // a call.
 const fnConcat = "CONCAT"
@@ -146,6 +150,8 @@ func (e Expr) outputKind(input Kind) Kind {
 		return e.arg.outputKind(input)
 	case exprCast:
 		return e.castTo.Kind
+	case exprNot:
+		return KindBool
 	case exprCall:
 		if e.fn == fnConcat {
 			return KindText

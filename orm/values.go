@@ -197,6 +197,12 @@ func (vs *ValuesQuerySet) Count(ctx context.Context) (int64, error) {
 	return vs.q.count(ctx)
 }
 
+// Update writes the assignments to the rows the query matches, as
+// QuerySet.Update does; the keys of Values play no part in it.
+func (vs *ValuesQuerySet) Update(ctx context.Context, assignments ...any) (int64, error) {
+	return vs.q.update(ctx, assignments)
+}
+
 // ValuesListQuerySet is a queryset whose rows are slices of values in key
 // order, the counterpart of Django's values_list(). Build one with
 // QuerySet.ValuesList. The values have the types described at ValuesQuerySet.
@@ -278,6 +284,12 @@ func (vl *ValuesListQuerySet) Flat(ctx context.Context) ([]any, error) {
 // Count returns the number of rows the query yields.
 func (vl *ValuesListQuerySet) Count(ctx context.Context) (int64, error) {
 	return vl.q.count(ctx)
+}
+
+// Update writes the assignments to the rows the query matches, as
+// QuerySet.Update does; the keys of ValuesList play no part in it.
+func (vl *ValuesListQuerySet) Update(ctx context.Context, assignments ...any) (int64, error) {
+	return vl.q.update(ctx, assignments)
 }
 
 // Pluck returns the values of one key for every row of qs, typed as V: the

@@ -799,6 +799,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   defaults. The many-to-many and generic relation managers take it too.
 - ORM: the reverse foreign key manager of `RelatedSet` has `GetOrCreate` and
   `UpdateOrCreate`, which set the foreign key of a created row to the owner.
+- ORM: `orm.Abs`, Django's `Abs`, and `Expr.Not`, the negation of a boolean
+  expression, Django's `~F()`: `Update(ctx, "is_active",
+  orm.F("is_active").Not())` switches every row. The negation of an
+  expression that is not boolean fails with an error.
+- ORM: `Update` on a `Values` or `ValuesList` queryset, as Django's
+  `values().update()`.
 
 ### Changed
 
@@ -952,6 +958,11 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   session and the response becomes a 500; before, the handler did not run.
   A session cookie of an unknown or expired session is deleted only when the
   handler uses the session.
+- ORM: `Update` of a many-to-many field or a reverse relation fails with
+  "cannot update model field <ManyToManyField: tags> (only concrete fields
+  are permitted)", as in Django, instead of "cannot resolve keyword". An
+  `Update` on a queryset ordered by an aggregate annotation fails with a
+  `FieldError`, as in Django; before, it ignored the order.
 
 ### Fixed
 

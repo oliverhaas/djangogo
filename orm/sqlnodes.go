@@ -396,8 +396,13 @@ type funcNode struct {
 	typ valueType
 }
 
-// render writes "FN(arg)".
+// render writes "FN(arg)". A decimal result is cast to NUMERIC on SQLite, as
+// for a caseNode.
 func (n funcNode) render(w *sqlWriter) {
+	if n.typ == typeDecimal && w.d.Name() == "sqlite" {
+		w.write("CAST(")
+		defer w.write(" AS NUMERIC)")
+	}
 	w.write(n.fn + "(")
 	n.arg.render(w)
 	w.write(")")
@@ -408,6 +413,24 @@ func (n funcNode) vtype() valueType { return n.typ }
 
 // aggregate reports whether the argument holds an aggregate.
 func (n funcNode) aggregate() bool { return n.arg.aggregate() }
+
+// notNode is the negation of a boolean expression.
+type notNode struct {
+	inner sqlNode
+}
+
+// render writes "NOT (inner)".
+func (n notNode) render(w *sqlWriter) {
+	w.write("NOT (")
+	n.inner.render(w)
+	w.write(")")
+}
+
+// vtype is bool.
+func (notNode) vtype() valueType { return typeBool }
+
+// aggregate reports whether the negated expression holds an aggregate.
+func (n notNode) aggregate() bool { return n.inner.aggregate() }
 
 // callNode is a call of a function of several arguments, such as
 // COALESCE(a, b).

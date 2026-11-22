@@ -129,6 +129,10 @@ func TestConstraintSourceRebuildsConditions(t *testing.T) {
 			orm.Q("n__gte", orm.Case(orm.When{Cond: orm.Q("kind", "a"), Then: 1}, orm.When{Cond: orm.Q("kind", "b"), Then: "m"}).Default(orm.Value(0))),
 			`orm.Q("n__gte", orm.Case(orm.When{Cond: orm.Q("kind", "a"), Then: orm.Value(int64(1))}, orm.When{Cond: orm.Q("kind", "b"), Then: orm.F("m")}).Default(orm.Value(int64(0))))`,
 		},
+		{
+			orm.Q("n__lte", orm.Abs("m"), "active", orm.F("archived").Not()),
+			`orm.Q("n__lte", orm.Abs(orm.F("m")), "active", orm.F("archived").Not())`,
+		},
 	}
 	for _, tt := range tests {
 		assertSource(t, orm.CheckConstraint{Name: "c", Condition: tt.cond}, `orm.CheckConstraint{Name: "c", Condition: `+tt.src+`}`)

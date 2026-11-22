@@ -157,12 +157,25 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		return convertNode{inner: arg, to: e.castTo, input: valueKind(arg.vtype())}, nil
 	case exprCase:
 		return c.resolveCase(e)
+	case exprNot:
+		arg, err := c.resolveExpr(*e.arg)
+		if err != nil {
+			return nil, err
+		}
+		if arg.vtype() != typeBool {
+			return nil, errNegateNonConditional
+		}
+		return notNode{inner: arg}, nil
 	case exprStar:
 		return nil, errors.New(`orm: "*" is only valid as the argument of Count`)
 	default:
 		return nil, errors.New("orm: empty expression")
 	}
 }
+
+// errNegateNonConditional refuses the negation of an expression that is not
+// boolean, as Django's NegatedExpression does.
+var errNegateNonConditional = errors.New("orm: cannot negate non-conditional expressions")
 
 // errStarFilter refuses Count("*") with a filter, as Django does.
 var errStarFilter = errors.New("orm: Star cannot be used with filter. Please specify a field.") //nolint:revive,staticcheck // Django's message

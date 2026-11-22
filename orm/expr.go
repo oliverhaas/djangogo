@@ -33,13 +33,16 @@ const (
 	exprCast
 	// exprCase is a conditional expression.
 	exprCase
+	// exprNot negates a boolean expression.
+	exprNot
 )
 
 // Expr is an SQL value expression: a field reference (F), a literal (Value),
 // an arithmetic or bitwise combination of expressions, an aggregate (Count,
 // Sum, Avg, Min, Max), a text function (Lower, Upper, Length, Trim, LTrim,
-// RTrim, Concat), Coalesce, Cast or a conditional expression (Case). It is
-// immutable; every method returns a new Expr.
+// RTrim, Concat), Abs, Coalesce, Cast, a conditional expression (Case) or
+// the negation of a boolean expression (Not). It is immutable; every method
+// returns a new Expr.
 //
 // An Expr can be the value of a filter, so a column is compared with another
 // column or with a computed value:
@@ -104,6 +107,21 @@ func toExpr(x any) Expr {
 		}
 	}
 	return Value(x)
+}
+
+// Not returns the negation of the boolean expression e, Django's ~F() and
+// ~Case(): F("is_active").Not() is true where is_active is false. A query
+// with the negation of an expression that is not boolean fails with an
+// error, as Django raises a TypeError:
+//
+//	Update(ctx, "is_active", orm.F("is_active").Not())
+//
+// The negation of a negation is the expression itself.
+func (e Expr) Not() Expr {
+	if e.kind == exprNot {
+		return *e.arg
+	}
+	return Expr{kind: exprNot, arg: &e}
 }
 
 // binary builds the arithmetic combination "e op x".
@@ -239,7 +257,7 @@ func (e Expr) containsAggregate() bool {
 		return true
 	case exprBinary:
 		return e.left.containsAggregate() || e.right.containsAggregate()
-	case exprFunc, exprCast:
+	case exprFunc, exprCast, exprNot:
 		return e.arg.containsAggregate()
 	case exprNode:
 		return e.node.aggregate()

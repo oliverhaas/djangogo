@@ -37,9 +37,26 @@ type updB struct {
 	Y  int64 `orm:"default=10"`
 }
 
+// updFoo is Django's update.Foo.
+type updFoo struct {
+	ID     int64
+	Target string `orm:"max_length=10;unique"`
+}
+
+// updBar is Django's update.Bar. Its foreign key targets the primary key of
+// Foo, where Django's targets the target column through to_field.
+type updBar struct {
+	ID     int64
+	Foo    orm.FK[updFoo]
+	O2oFoo orm.O2O[updFoo] `orm:"related_name=o2o_bar;null"`
+	M2mFoo orm.M2M[updFoo] `orm:"related_name=m2m_foo"`
+	X      int64
+}
+
 // updModels returns the models of Django's update test app.
 func updModels() []any {
-	return []any{djangotest.App("update", &updDataPoint{}, &updRelatedPoint{}, &updA{}, &updB{})}
+	return []any{djangotest.App("update", &updDataPoint{}, &updRelatedPoint{}, &updA{}, &updB{},
+		&updFoo{}, &updBar{})}
 }
 
 // updSimple is the fixture of Django's update SimpleTest: two A rows, and
@@ -93,14 +110,11 @@ func updUpdate[T any](t *testing.T, want int64, qs *orm.QuerySet[T], assignments
 	djangotest.AssertEqual(t, got, want)
 }
 
-// The reverse manager a1.b_set belongs to another work package: the rows are
-// selected through the forward key instead.
-//
 // Ported from Django: tests/update/tests.py::SimpleTest.test_nonempty_update
 func TestUpdateNonemptyUpdate(t *testing.T) {
 	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
 		fx := updSetUpSimple(t, db)
-		updUpdate(t, 20, orm.Query[updB](db).Filter("a", fx.a1), "y", 100)
+		updUpdate(t, 20, orm.RelatedSet[updB](db, fx.a1, "updb_set").QuerySet(), "y", 100)
 		djangotest.AssertEqual(t, mustCount(t, orm.Query[updB](db).Filter("y", 100)), int64(20))
 	})
 }
@@ -109,9 +123,19 @@ func TestUpdateNonemptyUpdate(t *testing.T) {
 func TestUpdateEmptyUpdate(t *testing.T) {
 	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
 		fx := updSetUpSimple(t, db)
-		updUpdate(t, 0, orm.Query[updB](db).Filter("a", fx.a2), "y", 100)
+		updUpdate(t, 0, orm.RelatedSet[updB](db, fx.a2, "updb_set").QuerySet(), "y", 100)
 		djangotest.AssertEqual(t, mustCount(t, orm.Query[updB](db).Filter("y", 100)), int64(0))
 	})
+}
+
+// Ported from Django: tests/update/tests.py::SimpleTest.test_nonempty_update_with_inheritance
+func TestUpdateNonemptyUpdateWithInheritance(t *testing.T) {
+	t.Skip("needs model inheritance, which the ORM does not have")
+}
+
+// Ported from Django: tests/update/tests.py::SimpleTest.test_empty_update_with_inheritance
+func TestUpdateEmptyUpdateWithInheritance(t *testing.T) {
+	t.Skip("needs model inheritance, which the ORM does not have")
 }
 
 // Django runs this on the inherited model D. There is no model inheritance
@@ -224,49 +248,217 @@ func TestUpdateUpdateAnnotatedQueryset(t *testing.T) {
 	})
 }
 
-// Only the F("data__name") case is ported: there is no Lower transform and
-// there are no database functions to build the other three annotations
-// from. The direct reference without an annotation is rejected the same way.
+// The direct reference without an annotation is rejected the same way.
 //
 // Ported from Django: tests/update/tests.py::AdvancedTests.test_update_with_joined_field_annotation
 func TestUpdateUpdateWithJoinedFieldAnnotation(t *testing.T) {
+	t.Cleanup(orm.RegisterTransform(orm.KindChar, "lower", orm.Lower))
 	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
 		updSetUpAdvanced(t, db)
 		ctx := context.Background()
 		const msg = "oined field references are not permitted in this query"
-		_, err := orm.Query[updRelatedPoint](db).Annotate("new_name", orm.F("data__name")).
-			Update(ctx, "name", orm.F("new_name"))
+		for name, annotation := range map[string]orm.Expr{
+			"F":      orm.F("data__name"),
+			"Flower": orm.F("data__name__lower"),
+			"Lower":  orm.Lower("data__name"),
+			"Concat": orm.Concat("data__name", "data__value"),
+		} {
+			t.Run(name, func(t *testing.T) {
+				_, err := orm.Query[updRelatedPoint](db).Annotate("new_name", annotation).
+					Update(ctx, "name", orm.F("new_name"))
+				assertFieldError(t, err, msg)
+			})
+		}
+		_, err := orm.Query[updRelatedPoint](db).Update(ctx, "name", orm.F("data__name"))
 		assertFieldError(t, err, msg)
-		_, err = orm.Query[updRelatedPoint](db).Update(ctx, "name", orm.F("data__name"))
-		assertFieldError(t, err, msg)
-		// Neither statement wrote anything.
+		// No statement wrote anything.
 		assertFlat(t, orm.Query[updRelatedPoint](db).ValuesList("name"), []any{"r1"})
 	})
 }
 
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_respects_to_field
+func TestUpdateUpdateRespectsToField(t *testing.T) {
+	t.Skip("needs to_field, which the ORM does not have")
+}
+
+// Django names the field by its Python class path,
+// <django.db.models.fields.related.ManyToManyField: m2m_foo>. The Go error
+// names the class only.
+//
 // Ported from Django: tests/update/tests.py::AdvancedTests.test_update_m2m_field
 func TestUpdateUpdateM2MField(t *testing.T) {
-	t.Skip("needs M2M[T], which belongs to the relations work package")
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		_, err := orm.Query[updBar](db).Update(context.Background(), "m2m_foo", "whatever")
+		assertFieldError(t, err,
+			"annot update model field <ManyToManyField: m2m_foo> (only concrete fields are permitted)")
+	})
 }
 
 // Ported from Django: tests/update/tests.py::AdvancedTests.test_update_reverse_m2m_descriptor
 func TestUpdateUpdateReverseM2MDescriptor(t *testing.T) {
-	t.Skip("needs M2M[T], which belongs to the relations work package")
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		_, err := orm.Query[updFoo](db).Update(context.Background(), "m2m_foo", "whatever")
+		assertFieldError(t, err,
+			"annot update model field <ManyToManyRel: update.updbar> (only concrete fields are permitted)")
+	})
 }
 
+// The reverse query name of Bar.foo is updbar, after the Go model name, where
+// Django's is bar.
+//
 // Ported from Django: tests/update/tests.py::AdvancedTests.test_update_reverse_fk_descriptor
 func TestUpdateUpdateReverseFKDescriptor(t *testing.T) {
-	t.Skip("needs reverse relations, which belong to the relations work package")
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		_, err := orm.Query[updFoo](db).Update(context.Background(), "updbar", "whatever")
+		assertFieldError(t, err,
+			"annot update model field <ManyToOneRel: update.updbar> (only concrete fields are permitted)")
+	})
 }
 
 // Ported from Django: tests/update/tests.py::AdvancedTests.test_update_reverse_o2o_descriptor
 func TestUpdateUpdateReverseO2ODescriptor(t *testing.T) {
-	t.Skip("needs O2O[T], which belongs to the relations work package")
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		_, err := orm.Query[updFoo](db).Update(context.Background(), "o2o_bar", "whatever")
+		assertFieldError(t, err,
+			"annot update model field <OneToOneRel: update.updbar> (only concrete fields are permitted)")
+	})
+}
+
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_reverse_mti_parent_link_descriptor
+func TestUpdateUpdateReverseMTIParentLinkDescriptor(t *testing.T) {
+	t.Skip("needs model inheritance, which the ORM does not have")
 }
 
 // Ported from Django: tests/update/tests.py::AdvancedTests.test_update_annotated_multi_table_queryset
 func TestUpdateUpdateAnnotatedMultiTableQueryset(t *testing.T) {
-	t.Skip("needs reverse relations, which belong to the relations work package")
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		updSetUpAdvanced(t, db)
+		counted := func() *orm.QuerySet[updDataPoint] {
+			return orm.Query[updDataPoint](db).Annotate("related_count", orm.Count("updrelatedpoint"))
+		}
+		// A trivial annotated update.
+		updUpdate(t, 3, counted(), "value", "Foo")
+		// The annotation filters the rows.
+		updUpdate(t, 1, counted().Filter("related_count", 1), "value", "Foo")
+		// An aggregate over a joined field cannot be assigned.
+		_, err := orm.Query[updRelatedPoint](db).Annotate("max", orm.Max("data__value")).
+			Update(context.Background(), "name", orm.F("max"))
+		assertFieldError(t, err, "oined field references are not permitted in this query")
+	})
+}
+
+// Django names the aggregate expression after the colon. The Go error names
+// the annotation.
+//
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_ordered_by_m2m_aggregation_annotation
+func TestUpdateUpdateOrderedByM2MAggregationAnnotation(t *testing.T) {
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		_, err := orm.Query[updBar](db).Annotate("m2m_count", orm.Count("m2m_foo")).
+			OrderBy("m2m_count").Update(context.Background(), "x", 2)
+		assertFieldError(t, err, "annot update when ordering by an aggregate: m2m_count")
+		_, err = orm.Query[updBar](db).Annotate("m2m_count", orm.Count("m2m_foo")).
+			OrderBy("-m2m_count").Update(context.Background(), "x", 2)
+		assertFieldError(t, err, "annot update when ordering by an aggregate: m2m_count")
+	})
+}
+
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_transformed_field
+func TestUpdateUpdateTransformedField(t *testing.T) {
+	t.Cleanup(orm.RegisterTransform(orm.KindInt, "abs", orm.Abs))
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		create(t, db, &updA{X: 5})
+		create(t, db, &updA{X: -6})
+		updUpdate(t, 2, orm.Query[updA](db), "x", orm.F("x__abs"))
+		assertFlat(t, orm.Query[updA](db).OrderBy("x").ValuesList("x"), []any{int64(5), int64(6)})
+	})
+}
+
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_ordered_by_inline_m2m_annotation
+func TestUpdateUpdateOrderedByInlineM2MAnnotation(t *testing.T) {
+	t.Skip("needs OrderBy with an expression, which takes keys only")
+}
+
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_ordered_by_m2m_annotation
+func TestUpdateUpdateOrderedByM2MAnnotation(t *testing.T) {
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		foo := create(t, db, &updFoo{Target: "test"})
+		create(t, db, &updBar{Foo: fkTo[updFoo](foo.ID)})
+		updUpdate(t, 1, orm.Query[updBar](db).Annotate("abs_id", orm.Abs("m2m_foo")).OrderBy("abs_id"), "x", 3)
+		assertFlat(t, orm.Query[updBar](db).ValuesList("x"), []any{int64(3)})
+	})
+}
+
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_ordered_by_m2m_annotation_desc
+func TestUpdateUpdateOrderedByM2MAnnotationDesc(t *testing.T) {
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		foo := create(t, db, &updFoo{Target: "test"})
+		create(t, db, &updBar{Foo: fkTo[updFoo](foo.ID)})
+		updUpdate(t, 1, orm.Query[updBar](db).Annotate("abs_id", orm.Abs("m2m_foo")).OrderBy("-abs_id"), "x", 4)
+		assertFlat(t, orm.Query[updBar](db).ValuesList("x"), []any{int64(4)})
+	})
+}
+
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_values_annotation
+func TestUpdateUpdateValuesAnnotation(t *testing.T) {
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		fx := updSetUpAdvanced(t, db)
+		updated, err := orm.Query[updRelatedPoint](db).Annotate("abs_id", orm.Abs("id")).
+			Filter("data__is_active", false).Values("id", "abs_id").
+			Update(context.Background(), "data", fx.d0)
+		if err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		djangotest.AssertEqual(t, updated, int64(1))
+		assertFlat(t, orm.Query[updRelatedPoint](db).Filter("pk", fx.r1.ID).ValuesList("data"),
+			[]any{fx.d0.ID})
+	})
+}
+
+// updNamesActive returns the names and is_active values of the data points,
+// ordered by name.
+func updNamesActive(t *testing.T, db *orm.DB) []any {
+	t.Helper()
+	rows, err := orm.Query[updDataPoint](db).OrderBy("name").ValuesList("name", "is_active").All(context.Background())
+	if err != nil {
+		t.Fatalf("ValuesList: %v", err)
+	}
+	out := make([]any, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r[0], r[1])
+	}
+	return out
+}
+
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_negated_f
+func TestUpdateUpdateNegatedF(t *testing.T) {
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		updSetUpAdvanced(t, db)
+		updUpdate(t, 3, orm.Query[updDataPoint](db), "is_active", orm.F("is_active").Not())
+		djangotest.AssertEqual(t, updNamesActive(t, db), []any{"d0", false, "d2", false, "d3", true})
+		updUpdate(t, 3, orm.Query[updDataPoint](db), "is_active", orm.F("is_active").Not())
+		djangotest.AssertEqual(t, updNamesActive(t, db), []any{"d0", true, "d2", true, "d3", false})
+	})
+}
+
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_update_negated_f_conditional_annotation
+func TestUpdateUpdateNegatedFConditionalAnnotation(t *testing.T) {
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		updSetUpAdvanced(t, db)
+		isD2 := orm.Case(orm.When{Cond: orm.Q("name", "d2"), Then: true}).Default(false)
+		updUpdate(t, 3, orm.Query[updDataPoint](db).Annotate("is_d2", isD2), "is_active", orm.F("is_d2").Not())
+		djangotest.AssertEqual(t, updNamesActive(t, db), []any{"d0", true, "d2", false, "d3", true})
+	})
+}
+
+// Django raises a TypeError. The Go error comes from Update.
+//
+// Ported from Django: tests/update/tests.py::AdvancedTests.test_updating_non_conditional_field
+func TestUpdateUpdatingNonConditionalField(t *testing.T) {
+	djangotest.EachDB(t, updModels(), func(t *testing.T, db *orm.DB) {
+		updSetUpAdvanced(t, db)
+		_, err := orm.Query[updDataPoint](db).Update(context.Background(), "is_active", orm.F("name").Not())
+		assertErrorContains(t, err, "annot negate non-conditional expressions")
+	})
 }
 
 // An expression on the right-hand side reads the row that is being updated.

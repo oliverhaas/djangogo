@@ -385,22 +385,28 @@ func (qs *QuerySet[T]) Exists(ctx context.Context) (bool, error) {
 // Expr over the fields of the row; an expression that spans a relation is an
 // error. Update on a queryset with a Limit or Offset is an error.
 func (qs *QuerySet[T]) Update(ctx context.Context, assignments ...any) (int64, error) {
-	query, args, err := qs.q.updateSQL(assignments)
+	return qs.q.update(ctx, assignments)
+}
+
+// update runs the UPDATE of Update and its counterparts on the values
+// querysets.
+func (q *query) update(ctx context.Context, assignments []any) (int64, error) {
+	query, args, err := q.updateSQL(assignments)
 	if errors.Is(err, errEmptyResultSet) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	result, err := qs.q.db.conn(ctx).ExecContext(ctx, query, args...)
+	result, err := q.db.conn(ctx).ExecContext(ctx, query, args...)
 	if err != nil {
-		err = fmt.Errorf("orm: update %s: %w", qs.q.model.Name(), err)
+		err = fmt.Errorf("orm: update %s: %w", q.model.Name(), err)
 		markForRollbackOnError(ctx, err)
 		return 0, err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("orm: update %s: rows affected: %w", qs.q.model.Name(), err)
+		return 0, fmt.Errorf("orm: update %s: rows affected: %w", q.model.Name(), err)
 	}
 	return affected, nil
 }

@@ -189,17 +189,20 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   ordered. SQLite does not create a unique constraint with
   `NullsNotDistinct`, which PostgreSQL 15 needs. A migration writes the
   condition and expressions of a constraint as Go code, which covers `Q`,
-  `F`, `Value`, arithmetic, the text functions, `Coalesce`, `Concat`, `Cast`
-  and `Case` but no aggregate.
+  `F`, `Value`, arithmetic, the text functions, `Abs`, `Coalesce`, `Concat`,
+  `Cast`, `Case` and `Not` but no aggregate.
 - **Database:** one database per application.
 - **Querying:** the date and time transforms (`__year`, `__date`, `__hour`
   and the others) read a datetime in UTC. Besides the aggregates, the
   database functions are `Lower`, `Upper`, `Length`, `Trim`, `LTrim`,
-  `RTrim`, `Coalesce`, `Concat`, `Cast` and `Case` with `When`. A transform of
-  `RegisterTransform` applies to one field kind, where Django's registration
-  on `CharField` also covers its subclasses. `OrderBy` takes keys, not
-  expressions: annotate an expression to order by it. There is
-  no `extra()` and no fetch modes. `SelectRelated` needs field names: Django
+  `RTrim`, `Abs`, `Coalesce`, `Concat`, `Cast` and `Case` with `When`. There
+  are no `Subquery`, `Exists` or `OuterRef` expressions and no window
+  functions, and `Filter` takes no boolean expression as a condition:
+  annotate the expression and filter the annotation by `true` instead. A
+  transform of `RegisterTransform` applies to one field kind, where Django's
+  registration on `CharField` also covers its subclasses. `OrderBy` takes
+  keys, not expressions: annotate an expression to order by it. There is no
+  `extra()` and no fetch modes. `SelectRelated` needs field names: Django
   6.1 deprecates `select_related()` without arguments. A model keeps prefetched
   reverse and many-to-many sets only when it embeds `orm.RelCache`, and the
   queryset of an `orm.Prefetch` cannot be sliced. `Raw` leaves the fields missing
