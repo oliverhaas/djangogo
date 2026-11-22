@@ -449,3 +449,15 @@ func TestGetForIDUnknown(t *testing.T) {
 	_, err := contenttypes.GetForID(context.Background(), db, 12345)
 	djangotest.AssertErrorIs(t, err, orm.ErrDoesNotExist)
 }
+
+// TestNaturalKeyIsUnique rejects a second row for the same app label and
+// model, as the unique_together of Django's ContentType does. No Django test
+// exists.
+func TestNaturalKeyIsUnique(t *testing.T) {
+	djangotest.EachDB(t, testModels(), func(t *testing.T, db *orm.DB) {
+		ct := mustGet(t, db, &Author{})
+		dup := contenttypes.ContentType{AppLabel: ct.AppLabel, Model: ct.Model}
+		err := orm.Query[contenttypes.ContentType](db).Create(context.Background(), &dup)
+		djangotest.AssertErrorIs(t, err, orm.ErrIntegrity)
+	})
+}

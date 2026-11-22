@@ -79,17 +79,12 @@ func (c *cache) getID(id int64) (ContentType, bool) {
 	return ct, ok
 }
 
-// addID stores a row that was looked up by id. A duplicate of a pair that is
-// already cached is remembered by id only, so the natural key keeps resolving
-// to the row with the lowest id.
+// addID stores a row that was looked up by id under both keys.
 func (c *cache) addID(ct ContentType) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.byID[ct.ID] = ct
-	key := naturalKey{ct.AppLabel, ct.Model}
-	if _, ok := c.byKey[key]; !ok {
-		c.byKey[key] = ct
-	}
+	c.byKey[naturalKey{ct.AppLabel, ct.Model}] = ct
 }
 
 // reset empties the cache.
@@ -125,7 +120,7 @@ func GetForModel(ctx context.Context, db *orm.DB, model *orm.Model) (ContentType
 	if ct, ok := c.get(key); ok {
 		return ct, nil
 	}
-	ct, err := first(ctx, db, key)
+	ct, err := load(ctx, db, key)
 	if errors.Is(err, orm.ErrDoesNotExist) {
 		ct, err = create(ctx, db, key)
 	}
@@ -181,8 +176,8 @@ func GetForModels(ctx context.Context, db *orm.DB, models ...*orm.Model) (map[*o
 	}
 
 	// One query for every app label involved. A row of another model of these
-	// apps is cached as well; the lowest id wins for a duplicated pair.
-	rows, err := orm.Query[ContentType](db).Filter("app_label__in", appLabels).OrderBy("id").All(ctx)
+	// apps is cached as well.
+	rows, err := orm.Query[ContentType](db).Filter("app_label__in", appLabels).All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("contenttypes: load content types: %w", err)
 	}
@@ -229,7 +224,7 @@ func GetByNaturalKey(ctx context.Context, db *orm.DB, appLabel, model string) (C
 	if ct, ok := c.get(key); ok {
 		return ct, nil
 	}
-	ct, err := first(ctx, db, key)
+	ct, err := load(ctx, db, key)
 	if err != nil {
 		return ContentType{}, err
 	}
@@ -276,29 +271,23 @@ func Sync(ctx context.Context, db *orm.DB) ([]ContentType, error) {
 		if err != nil {
 			return created, err
 		}
-		// A row that lost against a concurrent creator is not reported: the
-		// other caller made it.
-		if kept := c.add(ct); own && kept.ID == ct.ID {
+		c.add(ct)
+		// A row that a concurrent caller created is not reported.
+		if own {
 			created = append(created, ct)
 		}
 	}
 	return created, nil
 }
 
-// first returns the row with the lowest id for key, or orm.ErrDoesNotExist.
-// Taking the first row instead of requiring exactly one keeps a lookup working
-// when a duplicate slipped in (see the package documentation).
-func first(ctx context.Context, db *orm.DB, key naturalKey) (ContentType, error) {
-	rows, err := orm.Query[ContentType](db).
-		Filter("app_label", key.appLabel, "model", key.model).
-		OrderBy("id").Limit(1).All(ctx)
+// load reads the row for key from the database. A missing row is reported as
+// orm.ErrDoesNotExist.
+func load(ctx context.Context, db *orm.DB, key naturalKey) (ContentType, error) {
+	ct, err := orm.Query[ContentType](db).Get(ctx, "app_label", key.appLabel, "model", key.model)
 	if err != nil {
-		return ContentType{}, fmt.Errorf("contenttypes: load %s.%s: %w", key.appLabel, key.model, err)
+		return ContentType{}, fmt.Errorf("contenttypes: %s.%s: %w", key.appLabel, key.model, err)
 	}
-	if len(rows) == 0 {
-		return ContentType{}, fmt.Errorf("contenttypes: %s.%s: %w", key.appLabel, key.model, orm.ErrDoesNotExist)
-	}
-	return rows[0], nil
+	return ct, nil
 }
 
 // create inserts the row for key and returns the row that now stands for it.
@@ -308,25 +297,13 @@ func create(ctx context.Context, db *orm.DB, key naturalKey) (ContentType, error
 }
 
 // insert adds the row for key and returns the row that now stands for the
-// pair, and whether that is the row inserted here. Without a unique constraint
-// two callers can insert the same pair at the same moment, so the insert is
-// followed by a read of the row with the lowest id: a caller that lost removes
-// its own row and uses the winner's, and both end up with the same content
-// type.
+// pair, and whether that is the row inserted here. It is Django's
+// get_or_create: when another caller inserts the same pair first, the unique
+// constraint rejects this insert and the other caller's row is returned.
 func insert(ctx context.Context, db *orm.DB, key naturalKey) (ContentType, bool, error) {
-	ct := ContentType{AppLabel: key.appLabel, Model: key.model}
-	if err := orm.Query[ContentType](db).Create(ctx, &ct); err != nil {
+	ct, created, err := orm.Query[ContentType](db).GetOrCreate(ctx, nil, "app_label", key.appLabel, "model", key.model)
+	if err != nil {
 		return ContentType{}, false, fmt.Errorf("contenttypes: create %s.%s: %w", key.appLabel, key.model, err)
 	}
-	winner, err := first(ctx, db, key)
-	if err != nil {
-		return ContentType{}, false, err
-	}
-	if winner.ID == ct.ID {
-		return ct, true, nil
-	}
-	if _, err := orm.Query[ContentType](db).Filter("id", ct.ID).Delete(ctx); err != nil {
-		return ContentType{}, false, fmt.Errorf("contenttypes: remove duplicate %s.%s: %w", key.appLabel, key.model, err)
-	}
-	return winner, false, nil
+	return ct, created, nil
 }

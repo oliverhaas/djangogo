@@ -1004,6 +1004,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `orm.Time` or `orm.UUID` read back as a string. It now reads back as its Go
   type. An `orm.Value` that held a `netip.Addr` failed on SQLite with
   "unsupported type netip.Addr"; it is now sent as its text.
+- contenttypes: two processes that created the content type of a model at the
+  same moment could leave two rows for it, because the `django_content_type`
+  table had no unique constraint on (`app_label`, `model`). The table now has
+  Django's constraint. Run `makemigrations` and `migrate` after the upgrade.
 
 ### Security
 

@@ -39,14 +39,6 @@
 //
 // # Differences from Django
 //
-// The pair (app_label, model) is unique in Django through a database
-// constraint. Model-level unique-together is not available yet, so uniqueness
-// is enforced in code: a lookup takes the row with the lowest id, and a caller
-// that creates a row reads the pair back and removes its own row when another
-// one was first. Two transactions that create the same content type at the same
-// moment cannot see each other's row and can still leave a duplicate behind;
-// run Sync after migrate, so that no row is created on demand.
-//
 // A ContentType value does not know the model registry, so Name and
 // AppLabeledName are built from the stored names and not from verbose names.
 package contenttypes
@@ -63,8 +55,11 @@ type ContentType struct {
 	Model    string `orm:"max_length=100;verbose_name=python model class name"`
 }
 
-// Meta names the table as Django does.
-func (ContentType) Meta() orm.Meta { return orm.Meta{Table: "django_content_type"} }
+// Meta names the table and makes the pair (app_label, model) unique, as
+// Django does.
+func (ContentType) Meta() orm.Meta {
+	return orm.Meta{Table: "django_content_type", UniqueTogether: [][]string{{"AppLabel", "Model"}}}
+}
 
 // Name returns the model name (Django's ContentType.name for a model that is
 // not installed).
