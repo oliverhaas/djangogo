@@ -92,6 +92,13 @@ func through(independent bool) ([]Operation, int) {
 
 // reduce tries to merge op with the later operation other.
 func reduce(op, other Operation, app string) ([]Operation, int) {
+	// An elidable operation disappears into its neighbor.
+	switch {
+	case isElidable(op):
+		return []Operation{other}, reduceReplaced
+	case isElidable(other):
+		return []Operation{op}, reduceReplaced
+	}
 	switch o := op.(type) {
 	case CreateModel:
 		if result, ok := reduceCreateModel(o, other, app); ok {
@@ -161,6 +168,17 @@ func reduce(op, other Operation, app string) ([]Operation, int) {
 		}
 	}
 	return nil, reduceBlocked
+}
+
+// isElidable reports whether op may be dropped by the optimizer.
+func isElidable(op Operation) bool {
+	switch o := op.(type) {
+	case RunSQL:
+		return o.Elidable
+	case RunGo:
+		return o.Elidable
+	}
+	return false
 }
 
 // deletesModel reports whether op deletes the model name.

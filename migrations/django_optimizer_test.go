@@ -198,3 +198,23 @@ func TestOptimizerCreateModelRemoveConstraint(t *testing.T) {
 		},
 	})
 }
+
+// Ported from Django: tests/migrations/test_optimizer.py::OptimizerTests.test_optimize_elidable_operation
+func TestOptimizerElidableOperation(t *testing.T) {
+	elidable := migrations.RunSQL{SQL: []string{"SELECT 1"}, Elidable: true}
+	assertOptimizesTo(t,
+		[]migrations.Operation{
+			elidable,
+			migrations.CreateModel{Name: "Foo", Fields: []migrations.FieldState{charField("Name", "name", 255)}},
+			elidable,
+			migrations.CreateModel{Name: "Bar", Fields: []migrations.FieldState{intField("Size", "size")}},
+			elidable,
+			migrations.RenameModel{OldName: "Foo", NewName: "Phou"},
+			migrations.DeleteModel{Name: "Bar"},
+			elidable,
+		},
+		[]migrations.Operation{
+			migrations.CreateModel{Name: "Phou", Fields: []migrations.FieldState{charField("Name", "name", 255)}},
+		},
+	)
+}

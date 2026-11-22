@@ -2,7 +2,6 @@ package migrations
 
 import (
 	"context"
-	"time"
 
 	"github.com/oliverhaas/djangogo/orm"
 )
@@ -56,6 +55,10 @@ func NewExecutor(ctx context.Context, db *orm.DB, reg *Registry, installedApps [
 // app are unapplied, together with everything that depends on them. Any other
 // target is applied with all its unapplied dependencies. With cleanStart the
 // plan is made as if nothing was applied.
+//
+// A target that a squashed migration replaces is not in the graph. The loader
+// then rebuilds the graph without squashed migrations, and the plan uses the
+// replaced migrations.
 func (x *Executor) MigrationPlan(targets []Key, cleanStart bool) ([]PlanStep, error) {
 	applied := map[Key]bool{}
 	if !cleanStart {
@@ -86,6 +89,12 @@ func (x *Executor) MigrationPlan(targets []Key, cleanStart bool) ([]PlanStep, er
 					return nil, err
 				}
 			}
+		case x.Loader.ReplaceMigrations && !graph.Contains(target):
+			x.Loader.ReplaceMigrations = false
+			if err := x.Loader.buildGraph(); err != nil {
+				return nil, err
+			}
+			return x.MigrationPlan(targets, cleanStart)
 		case applied[target]:
 			// Roll back through the next migrations of the same app only.
 			// Going back to the target node itself could undo migrations of
@@ -150,9 +159,19 @@ func (x *Executor) Migrate(ctx context.Context, targets []Key, plan []PlanStep, 
 		return nil, err
 	}
 	if len(plan) == 0 {
+		// The tracking table is created only when there is something to
+		// record.
+		exists, err := x.Recorder.HasTable(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			if err := x.checkReplacements(ctx); err != nil {
+				return nil, err
+			}
+		}
 		return x.appliedState(full)
 	}
-	// The tracking table is created only when there is something to record.
 	if err := x.Recorder.EnsureSchema(ctx); err != nil {
 		return nil, err
 	}
@@ -164,14 +183,68 @@ func (x *Executor) Migrate(ctx context.Context, targets []Key, plan []PlanStep, 
 			forwards++
 		}
 	}
+	var state *ProjectState
 	switch {
 	case forwards > 0 && backwards > 0:
 		return nil, &InvalidMigrationPlanError{Plan: plan}
 	case forwards > 0:
-		return x.migrateForwards(ctx, plan, full, fake)
+		state, err = x.migrateForwards(ctx, plan, full, fake)
 	default:
-		return x.migrateBackwards(ctx, plan, full, fake)
+		state, err = x.migrateBackwards(ctx, plan, full, fake)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return state, x.checkReplacements(ctx)
+}
+
+// checkReplacements records a squashed migration as applied when all the
+// migrations it replaces are recorded. It runs after every migrate, so a
+// squashed migration added to a project that applied all the migrations it
+// replaces gets recorded without anything to apply.
+func (x *Executor) checkReplacements(ctx context.Context) error {
+	recorded, err := x.Recorder.AppliedMigrations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, key := range x.Loader.Replacements() {
+		if _, ok := recorded[key]; ok || !x.Loader.allReplacedApplied(key, recorded) {
+			continue
+		}
+		if err := x.Recorder.RecordApplied(ctx, key); err != nil {
+			return err
+		}
+		x.Loader.noteRecorded(key, true)
+	}
+	return nil
+}
+
+// record writes the row of the migration under key, after the rows of the
+// migrations it replaces, or deletes them when forward is false. run is the
+// transaction of the migration.
+func (x *Executor) record(ctx context.Context, run sqlRunner, d orm.Dialect, key Key, forward bool) error {
+	if m, ok := x.Loader.migrations[key]; ok {
+		for _, replaced := range m.Replaces {
+			if err := x.record(ctx, run, d, replaced, forward); err != nil {
+				return err
+			}
+		}
+	}
+	if forward {
+		return recordApplied(ctx, run, d, key)
+	}
+	return recordUnapplied(ctx, run, d, key)
+}
+
+// noteRecordedAll updates the applied migrations of the loader after record
+// wrote or deleted the rows of key and of the migrations it replaces.
+func (x *Executor) noteRecordedAll(key Key, forward bool) {
+	if m, ok := x.Loader.migrations[key]; ok {
+		for _, replaced := range m.Replaces {
+			x.noteRecordedAll(replaced, forward)
+		}
+	}
+	x.Loader.noteRecorded(key, forward)
 }
 
 // inPlan returns the set of migrations of a plan.
@@ -254,7 +327,7 @@ func (x *Executor) applyMigration(ctx context.Context, state *ProjectState, m *M
 		if err := m.MutateState(state); err != nil {
 			return err
 		}
-		if err := recordApplied(ctx, x.db.SQL(), x.db.Dialect(), m.Key()); err != nil {
+		if err := x.record(ctx, x.db.SQL(), x.db.Dialect(), m.Key(), true); err != nil {
 			return err
 		}
 	} else {
@@ -265,14 +338,14 @@ func (x *Executor) applyMigration(ctx context.Context, state *ProjectState, m *M
 			if err := m.apply(ctx, next, e); err != nil {
 				return err
 			}
-			return recordApplied(ctx, e.run, e.dialect, m.Key())
+			return x.record(ctx, e.run, e.dialect, m.Key(), true)
 		})
 		if err != nil {
 			return err
 		}
 		*state = *next
 	}
-	x.Loader.Applied[m.Key()] = time.Now().UTC()
+	x.noteRecordedAll(m.Key(), true)
 	x.report(ApplySuccess, m, fake)
 	return nil
 }
@@ -282,7 +355,7 @@ func (x *Executor) applyMigration(ctx context.Context, state *ProjectState, m *M
 func (x *Executor) unapplyMigration(ctx context.Context, state *ProjectState, m *Migration, fake bool) error {
 	x.report(UnapplyStart, m, fake)
 	if fake {
-		if err := recordUnapplied(ctx, x.db.SQL(), x.db.Dialect(), m.Key()); err != nil {
+		if err := x.record(ctx, x.db.SQL(), x.db.Dialect(), m.Key(), false); err != nil {
 			return err
 		}
 	} else {
@@ -290,13 +363,13 @@ func (x *Executor) unapplyMigration(ctx context.Context, state *ProjectState, m 
 			if err := m.unapply(ctx, state, e); err != nil {
 				return err
 			}
-			return recordUnapplied(ctx, e.run, e.dialect, m.Key())
+			return x.record(ctx, e.run, e.dialect, m.Key(), false)
 		})
 		if err != nil {
 			return err
 		}
 	}
-	delete(x.Loader.Applied, m.Key())
+	x.noteRecordedAll(m.Key(), false)
 	x.report(UnapplySuccess, m, fake)
 	return nil
 }

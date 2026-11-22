@@ -191,7 +191,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   is blank-imported in the main package and the binary is rebuilt;
   `makemigrations` prints the import line. `makemigrations` cannot write `RunGo`
   operations: add them by hand, as with Django's `RunPython`. There is no
-  squashing and no `makemigrations --merge`: conflicts are reported only. A change
+  `makemigrations --merge`: conflicts are reported only. A change
   to the type of a primary key does not change the foreign keys that reference
   it, and PostgreSQL rejects it.
 - **Templates:** the engine is built on pongo2. The `i18n`, `l10n`, `tz` and

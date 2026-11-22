@@ -87,29 +87,32 @@ func TestMigrateConflictExit(t *testing.T) {
 			"To fix them run 'manage.py makemigrations --merge'", 1)
 }
 
-// Go prints neither colors nor, without a verbosity option, the time at which
-// a migration was applied.
+// Go prints no colors.
 //
 // Ported from Django: tests/migrations/test_commands.py::MigrateTests.test_showmigrations_list
 func TestShowmigrationsList(t *testing.T) {
 	djangotest.EachDB(t, nil, func(t *testing.T, db *orm.DB) {
 		c := newCommand(t, db, testMigrations(), djangotest.App("migrations"))
-		djangotest.AssertEqual(t, c.call("showmigrations", "--list"),
+		djangotest.AssertEqual(t, c.call("showmigrations", "--list", "-v", "0"),
 			"migrations\n [ ] 0001_initial\n [ ] 0002_second\n")
 
 		c.call("migrate", "migrations", "0001")
-		djangotest.AssertEqual(t, c.call("showmigrations", "migrations", "--list"),
+		// An explicit app label selects the apps to list.
+		djangotest.AssertEqual(t, c.call("showmigrations", "migrations", "--list", "-v", "0"),
 			"migrations\n [X] 0001_initial\n [ ] 0002_second\n")
 		// The list is the default format.
 		djangotest.AssertEqual(t, c.call("showmigrations", "migrations"),
 			"migrations\n [X] 0001_initial\n [ ] 0002_second\n")
+		// Verbosity 2 shows when a migration was applied.
+		applied, err := migrations.NewRecorder(db).AppliedMigrations(context.Background())
+		djangotest.AssertEqual(t, err, nil)
+		at := applied[key("migrations", "0001_initial")].UTC().Format("2006-01-02 15:04:05")
+		djangotest.AssertEqual(t, c.call("showmigrations", "migrations", "-v", "2"),
+			"migrations\n [X] 0001_initial (applied at "+at+")\n [ ] 0002_second\n")
 		c.call("migrate", "migrations", "zero")
 	})
 }
 
-// Without a verbosity option Go does not print the dependencies of each
-// migration.
-//
 // Ported from Django: tests/migrations/test_commands.py::MigrateTests.test_showmigrations_plan
 func TestShowmigrationsPlan(t *testing.T) {
 	djangotest.EachDB(t, nil, func(t *testing.T, db *orm.DB) {
@@ -118,12 +121,20 @@ func TestShowmigrationsPlan(t *testing.T) {
 			"[ ]  migrations.0001_initial\n"+
 				"[ ]  migrations.0003_third\n"+
 				"[ ]  migrations.0002_second\n")
+		djangotest.AssertEqual(t, c.call("showmigrations", "--plan", "-v", "2"),
+			"[ ]  migrations.0001_initial\n"+
+				"[ ]  migrations.0003_third ... (migrations.0001_initial)\n"+
+				"[ ]  migrations.0002_second ... (migrations.0001_initial, migrations.0003_third)\n")
 
 		c.call("migrate", "migrations", "0003")
 		djangotest.AssertEqual(t, c.call("showmigrations", "--plan"),
 			"[X]  migrations.0001_initial\n"+
 				"[X]  migrations.0003_third\n"+
 				"[ ]  migrations.0002_second\n")
+		djangotest.AssertEqual(t, c.call("showmigrations", "--plan", "-v", "2"),
+			"[X]  migrations.0001_initial\n"+
+				"[X]  migrations.0003_third ... (migrations.0001_initial)\n"+
+				"[ ]  migrations.0002_second ... (migrations.0001_initial, migrations.0003_third)\n")
 		c.call("migrate", "migrations", "zero")
 	})
 }

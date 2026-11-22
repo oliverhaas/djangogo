@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -56,6 +57,7 @@ func main() {
 func handWritten() migrations.Migration {
 	return migrations.Migration{
 		App: "people", Name: "0002_by_hand",
+		Replaces:     []migrations.Key{key("people", "0002_old")},
 		Dependencies: []migrations.Key{key("people", "0001_initial"), key("books", "0001_initial")},
 		RunBefore:    []migrations.Key{key("books", "0002_later")},
 		Operations: []migrations.Operation{
@@ -130,9 +132,16 @@ func handWritten() migrations.Migration {
 					migrations.DeleteModel{Name: "Broker"},
 				},
 			},
+			migrations.RunSQL{SQL: []string{"SELECT 3"}, Elidable: true},
+			migrations.RunGo{Forward: migrations.Noop, Reverse: migrations.Noop, Elidable: true},
+			migrations.RunGo{Forward: migrations.Noop},
 		},
 	}
 }
+
+// funcAddress matches the address of a function in %#v output, which differs
+// between binaries.
+var funcAddress = regexp.MustCompile(`\(migrations\.GoFunc\)\(0x[0-9a-f]+\)`)
 
 // runTool runs a command of the Go toolchain in dir and returns its standard
 // output. A failing command fails the test with everything it printed.
@@ -228,6 +237,7 @@ func TestGeneratedMigrationsBuild(t *testing.T) {
 		if want[i].Operations == nil {
 			want[i].Operations = []migrations.Operation{}
 		}
-		djangotest.AssertEqual(t, got[i], fmt.Sprintf("%#v", want[i]))
+		djangotest.AssertEqual(t, funcAddress.ReplaceAllString(got[i], "(migrations.GoFunc)(func)"),
+			funcAddress.ReplaceAllString(fmt.Sprintf("%#v", want[i]), "(migrations.GoFunc)(func)"))
 	}
 }

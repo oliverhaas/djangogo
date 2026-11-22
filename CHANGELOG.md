@@ -641,6 +641,21 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `orm.ConstraintSource` returns that Go source, and `orm.NewStateModel` and
   `orm.ConstraintSQL` render the SQL of a constraint on a model of a
   migration state.
+- Migrations: the new `squashmigrations` command replaces the migrations of
+  an app up to a given one, or from a given start, with one migration of
+  their optimized operations, with Django's options `--no-optimize`,
+  `--squashed-name`, `--no-header` and `--noinput`. The new migration lists
+  the ones it replaces in `Migration.Replaces`. `migrate` applies it on a
+  new database and the replaced migrations on a database that applied some
+  of them, and records it once all of them are applied. The optimizer drops
+  `RunSQL` and `RunGo` operations marked `Elidable`. A `RunGo` function is
+  written by its name, and a function defined in a migration file is listed
+  in a comment at the top of the new file: copy it over before the old files
+  are deleted. `migrate --prune` deletes the tracking rows of migrations
+  that no longer exist. `showmigrations` marks a squashed migration with the
+  number of migrations it replaces and an applied but unrecorded one with
+  `[-]`, and `-v 2` adds the time a migration was applied and, with
+  `--plan`, its dependencies.
 
 ### Changed
 

@@ -101,6 +101,87 @@ func (g *Graph) AddDependency(migration string, child, parent Key, skipValidatio
 	return g.ValidateConsistency()
 }
 
+// RemoveReplacedNodes removes the nodes of the replaced migrations that are in
+// the graph and moves their dependencies to replacement. The loader calls it
+// when a squashed migration takes the place of the migrations it replaces.
+func (g *Graph) RemoveReplacedNodes(replacement Key, replaced []Key) error {
+	rn, ok := g.nodes[replacement]
+	if !ok {
+		return &NodeNotFoundError{Message: fmt.Sprintf("Unable to find replacement node %s. It was either never added"+
+			" to the migration graph, or has been removed.", replacement.repr()), Node: replacement}
+	}
+	isReplaced := make(map[Key]bool, len(replaced))
+	for _, key := range replaced {
+		isReplaced[key] = true
+	}
+	for _, key := range replaced {
+		n, ok := g.nodes[key]
+		if !ok {
+			continue
+		}
+		delete(g.nodes, key)
+		delete(g.migrations, key)
+		// A link between two replaced nodes is dropped, so the replacement
+		// does not end up depending on itself.
+		for ck, child := range n.children {
+			delete(child.parents, key)
+			if !isReplaced[ck] {
+				rn.children[ck] = child
+				child.parents[replacement] = rn
+			}
+		}
+		for pk, parent := range n.parents {
+			delete(parent.children, key)
+			if !isReplaced[pk] {
+				rn.parents[pk] = parent
+				parent.children[replacement] = rn
+			}
+		}
+	}
+	return nil
+}
+
+// RemoveReplacementNode removes the node of a squashed migration and moves the
+// migrations that depend on it to the last of the replaced migrations. The
+// loader calls it when only some of the replaced migrations are applied, so
+// the squashed migration cannot be used.
+func (g *Graph) RemoveReplacementNode(replacement Key, replaced []Key) error {
+	rn, ok := g.nodes[replacement]
+	if !ok {
+		return &NodeNotFoundError{Message: fmt.Sprintf("Unable to remove replacement node %s. It was either never added"+
+			" to the migration graph, or has been removed already.", replacement.repr()), Node: replacement}
+	}
+	delete(g.nodes, replacement)
+	delete(g.migrations, replacement)
+	// Only the last replaced nodes get the children: a replaced node that
+	// another replaced node depends on is left out.
+	last := map[Key]*graphNode{}
+	for _, key := range replaced {
+		if n, ok := g.nodes[key]; ok {
+			last[key] = n
+		}
+	}
+	for _, key := range replaced {
+		if n, ok := g.nodes[key]; ok {
+			for pk := range n.parents {
+				delete(last, pk)
+			}
+		}
+	}
+	for ck, child := range rn.children {
+		delete(child.parents, replacement)
+		for lk, l := range last {
+			l.children[ck] = child
+			child.parents[lk] = l
+		}
+	}
+	// The replaced nodes already have the right parents.
+	for _, parent := range rn.parents {
+		delete(parent.children, replacement)
+	}
+	return nil
+}
+
 // ValidateConsistency fails with a NodeNotFoundError when a placeholder for a
 // missing migration is left in the graph.
 func (g *Graph) ValidateConsistency() error {

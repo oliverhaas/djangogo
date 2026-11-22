@@ -28,6 +28,10 @@ type Migration struct {
 	// RunBefore lists migrations that must be applied after this one. Use it
 	// when the other migration cannot name this one as a dependency.
 	RunBefore []Key
+	// Replaces lists the migrations a squashed migration replaces. The loader
+	// uses the squashed migration when all or none of them are applied, and
+	// the migrations themselves otherwise.
+	Replaces []Key
 	// Initial marks the first migration of an app.
 	Initial bool
 	// Operations are applied in order, and unapplied in reverse order.

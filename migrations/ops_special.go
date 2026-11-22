@@ -21,6 +21,9 @@ type RunSQL struct {
 	// StateOperations describe the effect of the SQL on the models, so later
 	// migrations see the right state. They change the state only.
 	StateOperations []Operation
+	// Elidable marks the operation as safe to drop when migrations are
+	// squashed.
+	Elidable bool
 }
 
 // StateForwards applies the state operations.
@@ -84,6 +87,9 @@ type GoFunc func(ctx context.Context, db *orm.DB, state *ProjectState) error
 type RunGo struct {
 	Forward GoFunc
 	Reverse GoFunc
+	// Elidable marks the operation as safe to drop when migrations are
+	// squashed.
+	Elidable bool
 }
 
 // Noop is a GoFunc that does nothing (Django's RunPython.noop).

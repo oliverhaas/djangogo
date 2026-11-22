@@ -48,6 +48,11 @@ func (c *sqlmigrateCommand) Run(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Keep squashed and replaced migrations side by side, so both can be shown.
+	loader.ReplaceMigrations = false
+	if err := loader.BuildGraph(ctx); err != nil {
+		return err
+	}
 	label, name := pos[0], pos[1]
 	if err := app.checkAppLabels(loader, []string{label}, 1); err != nil {
 		return err

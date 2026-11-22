@@ -164,6 +164,7 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	_ = app.Commands.Register(&migrateCommand{app: app})
 	_ = app.Commands.Register(&showmigrationsCommand{app: app})
 	_ = app.Commands.Register(&sqlmigrateCommand{app: app})
+	_ = app.Commands.Register(&squashmigrationsCommand{app: app})
 	_ = app.Commands.Register(&createsuperuserCommand{app: app})
 	_ = app.Commands.Register(&changepasswordCommand{app: app})
 	_ = app.Commands.Register(&clearsessionsCommand{app: app, store: app.sessions})

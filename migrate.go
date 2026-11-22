@@ -142,11 +142,12 @@ func (c *migrateCommand) Run(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(app.Out)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(app.Out, "usage: migrate [app_label] [migration_name] [--fake] [--plan] [--noinput]")
+		_, _ = fmt.Fprintln(app.Out, "usage: migrate [app_label] [migration_name] [--fake] [--plan] [--prune] [--noinput]")
 		fs.PrintDefaults()
 	}
 	fake := fs.Bool("fake", false, "mark migrations as run without actually running them")
 	showPlan := fs.Bool("plan", false, "show the operations that would be performed, without running them")
+	prune := fs.Bool("prune", false, "delete the rows of the tracking table that name migrations that no longer exist")
 	noInput := fs.Bool("noinput", false, "never prompt for input")
 	fs.BoolVar(noInput, "no-input", false, "never prompt for input")
 	pos, err := parseInterleaved(fs, args)
@@ -180,12 +181,23 @@ func (c *migrateCommand) Run(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *prune {
+		if len(pos) == 0 {
+			return commandError(1, "Migrations can be pruned only when an app is specified.")
+		}
+		if err := c.prune(ctx, executor, pos[0]); err != nil {
+			return err
+		}
+	}
 	plan, err := executor.MigrationPlan(targets, false)
 	if err != nil {
 		return err
 	}
 	if *showPlan {
 		c.printPlan(plan)
+		return nil
+	}
+	if *prune {
 		return nil
 	}
 
@@ -228,14 +240,14 @@ func (c *migrateCommand) Run(args []string) error {
 			open = false
 		}
 	}
-	if len(plan) > 0 {
-		if _, err := executor.Migrate(ctx, targets, plan, *fake); err != nil {
-			if open {
-				// End the "Applying ..." line the failed step left open.
-				c.println("")
-			}
-			return err
+	// Migrate also runs without a plan: it records the squashed migrations
+	// whose replaced migrations are all applied.
+	if _, err := executor.Migrate(ctx, targets, plan, *fake && len(plan) > 0); err != nil {
+		if open {
+			// End the "Applying ..." line the failed step left open.
+			c.println("")
 		}
+		return err
 	}
 
 	for _, hook := range app.postMigrate {
@@ -275,7 +287,59 @@ func (c *migrateCommand) targets(loader *migrations.Loader, pos []string) ([]mig
 	if err != nil {
 		return nil, err
 	}
+	// A partly applied squashed migration is not in the graph. Its last
+	// replaced migration stands in for it.
+	if !loader.Graph.Contains(m.Key()) {
+		if squashed, ok := loader.Replacement(m.Key()); ok {
+			return []migrations.Key{squashed.Replaces[len(squashed.Replaces)-1]}, nil
+		}
+	}
 	return []migrations.Key{m.Key()}, nil
+}
+
+// prune deletes the rows of the tracking table that name migrations of app
+// that no longer exist, such as the migrations a squashed migration replaced.
+// It refuses while a squashed migration still lists one of them in Replaces,
+// since that one could then not be recorded as applied.
+func (c *migrateCommand) prune(ctx context.Context, executor *migrations.Executor, app string) error {
+	loader := executor.Loader
+	c.println("Pruning migrations:")
+	var gone []migrations.Key
+	for key := range loader.Applied {
+		if _, ok := loader.Migration(key); !ok && key.App == app {
+			gone = append(gone, key)
+		}
+	}
+	slices.SortFunc(gone, func(a, b migrations.Key) int { return strings.Compare(a.Name, b.Name) })
+	var blocking []migrations.Key
+	for _, key := range loader.Replacements() {
+		squashed, _ := loader.Replacement(key)
+		if slices.ContainsFunc(squashed.Replaces, func(k migrations.Key) bool { return slices.Contains(gone, k) }) {
+			blocking = append(blocking, key)
+		}
+	}
+	switch {
+	case len(blocking) > 0:
+		c.println("  Cannot use --prune because the following squashed migrations have their 'replaces' " +
+			"attributes and may not be recorded as applied:")
+		for _, key := range blocking {
+			c.println("    " + key.String())
+		}
+		c.println("  Re-run '" + c.app.prog() + " migrate' if they are not marked as applied, and remove " +
+			"'replaces' attributes in their Migration classes.")
+	case len(gone) == 0:
+		c.println("  No migrations to prune.")
+	default:
+		for _, key := range gone {
+			_, _ = fmt.Fprintf(c.app.Out, "  Pruning %s", key)
+			if err := executor.Recorder.RecordUnapplied(ctx, key); err != nil {
+				c.println("")
+				return err
+			}
+			c.println(" OK")
+		}
+	}
+	return nil
 }
 
 // printTargets prints the "Operations to perform" block.
