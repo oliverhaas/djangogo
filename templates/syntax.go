@@ -23,12 +23,12 @@ var dictViewRe = regexp.MustCompile(`^(.*\sin\s+)([A-Za-z_][\w.]*)\.(items|keys|
 // There is no translation catalog, so the literal stands for itself.
 var translatedRe = regexp.MustCompile(`\b_\(\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*\)`)
 
-// outFilter is the filter djangoSyntax appends to every {{ }} tag, see
+// outFilter is the filter rewrite appends to every {{ }} tag, see
 // filterOut.
 const outFilter = "_out"
 
-// djangoSyntax rewrites a Django template source into one pongo2 renders the
-// way Django does. It covers what pongo2 cannot be taught through its tag
+// rewrite turns a Django template source into one that pongo2 renders the way
+// Django does. It covers what pongo2 cannot be taught through its tag
 // and filter registry:
 //
 //   - text that Django's lexer leaves alone but pongo2 would read as a tag
@@ -55,12 +55,11 @@ const outFilter = "_out"
 // name is the template name, "" for a template given as a string. A rewrite
 // keeps the line of every tag but {% extends %}, so the lines in error
 // messages stay right; a column can shift by a few characters.
-func djangoSyntax(src []byte, name string) []byte { return rewrite(src, name, nil) }
-
-// rewrite is djangoSyntax with extendsTo, which decides the parent of the
-// {% extends %} tag. It gets the parent the tag names, with literal set for
-// a string literal, and returns the parent to extend instead with ok set.
-// An empty parent removes the tag.
+//
+// extendsTo, unless nil, decides the parent of the {% extends %} tag. It
+// gets the parent the tag names, with literal set for a string literal, and
+// returns the parent to extend instead with ok set. An empty parent removes
+// the tag.
 func rewrite(src []byte, name string, extendsTo func(parent string, literal bool) (to string, ok bool)) []byte {
 	if bytes.IndexByte(src, '{') < 0 {
 		return src
@@ -82,7 +81,7 @@ func rewrite(src []byte, name string, extendsTo func(parent string, literal bool
 	return r.out
 }
 
-// rewriter holds the state of djangoSyntax while it walks a source.
+// rewriter holds the state of rewrite while it walks a source.
 type rewriter struct {
 	out []byte
 	// text is the text that has not been written yet, see literalText.

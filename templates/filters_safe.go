@@ -51,7 +51,7 @@ const noEscapePrefix = "_noescape_"
 // autoescapeFilters are Django's needs_autoescape filters: they escape their
 // input themselves when autoescape is on. A pongo2 filter cannot see the
 // setting, so each is registered twice, under its name for autoescape on
-// and with noEscapePrefix for off, and djangoSyntax picks the variant.
+// and with noEscapePrefix for off, and rewrite picks the variant.
 var autoescapeFilters = map[string]func(autoescape bool) pongo2.FilterFunction{
 	"join":           func(on bool) pongo2.FilterFunction { return joinFilter(false, on) },
 	"linebreaks":     linebreaksFilter,
@@ -71,7 +71,7 @@ var needsAutoescape = func() map[string]bool {
 	return m
 }()
 
-// safeLiteralFilter is the filter djangoSyntax puts behind a string literal
+// safeLiteralFilter is the filter rewrite puts behind a string literal
 // at the start of a {{ }} tag.
 const safeLiteralFilter = "_safe_literal"
 
@@ -81,7 +81,7 @@ func filterSafeLiteral(in, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	return pongo2.AsSafeValue(in.String()), nil
 }
 
-// filterOut is the last filter of every {{ }} tag (see djangoSyntax). pongo2
+// filterOut is the last filter of every {{ }} tag (see rewrite). pongo2
 // escapes only values that are strings; a value it prints through its String
 // method, such as a model instance or any other fmt.Stringer, would reach the
 // page unescaped. filterOut turns such a value into its text, which

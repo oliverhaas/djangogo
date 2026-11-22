@@ -106,7 +106,7 @@ func (n *forTagNode) assign(ctx *pongo2.ExecutionContext, key, value *pongo2.Val
 
 // dictViewFilter returns the filter behind a loop over mapping.items,
 // mapping.keys or mapping.values, the methods of a Python dict a Go map does
-// not have. djangoSyntax rewrites such a loop to iterate over
+// not have. rewrite changes such a loop to iterate over
 // "mapping.items|_dict_items:mapping". When the map has no entry of that
 // name, the filter returns what the method would: the keys, the values or
 // the key and value pairs, in key order.

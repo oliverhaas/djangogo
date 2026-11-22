@@ -343,32 +343,6 @@ func TestExtendMissing(t *testing.T) {
 	}
 }
 
-// TestExtendSelfError checks a template that extends itself. Django looks for
-// the next template of that name in the remaining loaders and reports
-// TemplateDoesNotExist ("Skipped to avoid recursion") when there is none.
-// pongo2 has no such lookup: a name always means the first source that has
-// it, so extending oneself is an error that names the cycle. For the same
-// reason Django's test_extend_recursive, test_recursive_multiple_loaders,
-// test_unique_history_per_loader and
-// test_block_override_in_extended_included_template have no counterpart.
-//
-// Ported from Django: tests/template_tests/test_extends.py::ExtendsBehaviorTests.test_extend_self_error
-func TestExtendSelfError(t *testing.T) {
-	engine := templates.New(templates.MapSource("fs", map[string]string{
-		"self.html": `{% extends "self.html" %}`,
-		"a.html":    `{% extends "b.html" %}`,
-		"b.html":    `{% extends 'a.html' %}`,
-	}))
-	_, err := engine.Render("self.html", nil)
-	if err == nil || !strings.Contains(err.Error(), `template "self.html" extends itself (self.html -> self.html)`) {
-		t.Errorf("self.html: error = %v, want the cycle error", err)
-	}
-	_, err = engine.Render("a.html", nil)
-	if err == nil || !strings.Contains(err.Error(), "a.html -> b.html -> a.html") {
-		t.Errorf("a.html: error = %v, want the cycle error", err)
-	}
-}
-
 // TestExtendsNotFirstTag checks that {% extends %} after another tag is an
 // error that names the template.
 //

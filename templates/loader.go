@@ -9,7 +9,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -130,15 +129,14 @@ func MapSource(label string, templates map[string]string) Source {
 	}
 }
 
-// extendsRe finds the parent named by a template's {% extends %} tag.
-var extendsRe = regexp.MustCompile(`\{%-?\s*extends\s+(?:"([^"]*)"|'([^']*)')\s*-?%\}`)
-
 // sourceLoader is the pongo2 loader of an Engine. It searches the sources in
 // order and remembers which template each one extends, which the render
 // recorder needs and pongo2 does not expose.
 type sourceLoader struct {
 	mu      sync.RWMutex
 	sources []Source
+	// parents maps the served name of a template to the served name of its
+	// parent, see served.
 	parents map[string]string
 }
 
@@ -212,55 +210,61 @@ func originName(filename string) string {
 	if filename == stringName {
 		return ""
 	}
-	base, _ := parseVariant(filename)
-	base, _, _ = cutPartial(base)
+	base, _, _ := cutPartial(parseServed(filename).name)
 	return base
 }
 
-// find reads the first source that has name. When none has it, tried lists the
-// candidates and err is nil; err reports a source that has the template but
-// failed to deliver it (permissions, a directory in place of a file).
-func (l *sourceLoader) find(name string) (data []byte, found bool, tried []TriedSource, err error) {
+// skipped is the reason Django reports for a template that a chain has
+// already passed through.
+const skipped = "Skipped to avoid recursion"
+
+// find reads the first source that has name and whose template is not in
+// skip, and returns the index of that source. When there is none, at is -1,
+// tried lists the candidates and err is nil; err reports a source that has
+// the template but failed to deliver it (permissions, a directory in place
+// of a file).
+func (l *sourceLoader) find(name string, skip []origin) (data []byte, at int, tried []TriedSource, err error) {
 	clean, ok := cleanName(name)
 	if !ok {
-		return nil, false, nil, nil
+		return nil, -1, nil, nil
 	}
 	l.mu.RLock()
 	sources := l.sources
 	l.mu.RUnlock()
-	for _, s := range sources {
+	for i, s := range sources {
+		if slices.Contains(skip, origin{name: clean, source: i}) {
+			tried = append(tried, TriedSource{Origin: s.origin(clean), Reason: skipped})
+			continue
+		}
 		data, err := s.read(clean)
 		if err == nil {
-			return data, true, tried, nil
+			return data, i, tried, nil
 		}
 		if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fs.ErrInvalid) {
-			return nil, false, tried, fmt.Errorf("templates: read %s: %w", s.origin(clean), err)
+			return nil, -1, tried, fmt.Errorf("templates: read %s: %w", s.origin(clean), err)
 		}
 		tried = append(tried, TriedSource{Origin: s.origin(clean), Reason: sourceMissing})
 	}
-	return nil, false, tried, nil
+	return nil, -1, tried, nil
 }
 
 // missing explains why pongo2 could not load name: the TemplateDoesNotExist
-// of a failed search, the read error of a source, or an inheritance cycle. It
-// returns nil when the template loads fine and the failure lies elsewhere.
+// of a failed search or the read error of a source. It returns nil when the
+// template loads fine and the failure lies elsewhere.
 func (l *sourceLoader) missing(name string) error {
-	base, overrides := parseVariant(name)
-	base, _, isPartial := cutPartial(base)
+	s := parseServed(name)
+	base, _, _ := cutPartial(s.name)
 	if base == "" {
 		return &TemplateDoesNotExist{Name: displayName(name)}
 	}
-	data, found, tried, err := l.find(base)
-	if err != nil {
-		return err
-	}
+	_, at, tried, err := l.find(base, s.history)
 	switch {
-	case !found:
+	case err != nil:
+		return err
+	case at < 0:
 		return &TemplateDoesNotExist{Name: base, Tried: tried}
-	case isPartial:
-		return nil
 	}
-	return l.checkExtends(base, data, overrides)
+	return nil
 }
 
 // cutPartial splits "page.html#card" into the template name and the partial
@@ -274,46 +278,9 @@ func cutPartial(name string) (base, partial string, isPartial bool) {
 	return base, partial, isPartial
 }
 
-// parentOf returns the template the source src extends, or "".
-func parentOf(src []byte) string {
-	if m := extendsRe.FindSubmatch(src); m != nil {
-		return string(m[1]) + string(m[2])
-	}
-	return ""
-}
-
-// checkExtends follows the {% extends %} chain of a template and reports a
-// cycle. pongo2 compiles a parent while it compiles the child, so a template
-// that extends itself, directly or through others, would recurse until the
-// stack is exhausted. overrides give the parents of the templates whose
-// {% extends %} has a variable, see variantName.
-func (l *sourceLoader) checkExtends(name string, src []byte, overrides []extendsOverride) error {
-	chain := []string{name}
-	for parent := parentIn(name, src, overrides); parent != ""; {
-		if slices.Contains(chain, parent) {
-			return fmt.Errorf("templates: template %q extends itself (%s -> %s)",
-				name, strings.Join(chain, " -> "), parent)
-		}
-		chain = append(chain, parent)
-		// A parent that is missing or unreadable ends the chain; pongo2 reports
-		// it when it compiles the child.
-		data, _, _, _ := l.find(parent)
-		parent = parentIn(parent, data, overrides)
-	}
-	return nil
-}
-
-// parentIn returns the parent of the template name with the source src: the
-// one overrides give, or else the one its {% extends %} names.
-func parentIn(name string, src []byte, overrides []extendsOverride) string {
-	if parent, ok := overrideOf(overrides, name); ok {
-		return parent
-	}
-	return parentOf(src)
-}
-
-// Abs returns name unchanged: as in Django a name is relative to the sources,
-// never to the template that mentions it.
+// Abs returns name unchanged: as in Django a name is relative to the
+// sources. A name in a tag that starts with "./" or "../" was made relative
+// to the template of the tag before, see relativeName.
 func (l *sourceLoader) Abs(_, name string) string { return name }
 
 // Get returns the content of the named template for pongo2. pongo2 drops the
@@ -321,63 +288,82 @@ func (l *sourceLoader) Abs(_, name string) string { return name }
 //
 // A name such as "page.html#card" stands for the partial card of
 // page.html, Django's template partials: Get returns a source that renders
-// only that partial, see partialSource. A name of variantName stands for a
-// template with the parents a render gave its {% extends %} tags with a
-// variable, see variantSource.
+// only that partial, see partialSource. A served name stands for a template
+// in a chain of {% extends %}, see served.
 func (l *sourceLoader) Get(name string) (io.Reader, error) {
-	base, overrides := parseVariant(name)
-	base, partial, isPartial := cutPartial(base)
+	s := parseServed(name)
+	base, partial, isPartial := cutPartial(s.name)
 	if base == "" {
-		return nil, &TemplateDoesNotExist{Name: name}
+		return nil, &TemplateDoesNotExist{Name: displayName(name)}
 	}
-	data, found, _, err := l.find(base)
+	data, at, _, err := l.find(base, s.history)
 	if err != nil {
 		return nil, err
 	}
-	if !found {
+	if at < 0 {
 		return nil, &TemplateDoesNotExist{Name: base}
 	}
 	if isPartial {
 		return bytes.NewReader(partialSource(data, base, partial)), nil
 	}
-	if err := l.checkExtends(base, data, overrides); err != nil {
-		return nil, err
-	}
-	l.noteParent(base, data)
-	if overrides != nil {
-		return bytes.NewReader(variantSource(data, base, overrides)), nil
-	}
-	return bytes.NewReader(djangoSyntax(data, base)), nil
+	clean, _ := cleanName(base)
+	return bytes.NewReader(l.serve(name, data, base, s, origin{name: clean, source: at})), nil
 }
 
-// noteParent records the template that the source of name extends.
-func (l *sourceLoader) noteParent(name string, src []byte) {
-	parent := parentOf(src)
+// serve returns the source of the template s for pongo2: src in Django's
+// syntax rewritten, see rewrite, with its {% extends %} naming the
+// parent as a served name that carries the history of s and self, the
+// origin of s, on up the chain. name is the template name for messages, ""
+// for a template given as a string. key, unless empty, is the served name
+// of s, under which the parent is recorded for chain.
+func (l *sourceLoader) serve(key string, src []byte, name string, s served, self origin) []byte {
+	depth := len(s.history)
+	next := served{history: append(slices.Clip(s.history), self), overrides: s.overrides}
+	parent := ""
+	out := rewrite(src, name, func(p string, literal bool) (string, bool) {
+		if to, ok := s.override(depth); ok {
+			p = to
+		} else if !literal {
+			return "", false
+		}
+		next.name = p
+		parent = next.String()
+		return parent, true
+	})
+	if key != "" {
+		l.noteParent(key, parent)
+	}
+	return out
+}
+
+// noteParent records parent, a served name or "" for none, as the parent of
+// the template with the served name key.
+func (l *sourceLoader) noteParent(key, parent string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if parent == "" {
-		delete(l.parents, name)
+		delete(l.parents, key)
 		return
 	}
 	if l.parents == nil {
 		l.parents = make(map[string]string)
 	}
-	l.parents[name] = parent
+	l.parents[key] = parent
 }
 
-// chain returns the templates name extends, nearest parent first.
-func (l *sourceLoader) chain(name string) []string {
+// chain returns the names of the templates that the template with the served
+// name key extends, nearest parent first. The parent of a served name has a
+// longer history, so the chain ends.
+func (l *sourceLoader) chain(key string) []string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	var out []string
-	seen := map[string]bool{name: true}
 	for {
-		parent, ok := l.parents[name]
-		if !ok || seen[parent] {
+		parent, ok := l.parents[key]
+		if !ok {
 			return out
 		}
-		seen[parent] = true
-		out = append(out, parent)
-		name = parent
+		out = append(out, parseServed(parent).name)
+		key = parent
 	}
 }

@@ -119,7 +119,7 @@ func (n *partialTemplateNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.Tem
 }
 
 // partialDefTagParser parses {% partialdef "name" [inline] %} up to its
-// {% endpartialdef %}, after djangoSyntax checked the arguments and quoted
+// {% endpartialdef %}, after rewrite checked the arguments and quoted
 // the name.
 func partialDefTagParser(doc *pongo2.Parser, start *pongo2.Token, args *pongo2.Parser) (pongo2.INodeTag, *pongo2.Error) {
 	name := args.MatchType(pongo2.TokenString)
@@ -153,7 +153,7 @@ func partialDefTagParser(doc *pongo2.Parser, start *pongo2.Token, args *pongo2.P
 	return node, nil
 }
 
-// partialTagParser parses {% partial "name" %}, after djangoSyntax checked
+// partialTagParser parses {% partial "name" %}, after rewrite checked
 // the argument and quoted the name.
 func partialTagParser(doc *pongo2.Parser, start *pongo2.Token, args *pongo2.Parser) (pongo2.INodeTag, *pongo2.Error) {
 	name := args.MatchType(pongo2.TokenString)

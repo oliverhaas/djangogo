@@ -316,7 +316,7 @@ func nowTagParser(_ *pongo2.Parser, _ *pongo2.Token, args *pongo2.Parser) (pongo
 	return &nowTagNode{format: format, asVar: asVar}, nil
 }
 
-// syntaxErrorTag is the tag djangoSyntax puts in place of a construct that
+// syntaxErrorTag is the tag rewrite puts in place of a construct that
 // Django rejects and pongo2 would accept, see syntaxError.
 const syntaxErrorTag = "_syntax_error"
 

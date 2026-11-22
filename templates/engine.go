@@ -55,8 +55,8 @@ type renderState struct {
 	// tagState holds what tags such as {% cycle %} remember during the
 	// render of one template, keyed by the tag, see tagState.
 	tagState map[any]any
-	// current is the name of the template being rendered, or of its
-	// variant, see variantName. It is "" for a template given as a string,
+	// current is the name of the template being rendered, or the served
+	// name of its variant, see served. It is "" for a template given as a string,
 	// whose source is source. A {% extends %} with a variable renders a
 	// variant of it.
 	current string
@@ -316,7 +316,7 @@ func (e *Engine) RenderString(src string, ctx map[string]any) (string, error) {
 func (e *Engine) renderString(src string, ctx map[string]any, st *renderState) (string, error) {
 	var tpl *pongo2.Template
 	err := guard("parse string", func() (err error) {
-		tpl, err = e.set.FromBytes(djangoSyntax([]byte(src), ""))
+		tpl, err = e.set.FromBytes(e.loader.serve("", []byte(src), "", served{}, stringOrigin))
 		return err
 	})
 	if err != nil {

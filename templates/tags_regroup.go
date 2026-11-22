@@ -17,7 +17,7 @@ type groupedResult map[string]any
 //
 // It stores in grouped one groupedResult per run of consecutive elements
 // with the same key, in the order of the list, so the list must be sorted
-// by the key. djangoSyntax rewrites the key expression to start with the
+// by the key. rewrite changes the key expression to start with the
 // variable name ("grouped.instrument"), as Django does: the tag binds each
 // element to that name while it evaluates the key.
 type regroupTagNode struct {
@@ -87,7 +87,7 @@ func groupKeyEqual(a, b any) bool {
 }
 
 // regroupTagParser parses {% regroup target by key as name %}, after
-// djangoSyntax checked the arguments and prefixed the key with the name.
+// rewrite checked the arguments and prefixed the key with the name.
 func regroupTagParser(_ *pongo2.Parser, _ *pongo2.Token, args *pongo2.Parser) (pongo2.INodeTag, *pongo2.Error) {
 	target, err := args.ParseExpression()
 	if err != nil {

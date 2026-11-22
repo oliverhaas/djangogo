@@ -3,7 +3,10 @@ package templates
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/flosch/pongo2/v6"
@@ -12,7 +15,7 @@ import (
 // extendsVarTag stands for a Django {% extends %} tag whose parent is not a
 // string literal, such as {% extends layout %}. pongo2 links a child to its
 // parent when it compiles the child, before any variable has a value, so
-// djangoSyntax rewrites
+// rewrite changes
 //
 //	{% extends layout %}rest
 //
@@ -22,107 +25,126 @@ import (
 //
 // When it renders, the tag renders a variant of the template in its place:
 // the same source, with the {% extends %} tag naming the parent the variable
-// holds, see variantName.
+// holds, see served.
 const extendsVarTag = "_extends_var"
 
 // stringName is pongo2's name of a template compiled from a string.
 const stringName = "<string>"
 
+// stringOrigin is the origin of a template given as a string, which no
+// source has.
+var stringOrigin = origin{name: stringName, source: -1}
+
 // errExtendsNoEngine is the render error for a {% extends %} with a variable
 // outside an Engine.
 var errExtendsNoEngine = errors.New("templates: extends: the template is not rendered by an Engine")
 
-// extendsOverride is a {% extends %} with a variable, resolved: the template
-// of the tag and the parent the variable names.
+// origin is a template of a source: its name and the index of the source.
+// Two sources with the same name hold two templates.
+type origin struct {
+	name   string
+	source int
+}
+
+// extendsOverride is a {% extends %} with a variable, resolved: the depth of
+// its template in the chain (0 for the template rendered) and the parent the
+// variable names.
 type extendsOverride struct {
-	template, parent string
+	depth  int
+	parent string
 }
 
-// variantName returns the name under which the loader serves the template
-// name with the parents overrides give: each template of overrides extends
-// the parent given there. Each override goes between NUL bytes, which no
-// template name has (see cleanName), with the unit separator between
-// template and parent. pongo2 reads the byte 1 as the end of its input, so
-// it does not serve. displayName removes the overrides from messages.
-func variantName(name string, overrides []extendsOverride) string {
-	var b strings.Builder
-	b.WriteString(name)
-	for _, o := range overrides {
-		b.WriteString("\x00" + o.template + "\x1f" + o.parent + "\x00")
+// served is what a name the loader serves to pongo2 stands for. pongo2 links
+// a child to its parent by name, so the name of a parent carries what Django
+// keeps while it renders a chain:
+//
+//   - history, the templates below in the chain, the leaf first. As in
+//     Django, a parent is the first template of its name that is not in the
+//     history, so a template can extend its namesake in a later source.
+//   - overrides, the parents a render gave the {% extends %} tags with a
+//     variable, see extendsVarTag.
+//
+// A served name is the template name, followed by the history and the
+// overrides between NUL bytes, which no template name has (see cleanName).
+// displayName removes them from messages.
+type served struct {
+	// name is the template name, with "#partial" for a partial.
+	name      string
+	history   []origin
+	overrides []extendsOverride
+}
+
+// String returns the served name.
+func (s served) String() string {
+	if len(s.history) == 0 && len(s.overrides) == 0 {
+		return s.name
 	}
-	return b.String()
+	v := url.Values{}
+	for _, o := range s.history {
+		v.Add("h", strconv.Itoa(o.source)+":"+o.name)
+	}
+	for _, o := range s.overrides {
+		v.Add("o", strconv.Itoa(o.depth)+":"+o.parent)
+	}
+	return s.name + "\x00" + v.Encode() + "\x00"
 }
 
-// parseVariant splits a name of variantName into the template name and the
-// overrides. A plain template name has none.
-func parseVariant(name string) (string, []extendsOverride) {
+// parseServed reads a served name. A plain template name has no history and
+// no overrides.
+func parseServed(name string) served {
 	base, rest, ok := strings.Cut(name, "\x00")
 	if !ok {
-		return name, nil
+		return served{name: name}
 	}
-	var overrides []extendsOverride
-	for pair := range strings.SplitSeq(strings.TrimSuffix(rest, "\x00"), "\x00\x00") {
-		tpl, parent, _ := strings.Cut(pair, "\x1f")
-		overrides = append(overrides, extendsOverride{template: tpl, parent: parent})
+	s := served{name: base}
+	v, _ := url.ParseQuery(strings.TrimSuffix(rest, "\x00"))
+	for _, h := range v["h"] {
+		i, n, _ := strings.Cut(h, ":")
+		src, _ := strconv.Atoi(i)
+		s.history = append(s.history, origin{name: n, source: src})
 	}
-	return base, overrides
+	for _, o := range v["o"] {
+		i, parent, _ := strings.Cut(o, ":")
+		depth, _ := strconv.Atoi(i)
+		s.overrides = append(s.overrides, extendsOverride{depth: depth, parent: parent})
+	}
+	return s
 }
 
-// overrideOf returns the parent overrides give the template name.
-func overrideOf(overrides []extendsOverride, name string) (string, bool) {
-	for _, o := range overrides {
-		if o.template == name {
+// override returns the parent the overrides give the template at depth.
+func (s served) override(depth int) (string, bool) {
+	for _, o := range s.overrides {
+		if o.depth == depth {
 			return o.parent, true
 		}
 	}
 	return "", false
 }
 
-// overridesRe finds the overrides in a name of variantName.
-var overridesRe = regexp.MustCompile("\x00[^\x00]*\x00")
+// servedRe finds the history and the overrides in a served name.
+var servedRe = regexp.MustCompile("\x00[^\x00]*\x00")
 
-// displayName returns text with each name of variantName in it cut back to
-// the template name.
+// displayName returns text with each served name in it cut back to the
+// template name.
 func displayName(text string) string {
 	if !strings.Contains(text, "\x00") {
 		return text
 	}
-	return overridesRe.ReplaceAllString(text, "")
-}
-
-// variantSource returns the source of the template name with the parents
-// overrides give. Its {% extends %} names the parent that overrides give it
-// or else the parent it names itself, as a variant with the same overrides,
-// so that they hold all the way up the chain. An empty name stands for a
-// template given as a string.
-func variantSource(src []byte, name string, overrides []extendsOverride) []byte {
-	self := name
-	if self == "" {
-		self = stringName
-	}
-	return rewrite(src, name, func(parent string, literal bool) (string, bool) {
-		if to, ok := overrideOf(overrides, self); ok {
-			return variantName(to, overrides), true
-		}
-		if literal {
-			return variantName(parent, overrides), true
-		}
-		return "", false
-	})
+	return servedRe.ReplaceAllString(text, "")
 }
 
 // variant compiles the template name with the parents overrides give and
-// returns it with its name, see variantName. An empty name stands for the
-// template given as a string, whose source is src.
+// returns it with its served name. An empty name stands for the template
+// given as a string, whose source is src.
 func (e *Engine) variant(name string, overrides []extendsOverride, src []byte) (*pongo2.Template, string, error) {
-	current := variantName(name, overrides)
+	current := served{name: name, overrides: overrides}.String()
 	if name != "" {
 		tpl, err := e.load(current)
 		return tpl, current, err
 	}
 	var tpl *pongo2.Template
 	err := guard("parse string", func() (err error) {
-		tpl, err = e.set.FromBytes(variantSource(src, "", overrides))
+		tpl, err = e.set.FromBytes(e.loader.serve(current, src, "", served{overrides: overrides}, stringOrigin))
 		return err
 	})
 	if err != nil && !errors.Is(err, errPanic) {
@@ -161,15 +183,15 @@ func (n *extendsVarNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.Template
 	}
 	parent := val.String()
 	if strings.ContainsRune(parent, 0) {
-		// No template name has a NUL byte, and variantName uses it.
+		// No template name has a NUL byte, and a served name uses it.
 		return ctx.OrigError(&TemplateDoesNotExist{Name: parent}, n.start)
 	}
 	// The template being rendered is st.current: the template of this tag
 	// or one that extends it. It renders again, with this tag naming parent.
-	leaf, overrides := parseVariant(st.current)
-	self, _ := parseVariant(n.start.Filename)
-	overrides = append(overrides, extendsOverride{template: self, parent: parent})
-	tpl, current, err := st.engine.variant(leaf, overrides, st.source)
+	leaf := parseServed(st.current)
+	depth := len(parseServed(n.start.Filename).history)
+	overrides := append(slices.Clip(leaf.overrides), extendsOverride{depth: depth, parent: parent})
+	tpl, current, err := st.engine.variant(leaf.name, overrides, st.source)
 	if err != nil {
 		return ctx.OrigError(err, n.start)
 	}
@@ -177,9 +199,11 @@ func (n *extendsVarNode) Execute(ctx *pongo2.ExecutionContext, w pongo2.Template
 	inc.Update(ctx.Public)
 	inc.Update(ctx.Private)
 	if st.recording {
-		st.included = append(st.included, Rendered{Name: parent, Context: visibleContext(inc)})
-		for _, grand := range st.engine.loader.chain(parent) {
-			st.included = append(st.included, Rendered{Name: grand, Context: visibleContext(inc)})
+		// The templates below this one in the chain are recorded already.
+		if chain := st.engine.loader.chain(current); len(chain) > depth {
+			for _, name := range chain[depth:] {
+				st.included = append(st.included, Rendered{Name: name, Context: visibleContext(inc)})
+			}
 		}
 	}
 	saved := st.current

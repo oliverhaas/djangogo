@@ -552,6 +552,13 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `{% include "../card.html" %}` includes `card.html`. A relative name that
   leaves the template directory, or that names the template itself in
   `{% extends %}`, fails with Django's message.
+- Templates: a template can extend a template of the same name in a later
+  source, as in Django. A project template `admin/base_site.html` that
+  starts with `{% extends "admin/base_site.html" %}` extends the one the
+  admin ships and overrides only some of its blocks. A template that extends
+  itself, directly or through other templates, with no namesake left fails
+  with a `TemplateDoesNotExist` whose `Tried` entry says "Skipped to avoid
+  recursion".
 
 ### Changed
 
