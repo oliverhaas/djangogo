@@ -768,6 +768,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   errors are printed. `--noreload` turns the reloader off. A program built
   from a list of files (`go run main.go`) or on a machine without the `go`
   command serves without the reloader, after a notice.
+- Views: `FormView`, `CreateView`, `UpdateView` and `DeleteView` add a success
+  message after valid data, as Django's `SuccessMessageMixin` does. Set
+  `SuccessMessage`, whose `%(name)s` placeholders are filled from the cleaned
+  data, or `GetSuccessMessage`, which also receives the saved or deleted
+  object. The view needs `messages.Middleware`. A `DELETE` request adds no
+  message, as in Django.
 
 ### Changed
 

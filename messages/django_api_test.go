@@ -107,13 +107,3 @@ func TestMiddlewareTestsResponseWithoutMessages(t *testing.T) {
 		t.Errorf("cookies set = %v, want none", cookies)
 	}
 }
-
-// Ported from Django: tests/messages_tests/test_mixins.py::SuccessMessageMixinTests.test_set_messages_success
-func TestSuccessMessageMixinTestsSetMessagesSuccess(t *testing.T) {
-	t.Skip("SuccessMessageMixin needs forms and generic views, which Djan-Go-Go does not have")
-}
-
-// Ported from Django: tests/messages_tests/test_mixins.py::SuccessMessageMixinTests.test_set_messages_success_on_delete
-func TestSuccessMessageMixinTestsSetMessagesSuccessOnDelete(t *testing.T) {
-	t.Skip("SuccessMessageMixin needs forms and generic views, which Djan-Go-Go does not have")
-}

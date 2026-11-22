@@ -126,6 +126,8 @@
 //	get_paginator()                       GetPaginator
 //	get_success_url()                     GetSuccessURL
 //	form_valid()                          FormValid
+//	success_message                       SuccessMessage
+//	get_success_message()                 GetSuccessMessage
 //	get_redirect_url()                    GetRedirectURL
 //	delete() of the object                DeleteObject
 //
@@ -142,6 +144,11 @@
 // into form_invalid: the form is rendered again and nothing is saved. A form
 // view binds the form to the body of a POST or a PUT, url-encoded or
 // multipart.
+//
+// SuccessMessage and GetSuccessMessage take the place of Django's
+// SuccessMessageMixin on FormView, CreateView, UpdateView and DeleteView. The
+// message is added after the save or the deletion and before the redirect,
+// so the view needs messages.Middleware.
 //
 // The keyword arguments of a Django URL are the path values of the route
 // pattern ({pk}, {slug}, {page}), and they are strings. Mount a generic view

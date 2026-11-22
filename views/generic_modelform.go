@@ -22,6 +22,9 @@ type modelFormView[T any] struct {
 	successURL    string
 	getSuccessURL func(r *http.Request, obj T) (string, error)
 	formValid     func(r *http.Request, form *forms.ModelForm[T]) error
+
+	successMessage    string
+	getSuccessMessage func(r *http.Request, obj T, cleanedData map[string]any) (string, error)
 }
 
 // modelForm returns the form for the request, Django's
@@ -101,7 +104,12 @@ func (m modelFormView[T]) process(
 	if err != nil {
 		return err
 	}
-	return redirectFound(w, target)
+	cleaned := form.CleanedData()
+	var get func() (string, error)
+	if m.getSuccessMessage != nil {
+		get = func() (string, error) { return m.getSuccessMessage(r, *obj, cleaned) }
+	}
+	return redirectFound(w, target, func() error { return addSuccessMessage(r, m.successMessage, get, cleaned) })
 }
 
 // checkSuccessURL reports a view that cannot name a success URL, before the
@@ -170,6 +178,14 @@ type CreateView[T any] struct {
 	// form (form.AddError), nothing is saved and the view renders the form
 	// again.
 	FormValid func(r *http.Request, form *forms.ModelForm[T]) error
+	// SuccessMessage is added as a success message after saving, with its
+	// %(name)s placeholders filled from the cleaned data of the form
+	// (success_message of SuccessMessageMixin). It needs messages.Middleware.
+	SuccessMessage string
+	// GetSuccessMessage replaces overriding get_success_message. It receives
+	// the saved object, which Django's method reads as self.object, and the
+	// cleaned data. An empty result adds no message.
+	GetSuccessMessage func(r *http.Request, obj T, cleanedData map[string]any) (string, error)
 	// TemplateName is the template to render (template_name). It replaces the
 	// default name.
 	TemplateName string
@@ -219,6 +235,9 @@ func (v CreateView[T]) core() modelFormView[T] {
 		successURL:    v.SuccessURL,
 		getSuccessURL: v.GetSuccessURL,
 		formValid:     v.FormValid,
+
+		successMessage:    v.SuccessMessage,
+		getSuccessMessage: v.GetSuccessMessage,
 	}
 }
 
@@ -306,6 +325,14 @@ type UpdateView[T any] struct {
 	// ServeError. When it adds an error to the form (form.AddError), nothing
 	// is saved and the view renders the form again.
 	FormValid func(r *http.Request, form *forms.ModelForm[T]) error
+	// SuccessMessage is added as a success message after saving, with its
+	// %(name)s placeholders filled from the cleaned data of the form
+	// (success_message of SuccessMessageMixin). It needs messages.Middleware.
+	SuccessMessage string
+	// GetSuccessMessage replaces overriding get_success_message. It receives
+	// the saved object, which Django's method reads as self.object, and the
+	// cleaned data. An empty result adds no message.
+	GetSuccessMessage func(r *http.Request, obj T, cleanedData map[string]any) (string, error)
 	// ContextObjectName is the context key of the object next to "object"
 	// (context_object_name, default the lowercased model name).
 	ContextObjectName string
@@ -366,6 +393,9 @@ func (v UpdateView[T]) core() modelFormView[T] {
 		successURL:    v.SuccessURL,
 		getSuccessURL: v.GetSuccessURL,
 		formValid:     v.FormValid,
+
+		successMessage:    v.SuccessMessage,
+		getSuccessMessage: v.GetSuccessMessage,
 	}
 }
 

@@ -170,6 +170,15 @@ type DeleteView[T any] struct {
 	// (form_class), which a POST must pass before anything is deleted. Nil
 	// uses a form without fields, which is always valid.
 	Form func(r *http.Request) (*forms.Form, error)
+	// SuccessMessage is added as a success message after a deletion by POST,
+	// with its %(name)s placeholders filled from the cleaned data of the
+	// confirmation form (success_message of SuccessMessageMixin). A DELETE
+	// request adds none, as in Django. It needs messages.Middleware.
+	SuccessMessage string
+	// GetSuccessMessage replaces overriding get_success_message. It receives
+	// the deleted object and the cleaned data of the confirmation form. An
+	// empty result adds no message.
+	GetSuccessMessage func(r *http.Request, obj T, cleanedData map[string]any) (string, error)
 }
 
 // ServeHTTP renders the confirmation page for GET and HEAD and deletes the
@@ -266,7 +275,12 @@ func (v DeleteView[T]) post(w http.ResponseWriter, r *http.Request) error {
 		}
 		return v.render(w, r, obj, form)
 	}
-	return v.deleteAndRedirect(w, r, obj)
+	cleaned := form.CleanedData()
+	var get func() (string, error)
+	if v.GetSuccessMessage != nil {
+		get = func() (string, error) { return v.GetSuccessMessage(r, obj, cleaned) }
+	}
+	return v.deleteAndRedirect(w, r, obj, func() error { return addSuccessMessage(r, v.SuccessMessage, get, cleaned) })
 }
 
 // delete removes the object without a form, Django's DeletionMixin.delete.
@@ -275,13 +289,13 @@ func (v DeleteView[T]) delete(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return v.deleteAndRedirect(w, r, obj)
+	return v.deleteAndRedirect(w, r, obj, func() error { return nil })
 }
 
 // deleteAndRedirect removes obj and redirects to the success URL. The URL is
 // resolved and checked first, so a view without a valid target deletes
-// nothing.
-func (v DeleteView[T]) deleteAndRedirect(w http.ResponseWriter, r *http.Request, obj T) error {
+// nothing. addMessage runs after the deletion and before the redirect.
+func (v DeleteView[T]) deleteAndRedirect(w http.ResponseWriter, r *http.Request, obj T, addMessage func() error) error {
 	target, err := v.successURL(r, obj)
 	if err != nil {
 		return err
@@ -296,6 +310,9 @@ func (v DeleteView[T]) deleteAndRedirect(w http.ResponseWriter, r *http.Request,
 		err = deleteObject(r.Context(), v.DB, obj)
 	}
 	if err != nil {
+		return err
+	}
+	if err := addMessage(); err != nil {
 		return err
 	}
 	writeRedirect(w, http.StatusFound, location)

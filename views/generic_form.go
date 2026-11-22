@@ -7,7 +7,9 @@ import (
 	"net/url"
 
 	"github.com/oliverhaas/djangogo/forms"
+	"github.com/oliverhaas/djangogo/messages"
 	"github.com/oliverhaas/djangogo/templates"
+	"github.com/oliverhaas/djangogo/validators"
 )
 
 // maxFormMemory is the part of a multipart body that is held in memory while
@@ -72,14 +74,38 @@ func formValid(form *forms.Form, ready, hook func() error) (bool, error) {
 }
 
 // redirectFound answers with a 302 redirect to target after Django's redirect
-// checks.
-func redirectFound(w http.ResponseWriter, target string) error {
+// checks. addMessage runs between the checks and the redirect, while the
+// message middleware can still store a message.
+func redirectFound(w http.ResponseWriter, target string, addMessage func() error) error {
 	location, err := checkedLocation(target, 0)
 	if err != nil {
 		return err
 	}
+	if err := addMessage(); err != nil {
+		return err
+	}
 	writeRedirect(w, http.StatusFound, location)
 	return nil
+}
+
+// addSuccessMessage adds the success message of a view for r, Django's
+// SuccessMessageMixin.form_valid: the result of get when it is not nil, else
+// message with its %(name)s placeholders filled from cleanedData. An empty
+// message adds nothing. Without messages.Middleware it returns
+// messages.ErrMiddlewareMissing, as messages.success raises MessageFailure.
+func addSuccessMessage(r *http.Request, message string, get func() (string, error), cleanedData map[string]any) error {
+	if get != nil {
+		var err error
+		if message, err = get(); err != nil {
+			return err
+		}
+	} else {
+		message = validators.FormatMessage(message, cleanedData)
+	}
+	if message == "" {
+		return nil
+	}
+	return messages.Success(r, message)
 }
 
 // errNoSuccessURL is the configuration error of a form view without a
@@ -130,6 +156,13 @@ type FormView struct {
 	// (form.AddError), the view renders the form again instead of
 	// redirecting, as a form_valid that returns form_invalid() does.
 	FormValid func(r *http.Request, form *forms.Form) error
+	// SuccessMessage is added as a success message after valid data, with its
+	// %(name)s placeholders filled from the cleaned data of the form
+	// (success_message of SuccessMessageMixin). It needs messages.Middleware.
+	SuccessMessage string
+	// GetSuccessMessage replaces overriding get_success_message. It receives
+	// the cleaned data of the form. An empty result adds no message.
+	GetSuccessMessage func(r *http.Request, cleanedData map[string]any) (string, error)
 	// TemplateName is the template to render (template_name). It is required
 	// unless GetTemplateNames is set.
 	TemplateName string
@@ -202,7 +235,12 @@ func (v FormView) process(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	return redirectFound(w, target)
+	cleaned := form.CleanedData()
+	var get func() (string, error)
+	if v.GetSuccessMessage != nil {
+		get = func() (string, error) { return v.GetSuccessMessage(r, cleaned) }
+	}
+	return redirectFound(w, target, func() error { return addSuccessMessage(r, v.SuccessMessage, get, cleaned) })
 }
 
 // checkSuccessURL reports a view without a success URL, Django's
