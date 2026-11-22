@@ -184,6 +184,66 @@ func TestMessagesMiddlewareIsInstalled(t *testing.T) {
 	djangotest.AssertEqual(t, rec.Code, http.StatusOK)
 }
 
+// TestMessageStorageSetting keeps the messages of MESSAGE_STORAGE in a cookie
+// with the SESSION_COOKIE_* attributes or in the session, and the next request
+// reads them.
+func TestMessageStorageSetting(t *testing.T) {
+	add := func(w http.ResponseWriter, r *http.Request) {
+		if err := messages.Info(r, "saved"); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+	show := func(w http.ResponseWriter, r *http.Request) {
+		for _, m := range messages.Get(r) {
+			_, _ = io.WriteString(w, m.Message)
+		}
+	}
+	cases := []struct {
+		name          string
+		storage       string
+		messageCookie bool
+	}{
+		{"fallback by default", "", true},
+		{"cookie", conf.MessageStorageCookie, true},
+		{"session", conf.MessageStorageSession, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := newWiredApp(t, conf.Settings{
+				MessageStorage:        tc.storage,
+				SessionEngine:         conf.SessionEngineSignedCookies,
+				SessionCookieDomain:   "example.com",
+				SessionCookieSameSite: "Strict",
+			}, routeApp{[]urls.Route{
+				urls.PathFunc("GET /add/{$}", add, "add"),
+				urls.PathFunc("GET /show/{$}", show, "show"),
+			}})
+			rec := request(app, http.MethodGet, "/add/")
+			c := cookie(rec, messages.CookieName)
+			if (c != nil) != tc.messageCookie {
+				t.Fatalf("messages cookie = %v, want one: %v", c, tc.messageCookie)
+			}
+			if c != nil {
+				djangotest.AssertEqual(t, c.Domain, "example.com")
+				djangotest.AssertEqual(t, c.SameSite, http.SameSiteStrictMode)
+				djangotest.AssertEqual(t, c.HttpOnly, true)
+			}
+			// The session holds the messages only for the session storage.
+			if got := cookie(rec, "sessionid") != nil; got == tc.messageCookie {
+				t.Errorf("session cookie set = %v, want %v", got, !tc.messageCookie)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/show/", nil)
+			for _, sc := range rec.Result().Cookies() {
+				req.AddCookie(sc)
+			}
+			next := httptest.NewRecorder()
+			app.Handler.ServeHTTP(next, req)
+			djangotest.AssertEqual(t, next.Body.String(), "saved")
+		})
+	}
+}
+
 // TestPasswordHashersSetting configures the hashers of PASSWORD_HASHERS, named
 // by Django's class or by the algorithm, the first one preferred.
 func TestPasswordHashersSetting(t *testing.T) {

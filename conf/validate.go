@@ -24,7 +24,9 @@ type Problem struct {
 // would complete them and are not changed.
 //
 // A problem is reported for: a SessionEngine other than SessionEngineDB and
-// SessionEngineSignedCookies; a SessionCookieSameSite or CSRFCookieSameSite
+// SessionEngineSignedCookies; a MessageStorage other than
+// MessageStorageFallback, MessageStorageCookie and MessageStorageSession; a
+// SessionCookieSameSite or CSRFCookieSameSite
 // other than "Lax", "Strict", "None" (in any letter case) or the empty string,
 // which sends no attribute; a database whose driver NormalizeDriver does not
 // know; a TimeZone that Location cannot load; a StaticURL that is not empty
@@ -55,6 +57,12 @@ func (s *Settings) Validate() []Problem {
 	if c.SessionEngine != SessionEngineDB && c.SessionEngine != SessionEngineSignedCookies {
 		v.addf("SESSION_ENGINE", "The SESSION_ENGINE setting must be %q or %q, but is %q.",
 			SessionEngineDB, SessionEngineSignedCookies, c.SessionEngine)
+	}
+	switch c.MessageStorage {
+	case MessageStorageFallback, MessageStorageCookie, MessageStorageSession:
+	default:
+		v.addf("MESSAGE_STORAGE", "The MESSAGE_STORAGE setting must be %q, %q or %q, but is %q.",
+			MessageStorageFallback, MessageStorageCookie, MessageStorageSession, c.MessageStorage)
 	}
 	v.notNegative("SESSION_COOKIE_AGE", int64(c.SessionCookieAge))
 	v.sameSite("SESSION_COOKIE_SAMESITE", c.SessionCookieSameSite)

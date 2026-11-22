@@ -14,6 +14,7 @@ import (
 	"github.com/oliverhaas/djangogo/auth"
 	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/forms"
+	"github.com/oliverhaas/djangogo/internal/pyjson"
 	"github.com/oliverhaas/djangogo/orm"
 	"github.com/oliverhaas/djangogo/views"
 )
@@ -357,9 +358,9 @@ func writeChangeObject(b *strings.Builder, c *ChangeObject, withFields bool) {
 	sep := ""
 	if c.Name != "" || c.Object != "" {
 		b.WriteString(`"name": `)
-		writePyJSONString(b, c.Name)
+		pyjson.WriteString(b, c.Name)
 		b.WriteString(`, "object": `)
-		writePyJSONString(b, c.Object)
+		pyjson.WriteString(b, c.Object)
 		sep = ", "
 	}
 	if withFields {
@@ -368,44 +369,11 @@ func writeChangeObject(b *strings.Builder, c *ChangeObject, withFields bool) {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			writePyJSONString(b, f)
+			pyjson.WriteString(b, f)
 		}
 		b.WriteByte(']')
 	}
 	b.WriteByte('}')
-}
-
-// writePyJSONString writes s as a JSON string the way Python's json.dumps
-// does with ensure_ascii: every character outside printable ASCII is
-// escaped, characters beyond the BMP as surrogate pairs.
-func writePyJSONString(b *strings.Builder, s string) {
-	b.WriteByte('"')
-	for _, r := range s {
-		switch {
-		case r == '"':
-			b.WriteString(`\"`)
-		case r == '\\':
-			b.WriteString(`\\`)
-		case r == '\n':
-			b.WriteString(`\n`)
-		case r == '\r':
-			b.WriteString(`\r`)
-		case r == '\t':
-			b.WriteString(`\t`)
-		case r == '\b':
-			b.WriteString(`\b`)
-		case r == '\f':
-			b.WriteString(`\f`)
-		case r >= ' ' && r <= '~':
-			b.WriteRune(r)
-		case r > 0xFFFF:
-			r -= 0x10000
-			fmt.Fprintf(b, `\u%04x\u%04x`, 0xD800+(r>>10), 0xDC00+(r&0x3FF))
-		default:
-			fmt.Fprintf(b, `\u%04x`, r)
-		}
-	}
-	b.WriteByte('"')
 }
 
 // App is the app config of the admin app, Django's django.contrib.admin in

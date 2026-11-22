@@ -354,7 +354,7 @@ func (a *Application) defaultMiddleware() ([]func(http.Handler) http.Handler, er
 	if a.DB != nil {
 		stack = append(stack, auth.Middleware(a.DB))
 	}
-	stack = append(stack, messages.Middleware, middleware.XFrameOptions(s.XFrameOptions))
+	stack = append(stack, messages.MiddlewareWithOptions(a.messageOptions()), middleware.XFrameOptions(s.XFrameOptions))
 	return stack, nil
 }
 

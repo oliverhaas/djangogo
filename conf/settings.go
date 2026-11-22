@@ -12,6 +12,21 @@ const (
 	SessionEngineSignedCookies = "signed_cookies"
 )
 
+// Message storages accepted by Settings.MessageStorage.
+const (
+	// MessageStorageFallback keeps the messages in a signed cookie and the
+	// ones that do not fit there in the session (Django's default,
+	// django.contrib.messages.storage.fallback.FallbackStorage).
+	MessageStorageFallback = "fallback"
+	// MessageStorageCookie keeps the messages in a signed cookie and drops
+	// the oldest ones that do not fit
+	// (django.contrib.messages.storage.cookie.CookieStorage).
+	MessageStorageCookie = "cookie"
+	// MessageStorageSession keeps the messages in the session
+	// (django.contrib.messages.storage.session.SessionStorage).
+	MessageStorageSession = "session"
+)
+
 // DefaultDatabaseAlias is the alias of the database used when none is named
 // (Django's DEFAULT_DB_ALIAS).
 const DefaultDatabaseAlias = "default"
@@ -121,6 +136,13 @@ type Settings struct {
 	// SessionExpireAtBrowserClose makes the session cookie a browser-session
 	// cookie (SESSION_EXPIRE_AT_BROWSER_CLOSE, default false).
 	SessionExpireAtBrowserClose bool `env:"SESSION_EXPIRE_AT_BROWSER_CLOSE"`
+
+	// MessageStorage selects where the messages framework keeps the messages
+	// between requests: MessageStorageFallback (default),
+	// MessageStorageCookie or MessageStorageSession (MESSAGE_STORAGE). The
+	// messages cookie takes the domain and the Secure, HttpOnly and SameSite
+	// attributes of the session cookie, as in Django.
+	MessageStorage string `env:"MESSAGE_STORAGE"`
 
 	// CSRFTrustedOrigins lists the origins trusted for unsafe requests, each
 	// with its scheme (CSRF_TRUSTED_ORIGINS).

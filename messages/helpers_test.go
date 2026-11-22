@@ -3,6 +3,7 @@ package messages_test
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"testing/fstest"
@@ -53,6 +54,8 @@ var levelNames = []string{"debug", "info", "success", "warning", "error"}
 
 // siteOptions selects the setup of the test site.
 type siteOptions struct {
+	// storage is the storage of the message middleware (MESSAGE_STORAGE).
+	storage messages.StorageKind
 	// withoutMessages leaves out the message middleware and the context
 	// processor (the modify_settings of test_middleware_disabled).
 	withoutMessages bool
@@ -103,7 +106,7 @@ func newSite(t *testing.T, opts siteOptions) http.Handler {
 
 	var h http.Handler = mux
 	if !opts.withoutMessages {
-		h = messages.Middleware(h)
+		h = messages.MiddlewareWithOptions(messages.Options{Storage: opts.storage, Cookie: testCookieOptions})(h)
 	}
 	return sessions.Middleware(sessions.NewSignedCookieStore([]byte("messages-tests")), sessions.DefaultCookieName)(h)
 }
@@ -122,17 +125,96 @@ func withConfig(t *testing.T, cfg messages.Config) {
 	t.Cleanup(messages.Configure(cfg))
 }
 
-// newStorage returns a session storage on a fresh session.
-func newStorage() *messages.Storage {
-	return messages.NewSessionStorage(sessions.NewSignedCookieStore([]byte("k")).New())
+// testSecret is the SECRET_KEY of the tests.
+var testSecret = []byte("messages-tests-secret")
+
+// testCookieOptions are the cookie settings of the cookie and fallback
+// storages in the tests.
+var testCookieOptions = messages.CookieOptions{Secret: testSecret}
+
+// storageKinds are the storages that Django runs BaseTests for: CookieTests,
+// SessionTests and FallbackTests.
+var storageKinds = []struct {
+	name string
+	kind messages.StorageKind
+}{
+	{"cookie", messages.StorageCookie},
+	{"session", messages.StorageSession},
+	{"fallback", messages.StorageFallback},
 }
 
-// storageWith returns a storage whose loaded messages are data, without
-// reading the session (BaseTests.get_storage).
-func storageWith(data ...messages.Message) *messages.Storage {
-	s := newStorage()
+// eachStorage runs f as a subtest for each storage kind.
+func eachStorage(t *testing.T, f func(t *testing.T, kind messages.StorageKind)) {
+	t.Helper()
+	for _, sk := range storageKinds {
+		t.Run(sk.name, func(t *testing.T) { f(t, sk.kind) })
+	}
+}
+
+// testStorage is a storage together with the session and the response header
+// that it writes to.
+type testStorage struct {
+	*messages.Storage
+	sess   *sessions.Session
+	header http.Header
+}
+
+// newStorage returns a storage of kind for a request without a messages
+// cookie and with a fresh session.
+func newStorage(kind messages.StorageKind) *testStorage {
+	sess := sessions.NewSignedCookieStore([]byte("k")).New()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	var s *messages.Storage
+	switch kind {
+	case messages.StorageCookie:
+		s = messages.NewCookieStorage(r, testCookieOptions)
+	case messages.StorageFallback:
+		s = messages.NewFallbackStorage(r, sess, testCookieOptions)
+	default:
+		s = messages.NewSessionStorage(sess)
+	}
+	return &testStorage{Storage: s, sess: sess, header: http.Header{}}
+}
+
+// storageWith returns a storage of kind whose loaded messages are data,
+// without reading the request (BaseTests.get_storage).
+func storageWith(kind messages.StorageKind, data ...messages.Message) *testStorage {
+	s := newStorage(kind)
 	s.SetLoaded(data)
 	return s
+}
+
+// update stores the unread messages, as update(response) in Django's tests.
+func (s *testStorage) update() []messages.Message { return s.Update(s.header) }
+
+// storedCount returns the number of messages that the last update stored in
+// the cookie and the session (BaseTests.stored_messages_count).
+func (s *testStorage) storedCount() int {
+	return storedCookieCount(s.header) + storedSessionCount(s.sess)
+}
+
+// storedCookieCount returns the number of messages in the messages cookie
+// that h sets, 0 for a cookie that is deleted (stored_cookie_messages_count
+// of Django's test_cookie.py).
+func storedCookieCount(h http.Header) int {
+	var c *http.Cookie
+	for _, sc := range (&http.Response{Header: h}).Cookies() {
+		if sc.Name == messages.CookieName {
+			c = sc
+		}
+	}
+	if c == nil || c.MaxAge < 0 {
+		return 0
+	}
+	ms, _, _ := messages.DecodeCookie(testCookieOptions, c.Value)
+	return len(ms)
+}
+
+// storedSessionCount returns the number of messages in sess
+// (stored_session_messages_count of Django's test_session.py).
+func storedSessionCount(sess *sessions.Session) int {
+	v, _ := sess.Get(messages.SessionKey)
+	return len(messages.DecodeMessages(v))
 }
 
 // contextMessages calls the lazy "messages" value of the last rendered
@@ -195,23 +277,6 @@ func mustPanic(t *testing.T, f func()) (v any) {
 	f()
 	t.Fatal("no panic")
 	return nil
-}
-
-// storageAndSession returns a storage whose loaded messages are data, as
-// storageWith does, together with the session it writes to, so that a test
-// can count the stored messages (stored_session_messages_count).
-func storageAndSession(data ...messages.Message) (*messages.Storage, *sessions.Session) {
-	sess := sessions.NewSignedCookieStore([]byte("k")).New()
-	s := messages.NewSessionStorage(sess)
-	s.SetLoaded(data)
-	return s, sess
-}
-
-// storedCount returns the number of messages in the session after an Update
-// (BaseTests.stored_messages_count of SessionTests).
-func storedCount(sess *sessions.Session) int {
-	v, _ := sess.Get(messages.SessionKey)
-	return len(messages.DecodeMessages(v))
 }
 
 // addLevelMessages adds six messages of different levels, one of them

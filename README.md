@@ -140,7 +140,7 @@ go run . startproject --template https://example.com/blog_template.tgz blog
 | `admin`           | The admin site: changelist, actions, add/change/delete, history, permissions. |
 | `scaffold`        | Project and app scaffolding used by `startproject`/`startapp`.             |
 | `contenttypes`    | Content types of the installed models.                                     |
-| `messages`        | One-time messages for the next page, stored in the session.                |
+| `messages`        | One-time messages for the next page, in a signed cookie or the session.    |
 | `middleware`      | Host validation, security headers, X-Frame-Options, gzip, error pages.     |
 | `staticfiles`     | Static file finders, `collectstatic`, `findstatic` and debug serving.      |
 | `checks`          | The system check framework behind the `check` command.                     |
@@ -242,8 +242,7 @@ listed one by one in [`fidelity/divergences.md`](fidelity/divergences.md).
   database store needs a database and the installed `sessions` app; without
   them, sessions use signed cookies. The middleware loads the session of the
   cookie with each request, also when no view reads it, where Django loads it
-  on first access. Messages use the session only: no cookie or
-  fallback storage. A message added after the response
+  on first access. A message added after the response
   headers are written is lost, and reading `messages` in a template, also in
   `{% if messages %}`, marks them as read.
 - **Commands:** `runserver` has no autoreload, and `shell` is a query shell over

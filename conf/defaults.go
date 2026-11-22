@@ -30,6 +30,8 @@ const (
 //     Django lists five dotted class paths.
 //   - SessionEngine is SessionEngineDB, the short name of
 //     "django.contrib.sessions.backends.db".
+//   - MessageStorage is MessageStorageFallback, the short name of
+//     "django.contrib.messages.storage.fallback.FallbackStorage".
 //   - Database has the driver "sqlite" and no DSN; Django's DATABASES is empty.
 //   - Host and Port are the defaults of runserver, which are not settings in
 //     Django.
@@ -54,6 +56,8 @@ func Defaults() Settings {
 		SessionCookieHTTPOnly: true,
 		SessionCookieSameSite: "Lax",
 		SessionCookiePath:     "/",
+
+		MessageStorage: MessageStorageFallback,
 
 		CSRFCookieName:     "csrftoken",
 		CSRFCookieAge:      52 * 7 * 24 * time.Hour,

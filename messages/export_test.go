@@ -1,5 +1,7 @@
 package messages
 
+import "time"
+
 // SetLoaded sets the messages that the request brought without reading the
 // session, as the get_storage helper of Django's tests sets _loaded_data.
 func (s *Storage) SetLoaded(ms []Message) {
@@ -25,3 +27,35 @@ var DecodeMessages = decodeMessages
 
 // PyRepr exposes pyRepr.
 var PyRepr = pyRepr
+
+// EncodeCookie returns the signed cookie value of ms, with the notFinished
+// marker at the end when unfinished is set, as the set_cookie_data helper of
+// Django's tests writes it. No messages give "" unless encodeEmpty is set.
+func EncodeCookie(opts CookieOptions, ms []Message, unfinished, encodeEmpty bool) string {
+	parts := make([]string, 0, len(ms)+1)
+	for _, m := range ms {
+		parts = append(parts, encodeMessage(m))
+	}
+	if unfinished {
+		parts = append(parts, notFinishedJSON)
+	}
+	return (&cookieBackend{opts: opts, now: time.Now}).encodeParts(parts, encodeEmpty)
+}
+
+// DecodeCookie exposes decodeCookie (Django's CookieStorage._decode).
+var DecodeCookie = decodeCookie
+
+// BisectKeepLeft exposes bisectKeepLeft for a list of numbers.
+var BisectKeepLeft = bisectKeepLeft[int]
+
+// BisectKeepRight exposes bisectKeepRight for a list of numbers.
+var BisectKeepRight = bisectKeepRight[int]
+
+// EncodeCookieAt returns the value of EncodeCookie signed at t.
+func EncodeCookieAt(opts CookieOptions, ms []Message, t time.Time) string {
+	parts := make([]string, 0, len(ms))
+	for _, m := range ms {
+		parts = append(parts, encodeMessage(m))
+	}
+	return (&cookieBackend{opts: opts, now: func() time.Time { return t }}).encodeParts(parts, false)
+}

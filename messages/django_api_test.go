@@ -15,7 +15,7 @@ import (
 // setUp and test_ok of ApiTests: request._messages = DummyStorage()).
 func apiRequest() (*http.Request, *messages.Storage) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	storage := newStorage()
+	storage := newStorage(messages.StorageSession).Storage
 	return req.WithContext(messages.NewContext(req.Context(), storage)), storage
 }
 
@@ -44,7 +44,7 @@ func TestApiTestsRequestIsNone(t *testing.T) {
 // Ported from Django: tests/messages_tests/test_api.py::ApiTests.test_middleware_missing
 func TestApiTestsMiddlewareMissing(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	storage := newStorage()
+	storage := newStorage(messages.StorageSession).Storage
 	msg := "You cannot add messages without installing " +
 		"django.contrib.messages.middleware.MessageMiddleware"
 	err := messages.Add(req, messages.LevelDebug, "some message")
@@ -62,7 +62,7 @@ func TestApiTestsMiddlewareMissing(t *testing.T) {
 // error.
 func TestApiTestsMiddlewareMissingSilently(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	storage := newStorage()
+	storage := newStorage(messages.StorageSession).Storage
 	_ = messages.Add(req, messages.LevelDebug, "some message")
 	if got := storage.Queued(); len(got) != 0 {
 		t.Errorf("stored = %v, want none", got)
@@ -116,97 +116,4 @@ func TestSuccessMessageMixinTestsSetMessagesSuccess(t *testing.T) {
 // Ported from Django: tests/messages_tests/test_mixins.py::SuccessMessageMixinTests.test_set_messages_success_on_delete
 func TestSuccessMessageMixinTestsSetMessagesSuccessOnDelete(t *testing.T) {
 	t.Skip("SuccessMessageMixin needs forms and generic views, which Djan-Go-Go does not have")
-}
-
-// The tests below are the tests of Django's cookie and fallback message
-// storages, which Djan-Go-Go does not have.
-
-// Ported from Django: tests/messages_tests/test_cookie.py::CookieTests.test_get
-func TestCookieTestsGet(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_cookie.py::CookieTests.test_cookie_settings
-func TestCookieTestsCookieSettings(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_cookie.py::CookieTests.test_get_bad_cookie
-func TestCookieTestsGetBadCookie(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_cookie.py::CookieTests.test_max_cookie_length
-func TestCookieTestsMaxCookieLength(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_cookie.py::CookieTests.test_message_rfc6265
-func TestCookieTestsMessageRfc6265(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_cookie.py::CookieTests.test_json_encoder_decoder
-func TestCookieTestsJsonEncoderDecoder(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_cookie.py::CookieTests.test_safedata
-func TestCookieTestsSafedata(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_cookie.py::CookieTests.test_extra_tags
-func TestCookieTestsExtraTags(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_cookie.py::BisectTests.test_bisect_keep_left
-func TestBisectTestsBisectKeepLeft(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_cookie.py::BisectTests.test_bisect_keep_right
-func TestBisectTestsBisectKeepRight(t *testing.T) {
-	t.Skip("Djan-Go-Go has no cookie message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_fallback.py::FallbackTests.test_get
-func TestFallbackTestsGet(t *testing.T) {
-	t.Skip("Djan-Go-Go has no fallback message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_fallback.py::FallbackTests.test_get_empty
-func TestFallbackTestsGetEmpty(t *testing.T) {
-	t.Skip("Djan-Go-Go has no fallback message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_fallback.py::FallbackTests.test_get_fallback
-func TestFallbackTestsGetFallback(t *testing.T) {
-	t.Skip("Djan-Go-Go has no fallback message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_fallback.py::FallbackTests.test_get_fallback_only
-func TestFallbackTestsGetFallbackOnly(t *testing.T) {
-	t.Skip("Djan-Go-Go has no fallback message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_fallback.py::FallbackTests.test_flush_used_backends
-func TestFallbackTestsFlushUsedBackends(t *testing.T) {
-	t.Skip("Djan-Go-Go has no fallback message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_fallback.py::FallbackTests.test_no_fallback
-func TestFallbackTestsNoFallback(t *testing.T) {
-	t.Skip("Djan-Go-Go has no fallback message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_fallback.py::FallbackTests.test_session_fallback
-func TestFallbackTestsSessionFallback(t *testing.T) {
-	t.Skip("Djan-Go-Go has no fallback message storage")
-}
-
-// Ported from Django: tests/messages_tests/test_fallback.py::FallbackTests.test_session_fallback_only
-func TestFallbackTestsSessionFallbackOnly(t *testing.T) {
-	t.Skip("Djan-Go-Go has no fallback message storage")
 }

@@ -740,6 +740,17 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   whose `CAST` does not convert as Django's does implements
   `orm.CastDialect`. A condition of `When` that spans a relation joins it
   with a LEFT OUTER JOIN.
+- Messages: Django's cookie and fallback storages. Applications keep the
+  messages in a signed `messages` cookie and the ones that do not fit into
+  2048 bytes in the session, as Django's default `FallbackStorage` does. The
+  new setting `MESSAGE_STORAGE` (`fallback`, `cookie` or `session`) selects
+  the storage, and the cookie takes the `SESSION_COOKIE_*` attributes and is
+  signed with `SECRET_KEY`, in Django's format, so a Django process with the
+  same secret reads it. `messages.MiddlewareWithOptions`,
+  `messages.NewCookieStorage` and `messages.NewFallbackStorage` select the
+  storage outside an application; `messages.Middleware` keeps the session
+  storage. `Storage.Update` now takes the response header and returns the
+  messages that no storage kept.
 
 ### Changed
 

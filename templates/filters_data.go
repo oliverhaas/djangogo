@@ -12,6 +12,7 @@ import (
 
 	"github.com/flosch/pongo2/v6"
 
+	"github.com/oliverhaas/djangogo/internal/pyjson"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -24,40 +25,40 @@ func pyJSON(b *strings.Builder, v any) error {
 		b.WriteString("null")
 		return nil
 	case string:
-		pyJSONString(b, x)
+		pyjson.WriteString(b, x)
 		return nil
 	case modelView:
-		pyJSONString(b, x.label())
+		pyjson.WriteString(b, x.label())
 		return nil
 	case templateTime:
-		pyJSONString(b, x.Format("2006-01-02T15:04:05.999999Z07:00"))
+		pyjson.WriteString(b, x.Format("2006-01-02T15:04:05.999999Z07:00"))
 		return nil
 	case time.Time:
-		pyJSONString(b, x.Format("2006-01-02T15:04:05.999999Z07:00"))
+		pyjson.WriteString(b, x.Format("2006-01-02T15:04:05.999999Z07:00"))
 		return nil
 	case templateDate:
-		pyJSONString(b, x.Date.String())
+		pyjson.WriteString(b, x.Date.String())
 		return nil
 	case orm.Date:
-		pyJSONString(b, x.String())
+		pyjson.WriteString(b, x.String())
 		return nil
 	case templateTimeOfDay:
-		pyJSONString(b, x.Time.String())
+		pyjson.WriteString(b, x.Time.String())
 		return nil
 	case orm.Time:
-		pyJSONString(b, x.String())
+		pyjson.WriteString(b, x.String())
 		return nil
 	case orm.Decimal:
-		pyJSONString(b, x.String())
+		pyjson.WriteString(b, x.String())
 		return nil
 	case orm.UUID:
-		pyJSONString(b, x.String())
+		pyjson.WriteString(b, x.String())
 		return nil
 	case templateDuration:
-		pyJSONString(b, x.String())
+		pyjson.WriteString(b, x.String())
 		return nil
 	case time.Duration:
-		pyJSONString(b, formatDurationPython(x))
+		pyjson.WriteString(b, formatDurationPython(x))
 		return nil
 	case *pongo2.Value:
 		return pyJSON(b, x.Interface())
@@ -100,7 +101,7 @@ func pyJSON(b *strings.Builder, v any) error {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			pyJSONString(b, k)
+			pyjson.WriteString(b, k)
 			b.WriteString(": ")
 			if err := pyJSON(b, rv.MapIndex(reflect.ValueOf(k).Convert(rv.Type().Key())).Interface()); err != nil {
 				return err
@@ -123,39 +124,8 @@ func pyJSON(b *strings.Builder, v any) error {
 // the JSON of a Django view by hand uses it for the strings.
 func QuoteJSON(s string) string {
 	var b strings.Builder
-	pyJSONString(&b, s)
+	pyjson.WriteString(&b, s)
 	return b.String()
-}
-
-// pyJSONString writes s as a JSON string in ASCII.
-func pyJSONString(b *strings.Builder, s string) {
-	b.WriteByte('"')
-	for _, r := range s {
-		switch {
-		case r == '"':
-			b.WriteString(`\"`)
-		case r == '\\':
-			b.WriteString(`\\`)
-		case r == '\n':
-			b.WriteString(`\n`)
-		case r == '\r':
-			b.WriteString(`\r`)
-		case r == '\t':
-			b.WriteString(`\t`)
-		case r == '\b':
-			b.WriteString(`\b`)
-		case r == '\f':
-			b.WriteString(`\f`)
-		case r < 0x20 || (r >= 0x7f && r <= 0xffff):
-			fmt.Fprintf(b, `\u%04x`, r)
-		case r > 0xffff:
-			r -= 0x10000
-			fmt.Fprintf(b, `\u%04x\u%04x`, 0xd800+(r>>10), 0xdc00+(r&0x3ff))
-		default:
-			b.WriteRune(r)
-		}
-	}
-	b.WriteByte('"')
 }
 
 // jsonEscape returns the JSON escape of r in the form Django writes it, with

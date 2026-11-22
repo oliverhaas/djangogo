@@ -4,8 +4,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/messages"
@@ -48,7 +50,7 @@ func TestSessionFormat(t *testing.T) {
 	s := messages.NewSessionStorage(sess)
 	s.Add(messages.LevelInfo, "héllo \"x\"", "")
 	s.Add(messages.LevelError, "bad", "tag1 tag2")
-	s.Update()
+	s.Update(http.Header{})
 	v, _ := sess.Get(messages.SessionKey)
 	want := `[["__json_message",0,20,"héllo \"x\"",""],["__json_message",0,40,"bad","tag1 tag2"]]`
 	if v != want {
@@ -64,6 +66,52 @@ func TestSessionFormat(t *testing.T) {
 	}
 }
 
+// TestCookieFormat checks the messages cookie against values that Django
+// 6.0's CookieStorage._encode wrote with SECRET_KEY "messages-tests-secret" at
+// the Unix time 1795000000, so a Django process that shares the secret reads
+// the cookie. Go's zlib output differs from Python's, so only a value that is
+// too short to compress is compared byte for byte.
+func TestCookieFormat(t *testing.T) {
+	const (
+		plain      = "W1siX19qc29uX21lc3NhZ2UiLDAsNDAsIkhpIiwiIl1d:1xTdUu:yuKp-oIhgr-lC-VGNaUcHWA1CjmpsqvDeelqC9jeCKA"
+		pair       = ".eJyLjlaKj88qzs-Lz00tLk5MT1XSMdAxMtBR8kjNyclXiCk1MjC0VIhRKs8vykmJUVLSUVKK1cHUY6hjZKqjZJNkl59to59kB1RWkpiuFBsLAJTPHOE:1xTdUu:wh-93u1f6o2S8TZ6XzGnxnNSSUHUW0RbZMKalNNc1m0"
+		unfinished = ".eJxly0EKgzAQBdCryF8PNAZcFILr3sHIoJim1pgBJ-L1m4W77t8bBjB_VTLvQXWKAWTIGsIrpCSNP61pn43HJUdaPEDASP-nJdsR3NzL5h5zX1mZYpUV3kazlPeaV_2EhRnjDwdDJsA:1xTdUu:uaYk8ZULVRTwhwuNIaL324E40r6pcULErlSSn32GXq0"
+		// oldSecret is plain signed with the SECRET_KEY "old-secret".
+		oldSecret = "W1siX19qc29uX21lc3NhZ2UiLDAsNDAsIkhpIiwiIl1d:1xTdUu:84cbDmG0yvwIsbXCo2XgJpZZ9GMokK27H7tSPInChdc"
+	)
+	opts := messages.CookieOptions{Secret: []byte("messages-tests-secret")}
+	hi := []messages.Message{{Level: messages.LevelError, Message: "Hi"}}
+	if got := messages.EncodeCookieAt(opts, hi, time.Unix(1795000000, 0)); got != plain {
+		t.Errorf("encoded = %s, want %s", got, plain)
+	}
+
+	twoMessages := []messages.Message{
+		{Level: messages.LevelInfo, Message: "Hello \u2019 \"world\""},
+		{Level: messages.LevelSuccess, Message: "<b>ok</b>", ExtraTags: "tag", Safe: true},
+	}
+	tests := []struct {
+		name  string
+		value string
+		opts  messages.CookieOptions
+		want  []messages.Message
+		all   bool
+	}{
+		{"plain", plain, opts, hi, true},
+		{"compressed", pair, opts, twoMessages, true},
+		{"unfinished", unfinished, opts, twoMessages, false},
+		{"fallback secret", oldSecret, messages.CookieOptions{Secret: []byte("new"), Fallbacks: [][]byte{[]byte("old-secret")}}, hi, true},
+	}
+	for _, tt := range tests {
+		ms, all, ok := messages.DecodeCookie(tt.opts, tt.value)
+		if !ok || all != tt.all || !slices.Equal(ms, tt.want) {
+			t.Errorf("%s: decoded %v, all %v, ok %v; want %v, all %v", tt.name, ms, all, ok, tt.want, tt.all)
+		}
+	}
+	if _, _, ok := messages.DecodeCookie(opts, oldSecret); ok {
+		t.Error("a value of another secret decoded")
+	}
+}
+
 // No Django test exists: a safe message, Django's message of a SafeString,
 // is printed as it is, and the text of other messages is escaped.
 func TestSafeMessageRendersAsHTML(t *testing.T) {
@@ -73,7 +121,7 @@ func TestSafeMessageRendersAsHTML(t *testing.T) {
 	s := messages.NewSessionStorage(sess)
 	s.AddSafe(messages.LevelSuccess, "<b>safe</b>", "")
 	s.Add(messages.LevelInfo, "<b>plain</b>", "")
-	s.Update()
+	s.Update(http.Header{})
 	v, _ := sess.Get(messages.SessionKey)
 	if str, _ := v.(string); !strings.HasPrefix(str, `[["__json_message",1,25,`) || !strings.Contains(str, `],["__json_message",0,20,`) {
 		t.Errorf("session value = %v, want the safe flag on the first message only", v)
@@ -143,9 +191,9 @@ func TestAddWithoutMiddleware(t *testing.T) {
 
 // TestExtraTagsJoined checks that several extra tags are joined with spaces.
 func TestExtraTagsJoined(t *testing.T) {
-	s := newStorage()
+	s := newStorage(messages.StorageSession)
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r = r.WithContext(messages.NewContext(r.Context(), s))
+	r = r.WithContext(messages.NewContext(r.Context(), s.Storage))
 	if err := messages.Warning(r, "x", "a", "b"); err != nil {
 		t.Fatal(err)
 	}
@@ -157,9 +205,9 @@ func TestExtraTagsJoined(t *testing.T) {
 // TestContextProcessorLevels checks the template view of a message and the
 // level names.
 func TestContextProcessorLevels(t *testing.T) {
-	s := storageWith(messages.Message{Level: messages.LevelError, Message: "bad", ExtraTags: "x"})
+	s := storageWith(messages.StorageSession, messages.Message{Level: messages.LevelError, Message: "bad", ExtraTags: "x"})
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r = r.WithContext(messages.NewContext(r.Context(), s))
+	r = r.WithContext(messages.NewContext(r.Context(), s.Storage))
 	ctx := messages.ContextProcessor(r)
 	if s.Used() {
 		t.Error("the context processor read the messages before a template used them")

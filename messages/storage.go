@@ -2,6 +2,7 @@ package messages
 
 import (
 	"encoding/json"
+	"net/http"
 	"slices"
 
 	"github.com/oliverhaas/djangogo/sessions"
@@ -26,13 +27,14 @@ type configError string
 // Error returns the text of the error.
 func (e configError) Error() string { return string(e) }
 
-// Storage holds the messages of one request in its session (Django's
-// SessionStorage). The messages that the request brought are read from the
-// session on first use, and Update writes back the ones still unread. A
-// Storage is not safe for concurrent use.
+// Storage holds the messages of one request (Django's BaseStorage). The
+// messages that the request brought are read on first use, and Update stores
+// the ones still unread for the next request. Where they are kept depends on
+// the constructor: NewSessionStorage, NewCookieStorage or NewFallbackStorage.
+// A Storage is not safe for concurrent use.
 type Storage struct {
-	sess *sessions.Session
-	// loaded holds the messages read from the session, once loadedOK is
+	b backend
+	// loaded holds the messages that the request brought, once loadedOK is
 	// set, and the messages that a read moved over from queued.
 	loaded   []Message
 	loadedOK bool
@@ -46,23 +48,54 @@ type Storage struct {
 	levelSet bool
 }
 
-// NewSessionStorage returns the storage of the messages in sess. Middleware
-// makes one for every request; a test of a handler can put one into the
-// request context with NewContext. It panics when sess is nil, as Django's
-// SessionStorage raises ImproperlyConfigured for a request without a session.
-func NewSessionStorage(sess *sessions.Session) *Storage {
-	if sess == nil {
-		panic(configError(noSessionMessage))
-	}
-	return &Storage{sess: sess}
+// backend loads and stores the messages of one request: the _get and _store
+// methods of Django's storage classes.
+type backend interface {
+	// load returns the stored messages, nil when the backend holds no data,
+	// and whether they are all the messages that were stored (Django's
+	// all_retrieved). bad reports stored data that could not be read.
+	load() (ms []Message, all, bad bool)
+	// store keeps ms for the next request and returns the messages it could
+	// not keep. removeOldest leaves out the oldest messages first, otherwise
+	// the newest. A backend that writes a cookie adds its header to h.
+	store(ms []Message, h http.Header, removeOldest bool) []Message
 }
 
-// loadedMessages returns the messages that the request brought, reading them
-// from the session on the first call.
+// NewSessionStorage returns the storage of the messages in sess (Django's
+// SessionStorage). Middleware makes one for every request; a test of a
+// handler can put one into the request context with NewContext. It panics
+// when sess is nil, as Django's SessionStorage raises ImproperlyConfigured
+// for a request without a session.
+func NewSessionStorage(sess *sessions.Session) *Storage {
+	return &Storage{b: newSessionBackend(sess)}
+}
+
+// NewCookieStorage returns the storage of the messages in a signed cookie
+// (Django's CookieStorage): the messages that r brought in the cookie, and
+// Update writes the cookie into the response header. Messages that do not
+// fit into MaxCookieSize are dropped, the oldest first. It panics when
+// opts.Secret is empty.
+func NewCookieStorage(r *http.Request, opts CookieOptions) *Storage {
+	return &Storage{b: newCookieBackend(r, opts)}
+}
+
+// NewFallbackStorage returns the storage of the messages in a signed cookie
+// and, for the messages that do not fit there, in sess (Django's
+// FallbackStorage, its default storage). It panics when sess is nil or
+// opts.Secret is empty.
+func NewFallbackStorage(r *http.Request, sess *sessions.Session, opts CookieOptions) *Storage {
+	backends := []backend{newCookieBackend(r, opts), newSessionBackend(sess)}
+	return &Storage{b: &fallbackBackend{backends: backends, used: make([]bool, len(backends))}}
+}
+
+// loadedMessages returns the messages that the request brought, loading them
+// on the first call. Data that cannot be read marks the storage used, so that
+// Update removes it, as Django's CookieStorage._decode does.
 func (s *Storage) loadedMessages() []Message {
 	if !s.loadedOK {
-		v, _ := s.sess.Get(SessionKey)
-		s.loaded = decodeMessages(v)
+		var bad bool
+		s.loaded, _, bad = s.b.load()
+		s.used = s.used || bad
 		s.loadedOK = true
 	}
 	return s.loaded
@@ -131,26 +164,55 @@ func (s *Storage) SetLevel(level int) {
 // storage.level = None).
 func (s *Storage) ResetLevel() { s.levelSet = false }
 
-// Update writes the unread messages to the session (Django's update). After a
-// read only the messages added since are kept. Without a read the messages
-// that the request brought are kept too, but the session is only touched when
-// a message was added. Middleware calls it before the response goes out.
-func (s *Storage) Update() {
+// Update stores the unread messages for the next request and returns the
+// ones that could not be stored (Django's update). After a read only the
+// messages added since are kept. Without a read the messages that the request
+// brought are kept too, but nothing is written unless a message was added. A
+// storage that writes a cookie adds its Set-Cookie header to h, the header of
+// the response; the session storage does not use h. Middleware calls it
+// before the response headers go out.
+func (s *Storage) Update(h http.Header) []Message {
 	switch {
 	case s.used:
-		s.store(s.queued)
+		return s.b.store(s.queued, h, true)
 	case s.addedNew:
-		s.store(append(slices.Clone(s.loadedMessages()), s.queued...))
+		return s.b.store(append(slices.Clone(s.loadedMessages()), s.queued...), h, true)
 	}
+	return nil
 }
 
-// store writes ms to the session, or removes the key when ms is empty.
-func (s *Storage) store(ms []Message) {
-	if len(ms) == 0 {
-		s.sess.Pop(SessionKey)
-		return
+// sessionBackend keeps the messages in the session (Django's
+// SessionStorage).
+type sessionBackend struct {
+	sess *sessions.Session
+}
+
+// newSessionBackend returns the backend of sess. It panics when sess is nil.
+func newSessionBackend(sess *sessions.Session) sessionBackend {
+	if sess == nil {
+		panic(configError(noSessionMessage))
 	}
-	s.sess.Set(SessionKey, encodeMessages(ms))
+	return sessionBackend{sess: sess}
+}
+
+// load reads the messages of the session, which always holds all of them.
+func (b sessionBackend) load() (ms []Message, all, bad bool) {
+	v, ok := b.sess.Get(SessionKey)
+	if !ok {
+		return nil, true, false
+	}
+	return decodeMessages(v), true, false
+}
+
+// store writes ms to the session, or removes the key when ms is empty. The
+// session keeps every message.
+func (b sessionBackend) store(ms []Message, _ http.Header, _ bool) []Message {
+	if len(ms) == 0 {
+		b.sess.Pop(SessionKey)
+		return nil
+	}
+	b.sess.Set(SessionKey, encodeMessages(ms))
+	return nil
 }
 
 // encodeMessages returns ms in Django's JSON format: a list of

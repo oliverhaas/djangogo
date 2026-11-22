@@ -55,6 +55,8 @@ var djangoDefaults = map[string]any{
 	"SESSION_SAVE_EVERY_REQUEST":      false,
 	"SESSION_EXPIRE_AT_BROWSER_CLOSE": false,
 
+	"MESSAGE_STORAGE": "fallback", // differs: "django.contrib.messages.storage.fallback.FallbackStorage"
+
 	"CSRF_TRUSTED_ORIGINS":   []string(nil),
 	"CSRF_COOKIE_NAME":       "csrftoken",
 	"CSRF_COOKIE_AGE":        31449600 * time.Second,

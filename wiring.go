@@ -312,6 +312,35 @@ func (a *Application) sessionOptions() sessions.Options {
 	}
 }
 
+// messageOptions returns the options of the message middleware from
+// MESSAGE_STORAGE. The messages cookie is signed with SECRET_KEY and takes the
+// SESSION_COOKIE_* attributes, as in Django's CookieStorage.
+func (a *Application) messageOptions() messages.Options {
+	s := a.Settings
+	storage := messages.StorageFallback
+	switch s.MessageStorage {
+	case conf.MessageStorageCookie:
+		storage = messages.StorageCookie
+	case conf.MessageStorageSession:
+		storage = messages.StorageSession
+	}
+	fallbacks := make([][]byte, len(s.SecretKeyFallbacks))
+	for i, key := range s.SecretKeyFallbacks {
+		fallbacks[i] = []byte(key)
+	}
+	return messages.Options{
+		Storage: storage,
+		Cookie: messages.CookieOptions{
+			Secret:          []byte(s.SecretKey),
+			Fallbacks:       fallbacks,
+			Domain:          s.SessionCookieDomain,
+			Secure:          s.SessionCookieSecure,
+			DisableHTTPOnly: !s.SessionCookieHTTPOnly,
+			SameSite:        sameSite(s.SessionCookieSameSite),
+		},
+	}
+}
+
 // csrfOptions returns the options of the CSRF middleware from the CSRF_*
 // settings. resolve, when not nil, finds the view of a request so that a view
 // marked with csrf.Exempt is not checked.

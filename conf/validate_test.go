@@ -113,6 +113,18 @@ func TestValidate(t *testing.T) {
 			}},
 		},
 
+		{name: "cookie message storage", change: func(s *conf.Settings) { s.MessageStorage = conf.MessageStorageCookie }},
+		{name: "session message storage", change: func(s *conf.Settings) { s.MessageStorage = conf.MessageStorageSession }},
+		{
+			name:   "Django's dotted path of a message storage",
+			change: func(s *conf.Settings) { s.MessageStorage = "django.contrib.messages.storage.session.SessionStorage" },
+			want: []conf.Problem{{
+				Setting: "MESSAGE_STORAGE",
+				Msg: `The MESSAGE_STORAGE setting must be "fallback", "cookie" or "session", ` +
+					`but is "django.contrib.messages.storage.session.SessionStorage".`,
+			}},
+		},
+
 		{
 			name: "ages of zero",
 			change: func(s *conf.Settings) {
@@ -214,6 +226,7 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 	s.TimeZone = "Mars/Olympus"
 	s.StaticURL = "static"
 	s.SessionEngine = "cache"
+	s.MessageStorage = "cache"
 	s.SessionCookieAge = -1
 	s.SessionCookieSameSite = "Loose"
 	s.CSRFTrustedOrigins = []string{"example.com"}
@@ -229,7 +242,7 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 		settings = append(settings, problem.Setting)
 	}
 	djangotest.AssertEqual(t, settings, []string{
-		"PORT", "DATABASES", "TIME_ZONE", "STATIC_URL", "SESSION_ENGINE", "SESSION_COOKIE_AGE",
+		"PORT", "DATABASES", "TIME_ZONE", "STATIC_URL", "SESSION_ENGINE", "MESSAGE_STORAGE", "SESSION_COOKIE_AGE",
 		"SESSION_COOKIE_SAMESITE", "CSRF_TRUSTED_ORIGINS", "CSRF_COOKIE_AGE", "CSRF_COOKIE_SAMESITE",
 		"SECURE_HSTS_SECONDS", "SECURE_PROXY_SSL_HEADER", "X_FRAME_OPTIONS",
 	})
