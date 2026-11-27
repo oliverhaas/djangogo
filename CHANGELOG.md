@@ -975,6 +975,18 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   the URL name `admin_password_reset` exists.
 - Middleware: `AllowedHosts` logs a rejected host at the error level with
   Django's message, as Django's `django.security.DisallowedHost` logger does.
+- ORM: `SaveRaw` writes an object exactly as given, like Django's
+  `save_base(raw=True)`: no defaults, no `auto_now` stamps, an update of the
+  row with the object's key or an insert when that row is missing. `IsRaw`
+  tells a `PreSave` or `PostSave` handler that the save is raw, like the `raw`
+  argument of Django's save signals.
+- ORM: `QueryModel` and `RelatedMany` return a `ModelQuerySet` for a model
+  known only at run time, with `Filter`, `Exclude`, `OrderBy`, `Only`, `All`
+  and `Count`.
+- ORM: `Flush` empties tables and restarts their auto primary keys,
+  `ResetSequences` moves the PostgreSQL key sequences past the largest key,
+  and `CheckForeignKeys` reports a broken reference inside a transaction
+  before the commit, with Django's message on SQLite.
 
 ### Changed
 
