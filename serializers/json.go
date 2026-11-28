@@ -113,47 +113,47 @@ func (JSONFormat) Deserialize(r io.Reader) iter.Seq2[*Object, error] {
 			return
 		}
 		for _, item := range list {
-			rawObj, ok := item.(pyjson.Object)
-			if !ok {
-				yield(nil, NewDeserializationError("Error deserializing object: expected an object"))
+			obj, err := objectFromJSON(item)
+			if err != nil {
+				yield(nil, err)
 				return
-			}
-			modelRaw, ok := rawObj.Get("model")
-			if !ok {
-				yield(nil, NewDeserializationError("Error deserializing object: 'model'"))
-				return
-			}
-			modelStr, ok := modelRaw.(string)
-			if !ok {
-				yield(nil, NewDeserializationError(fmt.Sprintf("Invalid model identifier: '%v'", modelRaw)))
-				return
-			}
-			fieldsRaw, ok := rawObj.Get("fields")
-			if !ok {
-				yield(nil, NewDeserializationError("Error deserializing object: 'fields'"))
-				return
-			}
-			fieldsObj, ok := fieldsRaw.(pyjson.Object)
-			if !ok {
-				yield(nil, NewDeserializationError("Error deserializing object: 'fields' must be an object"))
-				return
-			}
-			pkVal, hasPK := rawObj.Get("pk")
-			fields := make([]FieldValue, len(fieldsObj))
-			for i, m := range fieldsObj {
-				fields[i] = FieldValue{Name: m.Key, Value: m.Value}
-			}
-			obj := &Object{
-				Model:  modelStr,
-				PK:     pkVal,
-				HasPK:  hasPK,
-				Fields: fields,
 			}
 			if !yield(obj, nil) {
 				return
 			}
 		}
 	}
+}
+
+// objectFromJSON converts one decoded JSON value into an *Object for the json
+// and jsonl formats.
+func objectFromJSON(item any) (*Object, error) {
+	rawObj, ok := item.(pyjson.Object)
+	if !ok {
+		return nil, NewDeserializationError("Error deserializing object: expected an object")
+	}
+	modelRaw, ok := rawObj.Get("model")
+	if !ok {
+		return nil, NewDeserializationError("Error deserializing object: 'model'")
+	}
+	modelStr, ok := modelRaw.(string)
+	if !ok {
+		return nil, NewDeserializationError(fmt.Sprintf("Invalid model identifier: '%v'", modelRaw))
+	}
+	fieldsRaw, ok := rawObj.Get("fields")
+	if !ok {
+		return nil, NewDeserializationError("Error deserializing object: 'fields'")
+	}
+	fieldsObj, ok := fieldsRaw.(pyjson.Object)
+	if !ok {
+		return nil, NewDeserializationError("Error deserializing object: 'fields' must be an object")
+	}
+	pkVal, hasPK := rawObj.Get("pk")
+	fields := make([]FieldValue, len(fieldsObj))
+	for i, m := range fieldsObj {
+		fields[i] = FieldValue{Name: m.Key, Value: m.Value}
+	}
+	return &Object{Model: modelStr, PK: pkVal, HasPK: hasPK, Fields: fields}, nil
 }
 
 // DjangoJSONDefault converts temporal, duration, Decimal, and UUID values for

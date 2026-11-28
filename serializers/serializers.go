@@ -413,6 +413,7 @@ var (
 	registry   = []registryEntry{
 		{name: "python", format: pythonFormat{}},
 		{name: "json", format: JSONFormat{}},
+		{name: "jsonl", format: JSONLFormat{}},
 	}
 )
 

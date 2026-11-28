@@ -597,18 +597,9 @@ func TestSerializersPre1000ADDate(t *testing.T) {
 // Ported from Django: tests/serializers/tests.py::SerializersTestBase.test_pkless_serialized_strings
 // Check that serialized objects with null or omitted primary keys deserialize with zero id and insert on Save.
 func TestSerializersPKLessSerializedStrings(t *testing.T) {
-	const pklessStr = `[
-    {
-        "pk": null,
-        "model": "serializers.category",
-        "fields": {"name": "Reference"}
-    }, {
-        "model": "serializers.category",
-        "fields": {"name": "Non-fiction"}
-    }]`
-
 	for _, format := range testFormats {
 		t.Run(format, func(t *testing.T) {
+			pklessStr := pkLessSerializedString(t, format)
 			djangotest.EachDB(t, serializerModels(), func(t *testing.T, db *orm.DB) {
 				ctx := context.Background()
 				seedBaseTestData(t, db)
@@ -637,26 +628,9 @@ func TestSerializersPKLessSerializedStrings(t *testing.T) {
 // Check that serialized object keys and field mappings follow deterministic declaration order.
 func TestSerializersDeterministicMappingOrdering(t *testing.T) {
 	// Divergence from Django's USE_TZ=False test setting: pub_date carries the UTC "Z" suffix.
-	const mappingOrderingFmt = `[
-{
-  "model": "serializers.article",
-  "pk": %d,
-  "fields": {
-    "author": %d,
-    "headline": "Poker has no place on ESPN",
-    "pub_date": "2006-06-16T11:00:00Z",
-    "categories": [
-      %d,
-      %d
-    ],
-    "meta_data": [],
-    "topics": []
-  }
-}
-]
-`
 	for _, format := range testFormats {
 		t.Run(format, func(t *testing.T) {
+			mappingOrderingFmt := mappingOrderingTemplate(t, format)
 			djangotest.EachDB(t, serializerModels(), func(t *testing.T, db *orm.DB) {
 				ctx := context.Background()
 				data := seedBaseTestData(t, db)
@@ -766,34 +740,9 @@ func TestSerializersSerializeNoOnlyPKWithNaturalKeys(t *testing.T) {
 // Ported from Django: tests/serializers/tests.py::SerializersTransactionTestBase.test_forward_refs
 // Check that objects referencing primary keys defined later in the fixture save inside an atomic transaction.
 func TestSerializersForwardRefs(t *testing.T) {
-	const fwdRefStr = `[
-    {
-        "pk": 1,
-        "model": "serializers.article",
-        "fields": {
-            "headline": "Forward references pose no problem",
-            "pub_date": "2006-06-16T15:00:00",
-            "categories": [1],
-            "author": 1
-        }
-    },
-    {
-        "pk": 1,
-        "model": "serializers.category",
-        "fields": {
-            "name": "Reference"
-        }
-    },
-    {
-        "pk": 1,
-        "model": "serializers.author",
-        "fields": {
-            "name": "Agnes"
-        }
-    }]`
-
 	for _, format := range testFormats {
 		t.Run(format, func(t *testing.T) {
+			fwdRefStr := forwardRefsSerializedString(t, format)
 			djangotest.EachDB(t, serializerModels(), func(t *testing.T, db *orm.DB) {
 				ctx := context.Background()
 				err := db.Atomic(ctx, func(txCtx context.Context) error {
