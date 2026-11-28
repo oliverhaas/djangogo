@@ -23,6 +23,9 @@ type compiler struct {
 	annots     map[string]sqlNode
 	annotNames []string
 	resolved   int
+	// annotKinds holds the kinds of the annotations that resolveAnnotations
+	// resolved, by name, as annotationKind gives them.
+	annotKinds map[string]Kind
 	// used collects the joins touched while one filter condition is resolved.
 	used []*join
 	// reuse tracks multi-valued joins reusable within the current Filter call;
@@ -108,6 +111,10 @@ func (c *compiler) resolveAnnotations(filters int) error {
 		if _, ok := c.annots[a.name]; !ok {
 			c.annotNames = append(c.annotNames, a.name)
 		}
+		if c.annotKinds == nil {
+			c.annotKinds = map[string]Kind{}
+		}
+		c.annotKinds[a.name] = c.annotationKind(a.expr, n)
 		c.annots[a.name] = n
 		c.resolved++
 	}
@@ -629,23 +636,81 @@ func (c *compiler) appendOrderTerm(out []orderItem, t orderTerm, selected map[st
 func (c *compiler) annotationTransform(key string) (sqlNode, bool, error) {
 	parts := strings.Split(key, lookupSep)
 	for i := len(parts) - 1; i >= 1; i-- {
-		n, ok := c.annots[strings.Join(parts[:i], lookupSep)]
+		name := strings.Join(parts[:i], lookupSep)
+		n, ok := c.annots[name]
 		if !ok {
 			continue
 		}
-		for _, name := range parts[i:] {
-			kind := valueKind(n.vtype())
-			if !slices.Contains(transformsOf(kind), name) {
-				return nil, false, nil
-			}
+		kind := c.annotKind(name, n)
+		if !validTransforms(kind, parts[i:]) {
+			return nil, false, nil
+		}
+		for _, t := range parts[i:] {
 			var err error
-			if n, err = c.transform(n, kind, name); err != nil {
+			if n, err = c.transform(n, kind, t); err != nil {
 				return nil, true, err
 			}
+			kind = outputOf(kind, t)
 		}
 		return n, true, nil
 	}
 	return nil, false, nil
+}
+
+// annotKind returns the kind of the value of the annotation name, resolved
+// to n.
+func (c *compiler) annotKind(name string, n sqlNode) Kind {
+	if k, ok := c.annotKinds[name]; ok {
+		return k
+	}
+	return valueKind(n.vtype())
+}
+
+// annotationKind returns the kind of the value of annotation expression e,
+// resolved to n: the kind of Django's output_field, such as KindChar for
+// Left("name", 1) and the kind of the field for Reverse("name"). It falls
+// back on the kind of the type of n where the two disagree, such as for Avg,
+// whose value is a float.
+func (c *compiler) annotationKind(e Expr, n sqlNode) Kind {
+	fallback := valueKind(n.vtype())
+	input, ok := c.sourceKind(e)
+	if !ok {
+		input = fallback
+	}
+	if k := e.outputKind(input); fieldValueType(&Field{Kind: k}) == n.vtype() {
+		return k
+	}
+	return fallback
+}
+
+// sourceKind returns the kind of the field or annotation that e reads
+// through its first arguments, such as the kind of "name" for
+// Left("name", 1), or false when e reads none.
+func (c *compiler) sourceKind(e Expr) (Kind, bool) {
+	switch e.kind {
+	case exprField:
+		if n, ok := c.annots[e.key]; ok {
+			return c.annotKind(e.key, n), true
+		}
+		p, err := resolveFieldPath(c.q.model, e.key, c.annotNames)
+		if err != nil || p.field == nil || !validTransforms(p.field.Kind, p.rest) {
+			return 0, false
+		}
+		kind := p.field.Kind
+		for _, t := range p.rest {
+			kind = outputOf(kind, t)
+		}
+		return kind, true
+	case exprFunc, exprCast, exprWrap:
+		if e.arg != nil {
+			return c.sourceKind(*e.arg)
+		}
+	case exprCall:
+		if len(e.args) > 0 {
+			return c.sourceKind(e.args[0])
+		}
+	}
+	return 0, false
 }
 
 // relatedOrderTerm returns the term sub of the default ordering of the model

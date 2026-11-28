@@ -20,6 +20,11 @@ var binaryMethods = map[string]string{
 var functionNames = map[string]string{
 	"LOWER": "Lower", "UPPER": "Upper", "LENGTH": "Length",
 	"TRIM": "Trim", "LTRIM": "LTrim", "RTRIM": "RTrim",
+	fnChr: "Chr", fnLeft: "Left", fnLPad: "LPad", fnMD5: "MD5", fnOrd: "Ord",
+	fnRepeat: "Repeat", fnReplace: "Replace", fnReverse: "Reverse",
+	fnRight: "Right", fnRPad: "RPad",
+	fnSHA1: "SHA1", fnSHA224: "SHA224", fnSHA256: "SHA256", fnSHA384: "SHA384", fnSHA512: "SHA512",
+	fnStrIndex: "StrIndex", fnSubstr: "Substr",
 	"COALESCE": "Coalesce", fnConcat: "Concat", "ABS": "Abs",
 	"GREATEST": "Greatest", "LEAST": "Least", "NULLIF": "NullIf",
 	fnCollate: "Collate", fnNow: "Now", fnJSONArray: "JSONArray", fnJSONObject: "JSONObject",
@@ -253,6 +258,10 @@ func (g sourceWriter) expr(e Expr) (string, error) {
 			}
 			if precision, ok := a.value.(int); ok && e.fn == fnRound && i == 1 {
 				args[i] = strconv.Itoa(precision)
+				continue
+			}
+			if e.fn == fnSubstr && i == 2 && a.kind == exprValue && a.value == nil {
+				args[i] = "nil"
 				continue
 			}
 			arg, err := g.expr(a)

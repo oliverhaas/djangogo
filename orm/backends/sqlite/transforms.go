@@ -241,8 +241,9 @@ func timeExtractFunc(_ *moderncsqlite.FunctionContext, args []driver.Value) (dri
 // functionRegistration is the outcome of installing the SQL functions of this
 // package for every connection the driver opens; Open reports a failure.
 // SQLite ships the REGEXP operator without an implementation, and Django's
-// date and time functions, COT, RAND and the aggregates StdDev, Variance and
-// AnyValue exist only where Django or this package registers them.
+// date and time functions, COT, RAND, LPAD, RPAD, REPEAT, REVERSE, MD5, SHA1
+// to SHA512 and the aggregates StdDev, Variance and AnyValue exist only where
+// Django or this package registers them.
 var functionRegistration = errors.Join(
 	moderncsqlite.RegisterDeterministicScalarFunction("regexp", 2, regexpFunc),
 	moderncsqlite.RegisterDeterministicScalarFunction("django_date_extract", 2, dateExtractFunc),
@@ -254,6 +255,16 @@ var functionRegistration = errors.Join(
 	moderncsqlite.RegisterDeterministicScalarFunction("django_timestamp_diff", 2, timestampDiffFunc),
 	moderncsqlite.RegisterDeterministicScalarFunction("django_time_diff", 2, timeDiffFunc),
 	moderncsqlite.RegisterDeterministicScalarFunction("COT", 1, cotFunc),
+	moderncsqlite.RegisterDeterministicScalarFunction("LPAD", 3, lpadFunc),
+	moderncsqlite.RegisterDeterministicScalarFunction("MD5", 1, md5Func),
+	moderncsqlite.RegisterDeterministicScalarFunction("REPEAT", 2, repeatFunc),
+	moderncsqlite.RegisterDeterministicScalarFunction("REVERSE", 1, reverseFunc),
+	moderncsqlite.RegisterDeterministicScalarFunction("RPAD", 3, rpadFunc),
+	moderncsqlite.RegisterDeterministicScalarFunction("SHA1", 1, sha1Func),
+	moderncsqlite.RegisterDeterministicScalarFunction("SHA224", 1, sha224Func),
+	moderncsqlite.RegisterDeterministicScalarFunction("SHA256", 1, sha256Func),
+	moderncsqlite.RegisterDeterministicScalarFunction("SHA384", 1, sha384Func),
+	moderncsqlite.RegisterDeterministicScalarFunction("SHA512", 1, sha512Func),
 	moderncsqlite.RegisterScalarFunction("RAND", 0, randFunc),
 	moderncsqlite.RegisterFunction("STDDEV_POP", statFunction(false, true)),
 	moderncsqlite.RegisterFunction("STDDEV_SAMP", statFunction(true, true)),

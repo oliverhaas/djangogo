@@ -150,6 +150,15 @@ func TestConstraintSourceRebuildsConditions(t *testing.T) {
 			`orm.Q("n__lte", orm.Round(orm.Sqrt(orm.F("a")), 2), "m__gt", orm.Log(orm.Pi(), orm.Ceil(orm.F("b"))), "x__lt", orm.Random())`,
 		},
 		{
+			orm.Q(
+				"head", orm.Substr("name", 1, nil),
+				"padded", orm.LPad(orm.Left("name", 3), 5, orm.Value(" ")),
+				"hash", orm.SHA256(orm.Replace(orm.Reverse("alias"), orm.Value("a"), orm.Chr(65))),
+				"pos__gt", orm.StrIndex("name", orm.Repeat(orm.Value("x"), 2)),
+			),
+			`orm.Q("head", orm.Substr(orm.F("name"), orm.Value(int64(1)), nil), "padded", orm.LPad(orm.Left(orm.F("name"), orm.Value(int64(3))), orm.Value(int64(5)), orm.Value(" ")), "hash", orm.SHA256(orm.Replace(orm.Reverse(orm.F("alias")), orm.Value("a"), orm.Chr(orm.Value(int64(65))))), "pos__gt", orm.StrIndex(orm.F("name"), orm.Repeat(orm.Value("x"), orm.Value(int64(2)))))`,
+		},
+		{
 			orm.Q("due__lte", orm.ExpressionWrapper(orm.F("start").Add(orm.F("span")), orm.Field{Kind: orm.KindDateTime, Null: true})),
 			`orm.Q("due__lte", orm.ExpressionWrapper(orm.F("start").Add(orm.F("span")), orm.Field{Kind: orm.KindDateTime}))`,
 		},

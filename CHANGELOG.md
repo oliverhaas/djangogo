@@ -1033,6 +1033,28 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   the precision as its second argument; SQLite refuses a negative precision
   with Django's message. The SQLite backend registers the `COT` and `RAND`
   functions that SQLite lacks, as Django does.
+- ORM: the text database functions `orm.Chr`, `Left`, `LPad`, `MD5`, `Ord`,
+  `Repeat`, `Replace`, `Reverse`, `Right`, `RPad`, `SHA1`, `SHA224`,
+  `SHA256`, `SHA384`, `SHA512`, `StrIndex` and `Substr` port Django's
+  functions of the same names. Go has no default arguments, so `LPad` and
+  `RPad` take the fill and `Replace` the replacement; Django's defaults are
+  `orm.Value(" ")` and `orm.Value("")`. A literal length, number or position
+  out of range fails the query with Django's message. On PostgreSQL, `SHA1`
+  needs the `pgcrypto` extension, as in Django, while `SHA224` to `SHA512`
+  use the built-in functions and need no extension. The SQLite backend
+  registers the `LPAD`, `RPAD`, `REPEAT`, `REVERSE`, `MD5` and `SHA1` to
+  `SHA512` functions that SQLite lacks, as Django does.
+- ORM: `Filter` and `Exclude` apply a transform that follows an annotation
+  name, such as `"first_initial__ord"` after
+  `Annotate("first_initial", orm.Left("name", 1))`, as Django does; such a
+  key used to fail with an unsupported lookup error. The value of an
+  annotation of a function has the kind of Django's `output_field`, so a
+  transform registered for `orm.KindChar` follows `Left`, and one
+  registered for `orm.KindInt` follows `Ord`. The unsupported lookup error
+  of an annotation names that field class, as in Django.
+- Testing: on PostgreSQL, a `djangotest` database searches the `public`
+  schema after its own, so the functions of an extension installed in
+  `public`, such as `pgcrypto`, work in tests.
 
 ### Changed
 

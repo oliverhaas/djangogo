@@ -91,9 +91,11 @@ func NewDB(t testing.TB, models ...any) *orm.DB {
 }
 
 // NewPostgresDB returns a PostgreSQL database handle confined to a fresh,
-// private schema with a table created for every given model. The schema is
-// dropped when the test ends. The test is skipped when the PostgresDSNEnv
-// environment variable is unset.
+// private schema with a table created for every given model. Functions of
+// extensions installed in public, such as pgcrypto, are visible through the
+// search path, as on PostgreSQL's default search path. The schema is dropped
+// when the test ends. The test is skipped when the PostgresDSNEnv environment
+// variable is unset.
 func NewPostgresDB(t testing.TB, models ...any) *orm.DB {
 	t.Helper()
 	dsn := os.Getenv(PostgresDSNEnv)
@@ -161,21 +163,24 @@ func createTables(t testing.TB, db *orm.DB) {
 	}
 }
 
-// schemaDSN returns dsn with the connection's search_path set to schema, so
-// every statement on the returned DSN's connections resolves unqualified table
-// names inside that schema. Both URL and keyword/value DSNs are supported.
+// schemaDSN returns dsn with the connection's search_path set to
+// "<schema>,public", so every statement on the returned DSN's connections
+// resolves unqualified table names inside schema and sees the functions of
+// extensions installed in public, such as pgcrypto, as on PostgreSQL's
+// default search path. Both URL and keyword/value DSNs are supported.
 func schemaDSN(dsn, schema string) (string, error) {
+	path := schema + ",public"
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		u, err := url.Parse(dsn)
 		if err != nil {
 			return "", err
 		}
 		q := u.Query()
-		q.Set("search_path", schema)
+		q.Set("search_path", path)
 		u.RawQuery = q.Encode()
 		return u.String(), nil
 	}
-	return dsn + " search_path=" + schema, nil
+	return dsn + " search_path=" + path, nil
 }
 
 // randomName returns a short random lowercase identifier, unique per call, used

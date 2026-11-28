@@ -209,13 +209,16 @@ var callNames = map[string]string{
 func Concat(args ...any) Expr { return call(fnConcat, args) }
 
 // resolveCall binds Coalesce, Collate, Concat, Greatest, JSONArray,
-// JSONObject, Least, NullIf, Now and the math functions of several or no
-// arguments. Concat casts each argument that is not text to text on every dialect,
-// as Cast does. Django's ConcatPair casts on PostgreSQL only and leaves the
-// conversion to the || of SQLite, which gives the same text. Greatest and
-// Least are MAX and MIN on SQLite.
+// JSONObject, Least, NullIf, Now, the text functions of resolveText, and the
+// math functions of several or no arguments. Concat casts each argument that
+// is not text to text on every dialect, as Cast does. Django's ConcatPair
+// casts on PostgreSQL only and leaves the conversion to the || of SQLite,
+// which gives the same text. Greatest and Least are MAX and MIN on SQLite.
 func (c *compiler) resolveCall(e Expr) (sqlNode, error) {
 	switch e.fn {
+	case fnChr, fnLeft, fnLPad, fnMD5, fnOrd, fnRepeat, fnReplace, fnReverse,
+		fnRight, fnRPad, fnSHA1, fnSHA224, fnSHA256, fnSHA384, fnSHA512, fnStrIndex, fnSubstr:
+		return c.resolveText(e)
 	case fnATan2, fnLog, fnMod, fnPi, fnPower, fnRandom, fnRound:
 		return c.resolveMath(e)
 	case fnJSONArray, fnJSONObject:
@@ -307,8 +310,8 @@ type CastDialect interface {
 }
 
 // outputKind returns the kind of the value of e when the expression it
-// transforms has kind input: the result kind of a function such as Length or
-// Cast, and input for the others.
+// transforms has kind input: the kind of Django's output_field of a function
+// such as Length, Left or Cast, and input for the others.
 func (e Expr) outputKind(input Kind) Kind {
 	switch e.kind {
 	case exprFunc:
@@ -326,8 +329,16 @@ func (e Expr) outputKind(input Kind) Kind {
 		return KindBool
 	case exprCall:
 		switch e.fn {
+		case fnOrd, fnStrIndex:
+			return KindInt
 		case fnConcat:
 			return KindText
+		case fnChr, fnLeft, fnLPad, fnRepeat, fnRight, fnRPad, fnSubstr:
+			return KindChar
+		case fnMD5, fnReplace, fnReverse, fnSHA1, fnSHA224, fnSHA256, fnSHA384, fnSHA512:
+			// Django gives these no output_field, so the value has the
+			// field of the argument.
+			return e.args[0].outputKind(input)
 		case fnNow:
 			return KindDateTime
 		case fnJSONArray, fnJSONObject:
@@ -356,10 +367,13 @@ var transformRegistry struct {
 //
 // the key "name__lower" is the lowercased name in Filter ("name__lower",
 // "john smith"), Values, OrderBy and F, and the lookups that follow it
-// compare the lowercased value ("name__lower__startswith"). fn gets the
-// transformed value and returns the expression of the transform. The value
-// of the transform has the kind of the result of fn: an integer for Length,
-// and kind k for the other text functions.
+// compare the lowercased value ("name__lower__startswith"). The transform
+// also follows an annotation whose value has kind k, such as
+// "first_initial__lower" after Annotate("first_initial", orm.Left("name", 1)).
+// fn gets the transformed value and returns the expression of the
+// transform. The value of the transform has the kind of Django's
+// output_field of the result of fn: an integer for Length and Ord, KindChar
+// for Left, and kind k for Lower and Reverse.
 //
 // The transform applies to kind k only, where Django's registration on
 // CharField also covers its subclasses: register it for KindSlug, KindEmail

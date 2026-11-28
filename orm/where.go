@@ -379,11 +379,17 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 		if !ok {
 			continue
 		}
-		lookup, _, err := c.lookupOf(parts[i:], nil)
+		kind := c.annotKind(strings.Join(parts[:i], lookupSep), n)
+		lookup, transforms, err := c.kindLookupOf(parts[i:], kind)
 		if err != nil {
 			return nil, nil, err
 		}
-		pred, err := c.buildPredicate(lookup, n, annotationField(n), value, nil)
+		var pred *predicate
+		if len(transforms) == 0 {
+			pred, err = c.buildPredicate(lookup, n, annotationField(n), value, nil)
+		} else {
+			pred, err = c.transformPredicate(lookup, transforms, n, kind, value)
+		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -446,30 +452,36 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 	return node, used, nil
 }
 
-// lookupOf returns the lookup named by the trailing parts of a key, "exact"
-// when there is none, and the transforms before it, as Django's
-// Query.build_lookup splits them: every part but the last must be a
-// transform of the value before it, and the last is a lookup or, failing
-// that, a transform compared with "exact". path is the resolved field path,
-// or nil when the key names an annotation, which takes no transforms.
-// Anything else is a FieldError worded as Django's Query.try_transform words
-// it, with the same "perhaps you meant" suggestions.
+// lookupOf returns the lookup named by the trailing parts of a key that
+// ends on the field path, "exact" when there is none, and the transforms
+// before it, as Django's Query.build_lookup splits them. A relation takes
+// one lookup and no transforms; a plain field is read by kindLookupOf.
 func (c *compiler) lookupOf(rest []string, path *fieldPath) (string, []string, error) {
 	if len(rest) == 0 {
 		return lookupExact, nil, nil
 	}
-	if path == nil || path.relation {
+	if path.relation {
 		name := rest[0]
-		supported, kind := lookupNames, "an annotation"
-		if path != nil {
-			supported, kind = relationLookupNames, relationFieldName(path)
-		}
-		if len(rest) == 1 && slices.Contains(supported, name) {
+		if len(rest) == 1 && slices.Contains(relationLookupNames, name) {
 			return name, nil, nil
 		}
-		return "", nil, c.unsupportedLookup(strings.Join(rest, lookupSep), name, kind, supported)
+		return "", nil, c.unsupportedLookup(strings.Join(rest, lookupSep), name, relationFieldName(path), relationLookupNames)
 	}
-	kind, fieldName := path.field.Kind, path.field.Kind.FieldClassName()
+	return c.kindLookupOf(rest, path.field.Kind)
+}
+
+// kindLookupOf returns the lookup named by rest, the trailing parts of a key
+// that ends on a value of kind kind, "exact" when there is none, and the
+// transforms before it: every part but the last must be a transform of the
+// value before it, and the last is a lookup or, failing that, a transform
+// compared with "exact". Anything else is a FieldError worded as Django's
+// Query.try_transform words it, with the same "perhaps you meant"
+// suggestions.
+func (c *compiler) kindLookupOf(rest []string, kind Kind) (string, []string, error) {
+	if len(rest) == 0 {
+		return lookupExact, nil, nil
+	}
+	fieldName := kind.FieldClassName()
 	last := len(rest) - 1
 	for _, name := range rest[:last] {
 		if !slices.Contains(transformsOf(kind), name) {
@@ -532,8 +544,12 @@ func (c *compiler) fieldPredicate(lookup string, transforms []string, col colNod
 	if len(transforms) == 0 {
 		return c.buildPredicate(lookup, col, field, value, expectedModel)
 	}
-	var lhs sqlNode = col
-	kind := field.Kind
+	return c.transformPredicate(lookup, transforms, col, field.Kind, value)
+}
+
+// transformPredicate returns the predicate of lhs, a value of kind kind,
+// wrapped in transforms and compared with value under lookup.
+func (c *compiler) transformPredicate(lookup string, transforms []string, lhs sqlNode, kind Kind, value any) (*predicate, error) {
 	for _, name := range transforms {
 		n, err := c.transform(lhs, kind, name)
 		if err != nil {

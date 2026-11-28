@@ -119,9 +119,9 @@ func TestEachDBRunsEveryDialect(t *testing.T) {
 
 func TestSchemaDSN(t *testing.T) {
 	cases := []struct{ dsn, want string }{
-		{"postgres://u:p@localhost:5432/db?sslmode=disable", "postgres://u:p@localhost:5432/db?search_path=dt_x&sslmode=disable"},
-		{"postgresql://localhost/db", "postgresql://localhost/db?search_path=dt_x"},
-		{"host=localhost dbname=db", "host=localhost dbname=db search_path=dt_x"},
+		{"postgres://u:p@localhost:5432/db?sslmode=disable", "postgres://u:p@localhost:5432/db?search_path=dt_x%2Cpublic&sslmode=disable"},
+		{"postgresql://localhost/db", "postgresql://localhost/db?search_path=dt_x%2Cpublic"},
+		{"host=localhost dbname=db", "host=localhost dbname=db search_path=dt_x,public"},
 	}
 	for _, tc := range cases {
 		got, err := schemaDSN(tc.dsn, "dt_x")
