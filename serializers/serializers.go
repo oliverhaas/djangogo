@@ -135,10 +135,11 @@ type Options struct {
 	// comma-separated line.
 	Indent int
 	// UseNaturalForeignKeys serializes foreign-key and M2M references as
-	// natural keys when the target model implements NaturalKeyer.
+	// natural keys when the target model implements NaturalKeyer or
+	// ContextNaturalKeyer.
 	UseNaturalForeignKeys bool
 	// UseNaturalPrimaryKeys omits the primary key when the model implements
-	// NaturalKeyer.
+	// NaturalKeyer or ContextNaturalKeyer.
 	UseNaturalPrimaryKeys bool
 	// ProgressOutput receives progress-bar updates when non-nil.
 	ProgressOutput io.Writer
@@ -185,7 +186,7 @@ func NaturalForeignKeys() Option {
 }
 
 // NaturalPrimaryKeys omits the primary key for models that implement
-// NaturalKeyer.
+// NaturalKeyer or ContextNaturalKeyer.
 func NaturalPrimaryKeys() Option {
 	return func(o *Options) { o.UseNaturalPrimaryKeys = true }
 }
@@ -283,12 +284,27 @@ type DeserializedObject struct {
 	// DeferredFields maps deferred FK and M2M fields to their raw serialized
 	// values when HandleForwardReferences is enabled.
 	DeferredFields map[*orm.Field]any
+	// nullFields lists non-nullable non-pointer fields whose serialized value
+	// was null, so Save reports a NOT NULL IntegrityError as Django's save()
+	// does when writing None to a NOT NULL column.
+	nullFields []*orm.Field
 }
 
 // Save writes d.Object to db with orm.SaveRaw and then sets each M2M relation
 // in d.M2MData with orm.SetManyPKs. Subsequent calls do not re-save M2M data
 // unless SaveDeferredFields repopulates it.
 func (d *DeserializedObject) Save(ctx context.Context, db *orm.DB) error {
+	if len(d.nullFields) > 0 {
+		f := d.nullFields[0]
+		table := ""
+		if d.Model != nil {
+			table = d.Model.Table()
+		}
+		return &orm.IntegrityError{
+			Kind: orm.IntegrityNotNull,
+			Err:  fmt.Errorf("NOT NULL constraint failed: %s.%s", table, f.Column),
+		}
+	}
 	if err := orm.SaveRaw(ctx, db, d.Object); err != nil {
 		return err
 	}

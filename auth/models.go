@@ -90,9 +90,26 @@ func (u *User) GetFullName() string {
 // GetShortName returns the first name (Django's get_short_name).
 func (u *User) GetShortName() string { return u.FirstName }
 
-// NaturalKey returns the username, which identifies a user independently of
-// the primary key (Django's natural_key).
-func (u *User) NaturalKey() string { return u.Username }
+// NaturalKey returns the one-element slice [username], which identifies a user
+// independently of the primary key (Django's natural_key).
+func (u *User) NaturalKey() []any { return []any{u.Username} }
+
+// GetByNaturalKey looks up a user by its username natural key (Django's
+// BaseUserManager.get_by_natural_key).
+func (*User) GetByNaturalKey(ctx context.Context, db *orm.DB, key ...any) (any, error) {
+	if len(key) != 1 {
+		return nil, orm.ErrDoesNotExist
+	}
+	username, ok := key[0].(string)
+	if !ok {
+		return nil, orm.ErrDoesNotExist
+	}
+	u, err := orm.Query[User](db).Get(ctx, "username", username)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
 
 // String returns the username, or "AnonymousUser" for the anonymous user.
 func (u *User) String() string {
@@ -124,8 +141,25 @@ func (Group) Meta() orm.Meta { return orm.Meta{Table: "auth_group"} }
 // String returns the group name.
 func (g Group) String() string { return g.Name }
 
-// NaturalKey returns the group name (Django's natural_key).
-func (g Group) NaturalKey() string { return g.Name }
+// NaturalKey returns the one-element slice [name] (Django's natural_key).
+func (g Group) NaturalKey() []any { return []any{g.Name} }
+
+// GetByNaturalKey looks up a group by its name natural key (Django's
+// GroupManager.get_by_natural_key).
+func (*Group) GetByNaturalKey(ctx context.Context, db *orm.DB, key ...any) (any, error) {
+	if len(key) != 1 {
+		return nil, orm.ErrDoesNotExist
+	}
+	name, ok := key[0].(string)
+	if !ok {
+		return nil, orm.ErrDoesNotExist
+	}
+	g, err := orm.Query[Group](db).Get(ctx, "name", name)
+	if err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
 
 // Permission is one capability on one model (auth_permission): Codename
 // ("add_post") is unique per content type, Name is the readable form ("Can add

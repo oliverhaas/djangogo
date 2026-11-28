@@ -214,7 +214,7 @@ func serializeOneObject(
 
 // handleFKField serializes a ForeignKey or OneToOneField value as its target
 // primary key or, when NaturalForeignKeys is active and the target implements
-// NaturalKeyer, the target's natural key slice.
+// NaturalKeyer or ContextNaturalKeyer, the target's natural key slice.
 func handleFKField(ctx context.Context, db *orm.DB, sv reflect.Value, f *orm.Field, o *Options) (any, error) {
 	fv := sv.Field(f.Index)
 	pk, loadedObj := extractRelationState(f.Rel.Target, fv)
@@ -233,7 +233,10 @@ func handleFKField(ctx context.Context, db *orm.DB, sv reflect.Value, f *orm.Fie
 			}
 			target = fetched
 		}
-		nk, _ := naturalKeyOf(target)
+		nk, _, err := naturalKeyOfContext(ctx, db, target)
+		if err != nil {
+			return nil, err
+		}
 		return nk, nil
 	}
 	if pk == 0 {
@@ -258,8 +261,8 @@ func handleM2MField(
 
 	m2mValue := func(related any) (any, error) {
 		if useNat {
-			nk, _ := naturalKeyOf(related)
-			return nk, nil
+			nk, _, err := naturalKeyOfContext(ctx, db, related)
+			return nk, err
 		}
 		relSV := reflect.Indirect(reflect.ValueOf(related))
 		return valueFromField(targetModel, relSV, targetModel.PrimaryKey())
@@ -581,6 +584,7 @@ func handleObject(
 	fieldValues := make(map[*orm.Field]any, len(obj.Fields))
 	m2mData := make(map[string][]any)
 	var deferredFields map[*orm.Field]any
+	var nullFields []*orm.Field
 
 	for _, fv := range obj.Fields {
 		if m2mField, ok := m.ManyToManyField(fv.Name); ok {
@@ -618,6 +622,9 @@ func handleObject(
 				}
 				deferredFields[field] = fv.Value
 			} else {
+				if val == nil && !field.Null {
+					nullFields = append(nullFields, field)
+				}
 				fieldValues[field] = val
 			}
 			continue
@@ -626,6 +633,9 @@ func handleObject(
 		val, err := toPython(field, fv.Value)
 		if err != nil {
 			return nil, false, DeserializationErrorWithData(err, obj.Model, obj.PK, fv.Value)
+		}
+		if val == nil && !field.Null {
+			nullFields = append(nullFields, field)
 		}
 		fieldValues[field] = val
 	}
@@ -639,6 +649,7 @@ func handleObject(
 		Model:          m,
 		M2MData:        m2mData,
 		DeferredFields: deferredFields,
+		nullFields:     nullFields,
 	}, false, nil
 }
 
@@ -676,7 +687,10 @@ func buildInstance(
 
 	if pkField != nil && !hasExplicitPK {
 		if modelHasNaturalKey(m) && modelHasNaturalKeyGetter(m) && db != nil {
-			nk, _ := naturalKeyOf(ptr.Interface())
+			nk, _, err := naturalKeyOfContext(ctx, db, ptr.Interface())
+			if err != nil {
+				return nil, NewDeserializationError("Error deserializing object: " + err.Error())
+			}
 			found, err := callGetByNaturalKey(ctx, db, m, nk)
 			switch {
 			case err == nil && found != nil:

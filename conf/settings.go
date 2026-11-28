@@ -85,6 +85,9 @@ type Settings struct {
 	// StaticFilesDirs lists extra directories searched for static files
 	// before the apps' own (STATICFILES_DIRS).
 	StaticFilesDirs []string `env:"STATICFILES_DIRS"`
+	// FixtureDirs lists extra directories searched for fixtures after the
+	// apps' own (FIXTURE_DIRS).
+	FixtureDirs []string `env:"FIXTURE_DIRS"`
 
 	// LoginURL is where a login-required view sends an anonymous user
 	// (LOGIN_URL, default "/accounts/login/").

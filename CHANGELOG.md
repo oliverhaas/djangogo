@@ -993,6 +993,18 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `Deserialize` returns objects to save with `DeserializedObject.Save`, with
   Django's error messages. Natural keys come from the `NaturalKeyer` and
   `NaturalKeyGetter` interfaces, and `Register` adds a format.
+  `ContextNaturalKeyer` is for a natural key that needs a query.
+- Management: the `loaddata`, `dumpdata` and `flush` commands port Django's,
+  with the same options and messages. `loaddata` finds fixtures in the
+  `Fixtures()` file system of each app (the new `apps.FixturesProvider`), in
+  `FixtureDirs` (`FIXTURE_DIRS`) and at a given path. It reads `.gz`, `.zip`
+  and `.bz2` files and stdin, and loads all fixtures in one transaction.
+  `dumpdata` writes `.gz` files. For `.bz2`, `.lzma`, `.xz` and `.zip` it
+  writes an uncompressed file with Django's warning. `flush` empties all tables
+  and then runs the post-migrate hooks.
+- Contenttypes and auth: `ContentType`, `Permission`, `User` and `Group` have
+  Django's natural keys, so `dumpdata --natural-foreign --natural-primary`
+  writes them as Django does. `NaturalKey` returns `[]any`.
 
 ### Changed
 

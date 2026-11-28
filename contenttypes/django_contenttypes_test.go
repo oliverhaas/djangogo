@@ -391,16 +391,21 @@ func TestNaturalKey(t *testing.T) {
 	djangotest.EachDB(t, testModels(), func(t *testing.T, db *orm.DB) {
 		ctx := context.Background()
 		ct := mustGet(t, db, &Author{})
-		appLabel, name := ct.NaturalKey()
-		djangotest.AssertEqual(t, appLabel, "contenttypes_tests")
-		djangotest.AssertEqual(t, name, "author")
+		nk := ct.NaturalKey()
+		djangotest.AssertSequenceEqual(t, nk, []any{"contenttypes_tests", "author"})
 
 		contenttypes.ClearCache(db)
-		got, err := contenttypes.GetByNaturalKey(ctx, db, appLabel, name)
+		got, err := contenttypes.GetByNaturalKey(ctx, db, "contenttypes_tests", "author")
 		if err != nil {
 			t.Fatalf("GetByNaturalKey: %v", err)
 		}
 		djangotest.AssertEqual(t, got, ct)
+
+		viaMethod, err := (*contenttypes.ContentType)(nil).GetByNaturalKey(ctx, db, nk...)
+		if err != nil {
+			t.Fatalf("ContentType.GetByNaturalKey: %v", err)
+		}
+		djangotest.AssertEqual(t, *viaMethod.(*contenttypes.ContentType), ct)
 
 		_, err = contenttypes.GetByNaturalKey(ctx, db, "contenttypes_tests", "missing")
 		djangotest.AssertErrorIs(t, err, orm.ErrDoesNotExist)

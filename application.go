@@ -173,6 +173,9 @@ func New(settings conf.Settings, appConfigs ...apps.Config) (*Application, error
 	_ = app.Commands.Register(&changepasswordCommand{app: app})
 	_ = app.Commands.Register(&clearsessionsCommand{app: app, store: app.sessions})
 	_ = app.Commands.Register(&sendtestemailCommand{app: app})
+	_ = app.Commands.Register(&loaddataCommand{app: app})
+	_ = app.Commands.Register(&dumpdataCommand{app: app})
+	_ = app.Commands.Register(&flushCommand{app: app})
 	_ = app.Commands.Register(&startprojectCommand{app: app})
 	_ = app.Commands.Register(&startappCommand{app: app})
 	if appReg.IsInstalled(contenttypes.App{}.Name()) {

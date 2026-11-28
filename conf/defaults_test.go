@@ -35,6 +35,7 @@ var djangoDefaults = map[string]any{
 	"STATIC_URL":       "/static/", // differs: None
 	"STATIC_ROOT":      "",
 	"STATICFILES_DIRS": []string(nil),
+	"FIXTURE_DIRS":     []string(nil),
 
 	"LOGIN_URL":           "/accounts/login/",
 	"LOGIN_REDIRECT_URL":  "/accounts/profile/",

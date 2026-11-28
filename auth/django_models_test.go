@@ -11,16 +11,13 @@ import (
 )
 
 // Ported from Django: tests/auth_tests/test_models.py::NaturalKeysTestCase.test_user_natural_key
-//
-// There is no manager method get_by_natural_key: the natural key is the
-// username, and the lookup is an ordinary query on it.
 func TestUserNaturalKey(t *testing.T) {
 	eachDB(t, func(t *testing.T, db *orm.DB) {
 		staff := createUser(t, db, "staff", "")
-		got, err := orm.Query[auth.User](db).Get(context.Background(), "username", staff.NaturalKey())
+		got, err := (*auth.User)(nil).GetByNaturalKey(context.Background(), db, "staff")
 		must(t, err)
-		djangotest.AssertEqual(t, got.ID, staff.ID)
-		djangotest.AssertEqual(t, staff.NaturalKey(), "staff")
+		djangotest.AssertEqual(t, got.(*auth.User).ID, staff.ID)
+		djangotest.AssertSequenceEqual(t, staff.NaturalKey(), []any{"staff"})
 	})
 }
 
@@ -28,9 +25,26 @@ func TestUserNaturalKey(t *testing.T) {
 func TestGroupNaturalKey(t *testing.T) {
 	eachDB(t, func(t *testing.T, db *orm.DB) {
 		users := createGroup(t, db, "users")
-		got, err := orm.Query[auth.Group](db).Get(context.Background(), "name", users.NaturalKey())
+		got, err := (*auth.Group)(nil).GetByNaturalKey(context.Background(), db, "users")
 		must(t, err)
-		djangotest.AssertEqual(t, got.ID, users.ID)
+		djangotest.AssertEqual(t, got.(*auth.Group).ID, users.ID)
+		djangotest.AssertSequenceEqual(t, users.NaturalKey(), []any{"users"})
+	})
+}
+
+// Ported from Django: tests/auth_tests/test_models.py::LoadDataWithNaturalKeysAndMultipleDatabasesTestCase.test_load_data_with_user_permissions
+func TestPermissionNaturalKey(t *testing.T) {
+	eachDB(t, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		_, err := auth.SyncPermissions(ctx, db)
+		must(t, err)
+		got, err := (*auth.Permission)(nil).GetByNaturalKey(ctx, db, "add_user", "auth", "user")
+		must(t, err)
+		perm := got.(*auth.Permission)
+		nk, err := perm.NaturalKeyContext(ctx, db)
+		must(t, err)
+		djangotest.AssertSequenceEqual(t, nk, []any{"add_user", "auth", "user"})
+		djangotest.AssertSequenceEqual(t, perm.NaturalKeyDependencies(), []string{"contenttypes.contenttype"})
 	})
 }
 

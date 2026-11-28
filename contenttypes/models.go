@@ -44,6 +44,8 @@
 package contenttypes
 
 import (
+	"context"
+
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -71,9 +73,27 @@ func (ct ContentType) AppLabeledName() string { return ct.AppLabel + " | " + ct.
 // String returns AppLabeledName, as Django's __str__ does.
 func (ct ContentType) String() string { return ct.AppLabeledName() }
 
-// NaturalKey returns the pair that identifies the content type independently
-// of its primary key (Django's natural_key).
-func (ct ContentType) NaturalKey() (appLabel, model string) { return ct.AppLabel, ct.Model }
+// NaturalKey returns the pair [appLabel, model] that identifies the content
+// type independently of its primary key (Django's natural_key).
+func (ct ContentType) NaturalKey() []any { return []any{ct.AppLabel, ct.Model} }
+
+// GetByNaturalKey looks up a content type by its (app_label, model) natural
+// key (Django's ContentTypeManager.get_by_natural_key).
+func (*ContentType) GetByNaturalKey(ctx context.Context, db *orm.DB, key ...any) (any, error) {
+	if len(key) != 2 {
+		return nil, orm.ErrDoesNotExist
+	}
+	appLabel, ok1 := key[0].(string)
+	model, ok2 := key[1].(string)
+	if !ok1 || !ok2 {
+		return nil, orm.ErrDoesNotExist
+	}
+	ct, err := GetByNaturalKey(ctx, db, appLabel, model)
+	if err != nil {
+		return nil, err
+	}
+	return &ct, nil
+}
 
 // App is the app config of the contenttypes app. Register it before every app
 // whose models refer to ContentType, such as auth.App.

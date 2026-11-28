@@ -166,6 +166,46 @@ func (p Permission) UserPermStr(ctx context.Context, db *orm.DB) (string, error)
 	return ct.AppLabel + "." + p.Codename, nil
 }
 
+// NaturalKeyContext returns the three-element slice [codename, appLabel, model]
+// that identifies p independently of its primary key, loading its content type
+// from db when it is not cached yet (Django's Permission.natural_key).
+func (p Permission) NaturalKeyContext(ctx context.Context, db *orm.DB) ([]any, error) {
+	ct, err := contenttypes.GetForID(ctx, db, p.ContentTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return []any{p.Codename, ct.AppLabel, ct.Model}, nil
+}
+
+// NaturalKeyDependencies declares that Permission's natural key depends on
+// contenttypes.contenttype (Django's natural_key.dependencies).
+func (Permission) NaturalKeyDependencies() []string {
+	return []string{"contenttypes.contenttype"}
+}
+
+// GetByNaturalKey looks up a permission by its (codename, app_label, model)
+// natural key (Django's PermissionManager.get_by_natural_key).
+func (*Permission) GetByNaturalKey(ctx context.Context, db *orm.DB, key ...any) (any, error) {
+	if len(key) != 3 {
+		return nil, orm.ErrDoesNotExist
+	}
+	codename, ok1 := key[0].(string)
+	appLabel, ok2 := key[1].(string)
+	model, ok3 := key[2].(string)
+	if !ok1 || !ok2 || !ok3 {
+		return nil, orm.ErrDoesNotExist
+	}
+	ct, err := contenttypes.GetByNaturalKey(ctx, db, appLabel, model)
+	if err != nil {
+		return nil, err
+	}
+	p, err := orm.Query[Permission](db).Get(ctx, "codename", codename, "content_type_id", ct.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 // permSource selects the permissions of a user by the way they were granted.
 type permSource int
 

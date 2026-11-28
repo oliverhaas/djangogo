@@ -74,6 +74,11 @@ type StaticProvider interface {
 	Static() fs.FS
 }
 
+// FixturesProvider contributes fixture files (an app's fixtures/ directory).
+type FixturesProvider interface {
+	Fixtures() fs.FS
+}
+
 // CheckProvider contributes system checks.
 type CheckProvider interface {
 	Checks() []checks.Check

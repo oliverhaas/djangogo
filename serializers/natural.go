@@ -28,20 +28,32 @@ type NaturalKeyDepender interface {
 	NaturalKeyDependencies() []string
 }
 
+// ContextNaturalKeyer is optionally implemented by models whose natural key
+// requires a database query, such as auth.Permission resolving its content
+// type.
+type ContextNaturalKeyer interface {
+	NaturalKeyContext(ctx context.Context, db *orm.DB) ([]any, error)
+}
+
 var (
-	naturalKeyerType    = reflect.TypeFor[NaturalKeyer]()
-	naturalKeyGetterTyp = reflect.TypeFor[NaturalKeyGetter]()
-	naturalKeyDepType   = reflect.TypeFor[NaturalKeyDepender]()
+	naturalKeyerType        = reflect.TypeFor[NaturalKeyer]()
+	contextNaturalKeyerType = reflect.TypeFor[ContextNaturalKeyer]()
+	naturalKeyGetterTyp     = reflect.TypeFor[NaturalKeyGetter]()
+	naturalKeyDepType       = reflect.TypeFor[NaturalKeyDepender]()
 )
 
 // modelHasNaturalKey reports whether m's Go struct or pointer type implements
-// NaturalKeyer.
+// NaturalKeyer or ContextNaturalKeyer.
 func modelHasNaturalKey(m *orm.Model) bool {
 	if m == nil || m.GoType() == nil {
 		return false
 	}
 	t := m.GoType()
-	return t.Implements(naturalKeyerType) || reflect.PointerTo(t).Implements(naturalKeyerType)
+	pt := reflect.PointerTo(t)
+	return t.Implements(naturalKeyerType) ||
+		pt.Implements(naturalKeyerType) ||
+		t.Implements(contextNaturalKeyerType) ||
+		pt.Implements(contextNaturalKeyerType)
 }
 
 // modelHasNaturalKeyGetter reports whether a pointer to m's Go struct type
@@ -51,6 +63,46 @@ func modelHasNaturalKeyGetter(m *orm.Model) bool {
 		return false
 	}
 	return reflect.PointerTo(m.GoType()).Implements(naturalKeyGetterTyp)
+}
+
+// naturalKeyOfContext invokes NaturalKeyContext when instance implements
+// ContextNaturalKeyer (returning an error if db is nil and instance does not
+// also implement NaturalKeyer), or falls back to naturalKeyOf.
+func naturalKeyOfContext(ctx context.Context, db *orm.DB, instance any) ([]any, bool, error) {
+	if instance == nil {
+		return nil, false, nil
+	}
+	cnk, hasCNK := asContextNaturalKeyer(instance)
+	if hasCNK && db != nil {
+		nk, err := cnk.NaturalKeyContext(ctx, db)
+		return nk, true, err
+	}
+	if nk, ok := naturalKeyOf(instance); ok {
+		return nk, true, nil
+	}
+	if hasCNK {
+		return nil, false, &SerializationError{
+			Message: fmt.Sprintf("serializers: cannot compute natural key of %T without a database", instance),
+		}
+	}
+	return nil, false, nil
+}
+
+// asContextNaturalKeyer returns instance (or a pointer copy of a struct value)
+// as a ContextNaturalKeyer when implemented.
+func asContextNaturalKeyer(instance any) (ContextNaturalKeyer, bool) {
+	if cnk, ok := instance.(ContextNaturalKeyer); ok {
+		return cnk, true
+	}
+	rv := reflect.ValueOf(instance)
+	if rv.Kind() != reflect.Pointer {
+		ptr := reflect.New(rv.Type())
+		ptr.Elem().Set(rv)
+		if cnk, ok := ptr.Interface().(ContextNaturalKeyer); ok {
+			return cnk, true
+		}
+	}
+	return nil, false
 }
 
 // naturalKeyOf invokes NaturalKey on instance (a struct value or pointer).
@@ -84,7 +136,7 @@ func callGetByNaturalKey(ctx context.Context, db *orm.DB, m *orm.Model, key []an
 }
 
 // naturalKeyDependencies returns the explicit natural key dependencies declared
-// on m when m also implements NaturalKeyer.
+// on m when m also implements NaturalKeyer or ContextNaturalKeyer.
 func naturalKeyDependencies(m *orm.Model) []string {
 	if !modelHasNaturalKey(m) {
 		return nil
