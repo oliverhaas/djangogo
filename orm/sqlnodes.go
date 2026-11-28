@@ -521,6 +521,9 @@ func (n typedNode) aggregate() bool { return n.node.aggregate() }
 type callNode struct {
 	fn   string
 	args []sqlNode
+	// typ is the type of the result, or typeUnknown for the common type of
+	// the arguments.
+	typ valueType
 }
 
 // render writes "FN(a, b, ...)". A decimal result is cast to NUMERIC on
@@ -540,8 +543,13 @@ func (n callNode) render(w *sqlWriter) {
 	w.write(")")
 }
 
-// vtype is the common type of the arguments.
-func (n callNode) vtype() valueType { return commonType(n.args) }
+// vtype is typ, or the common type of the arguments.
+func (n callNode) vtype() valueType {
+	if n.typ != typeUnknown {
+		return n.typ
+	}
+	return commonType(n.args)
+}
 
 // aggregate reports whether an argument holds an aggregate.
 func (n callNode) aggregate() bool { return anyAggregate(n.args) }

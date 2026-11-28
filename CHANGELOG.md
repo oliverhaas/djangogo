@@ -1020,6 +1020,10 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   message. A queryset passed as an argument of a function, of `Case` or of
   the arithmetic methods of `Expr` is its `Subquery`, as Django resolves a
   `QuerySet`.
+- ORM: the database functions `orm.JSONArray` and `orm.JSONObject` port
+  Django's `JSONArray` and `JSONObject` and give a `json.RawMessage`. The
+  arguments of `JSONObject` alternate a key and a value, in the order of
+  Django's keyword arguments.
 
 ### Changed
 

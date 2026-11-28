@@ -122,6 +122,75 @@ func Collate(arg any, collation string) Expr {
 //	Filter("published__lte", orm.Now())
 func Now() Expr { return Expr{kind: exprCall, fn: fnNow} }
 
+// fnJSONArray marks the exprCall of JSONArray.
+const fnJSONArray = "JSON_ARRAY"
+
+// fnJSONObject marks the exprCall of JSONObject, whose arguments alternate a
+// key, a string Value, and a value.
+const fnJSONObject = "JSON_OBJECT"
+
+// JSONArray returns a JSON array of its arguments, Django's JSONArray. Each
+// argument is a field key or an Expr; pass Value(1) for a literal. A NULL
+// argument is a JSON null, and an argument that is a JSONArray or a JSONObject
+// nests. The value is a json.RawMessage:
+//
+//	Annotate("names", orm.JSONArray("name", orm.Lower("alias"), orm.Value(30)))
+//
+// On PostgreSQL it is JSONB_BUILD_ARRAY, with each argument cast to its type
+// as Django does, and on SQLite JSON_ARRAY.
+func JSONArray(args ...any) Expr { return call(fnJSONArray, args) }
+
+// JSONObject returns a JSON object, Django's JSONObject. Its arguments
+// alternate a key, a string, and a value, a field key or an Expr, in the
+// order of Django's keyword arguments:
+//
+//	Annotate("info", orm.JSONObject("name", orm.Lower("name"), "alias", "alias"))
+//
+// A query fails with an error for an odd number of arguments or a key that is
+// not a string. On PostgreSQL it is JSONB_BUILD_OBJECT, which orders the keys
+// as JSONB does, and on SQLite JSON_OBJECT.
+func JSONObject(pairs ...any) Expr {
+	exprs := make([]Expr, len(pairs))
+	for i, x := range pairs {
+		if i%2 == 0 {
+			exprs[i] = Value(x)
+		} else {
+			exprs[i] = fieldOrExpr(x)
+		}
+	}
+	return Expr{kind: exprCall, fn: fnJSONObject, args: exprs}
+}
+
+// resolveJSON binds JSONArray or JSONObject.
+func (c *compiler) resolveJSON(e Expr) (sqlNode, error) {
+	object := e.fn == fnJSONObject
+	if object && len(e.args)%2 != 0 {
+		return nil, fmt.Errorf("orm: JSONObject takes pairs of a key and a value, not %d arguments", len(e.args))
+	}
+	pg := c.d.Name() == "postgres"
+	args := make([]sqlNode, len(e.args))
+	for i, a := range e.args {
+		key := object && i%2 == 0
+		if _, ok := a.value.(string); key && !ok {
+			return nil, fmt.Errorf("orm: the JSONObject key %v is a %T, not a string", a.value, a.value)
+		}
+		n, err := c.resolveExpr(a)
+		if err != nil {
+			return nil, err
+		}
+		if _, cast := n.(convertNode); pg && (key || !cast && n.vtype() != typeUnknown) {
+			kind := valueKind(n.vtype())
+			n = convertNode{inner: n, to: &Field{Kind: kind}, input: kind}
+		}
+		args[i] = n
+	}
+	fn := e.fn
+	if pg {
+		fn = map[string]string{fnJSONArray: "JSONB_BUILD_ARRAY", fnJSONObject: "JSONB_BUILD_OBJECT"}[fn]
+	}
+	return callNode{fn: fn, args: args, typ: typeJSON}, nil
+}
+
 // callNames are the Django names of the functions of call, by SQL name.
 var callNames = map[string]string{
 	"COALESCE": "Coalesce",
@@ -139,13 +208,15 @@ var callNames = map[string]string{
 //	Annotate("label", orm.Concat("name", orm.Value(" ("), "goes_by", orm.Value(")")))
 func Concat(args ...any) Expr { return call(fnConcat, args) }
 
-// resolveCall binds Coalesce, Collate, Concat, Greatest, Least, NullIf or
-// Now. Concat casts each argument that is not text to text on every dialect,
+// resolveCall binds Coalesce, Collate, Concat, Greatest, JSONArray,
+// JSONObject, Least, NullIf or Now. Concat casts each argument that is not text to text on every dialect,
 // as Cast does. Django's ConcatPair casts on PostgreSQL only and leaves the
 // conversion to the || of SQLite, which gives the same text. Greatest and
 // Least are MAX and MIN on SQLite.
 func (c *compiler) resolveCall(e Expr) (sqlNode, error) {
 	switch e.fn {
+	case fnJSONArray, fnJSONObject:
+		return c.resolveJSON(e)
 	case fnNow:
 		if c.d.Name() == "sqlite" {
 			return rawNode{sql: "STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')", typ: typeTime}, nil
@@ -252,6 +323,8 @@ func (e Expr) outputKind(input Kind) Kind {
 			return KindText
 		case fnNow:
 			return KindDateTime
+		case fnJSONArray, fnJSONObject:
+			return KindJSON
 		}
 	}
 	return input

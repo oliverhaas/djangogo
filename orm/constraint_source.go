@@ -22,7 +22,7 @@ var functionNames = map[string]string{
 	"TRIM": "Trim", "LTRIM": "LTrim", "RTRIM": "RTrim",
 	"COALESCE": "Coalesce", fnConcat: "Concat", "ABS": "Abs",
 	"GREATEST": "Greatest", "LEAST": "Least", "NULLIF": "NullIf",
-	fnCollate: "Collate", fnNow: "Now",
+	fnCollate: "Collate", fnNow: "Now", fnJSONArray: "JSONArray", fnJSONObject: "JSONObject",
 }
 
 // ConstraintSource returns Go source code that builds c, such as
@@ -243,6 +243,10 @@ func (g sourceWriter) expr(e Expr) (string, error) {
 	case exprCall:
 		args := make([]string, len(e.args))
 		for i, a := range e.args {
+			if key, ok := a.value.(string); ok && e.fn == fnJSONObject && i%2 == 0 {
+				args[i] = strconv.Quote(key)
+				continue
+			}
 			arg, err := g.expr(a)
 			if err != nil {
 				return "", err
