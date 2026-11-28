@@ -126,6 +126,9 @@ func formatOriginalException(orig error) string {
 
 // Options holds configuration for serialization and deserialization calls.
 type Options struct {
+	// DB is the database connection whose model registry is consulted during
+	// serialization and deserialization, like Django's using.
+	DB *orm.DB
 	// SelectedFields restricts serialization to the named field attributes when
 	// non-nil.
 	SelectedFields []string
@@ -408,8 +411,8 @@ func (d *DeserializedObject) String() string {
 type Format interface {
 	// Serialize encodes the stream of Objects to w using o.
 	Serialize(w io.Writer, objs iter.Seq2[*Object, error], o *Options) error
-	// Deserialize decodes a stream of Objects from r.
-	Deserialize(r io.Reader) iter.Seq2[*Object, error]
+	// Deserialize decodes a stream of Objects from r using o.
+	Deserialize(r io.Reader, o *Options) iter.Seq2[*Object, error]
 }
 
 // internalFormat is an optional interface implemented by formats that are for
@@ -427,6 +430,7 @@ type registryEntry struct {
 var (
 	registryMu sync.RWMutex
 	registry   = []registryEntry{
+		{name: "xml", format: XMLFormat{}},
 		{name: "python", format: pythonFormat{}},
 		{name: "json", format: JSONFormat{}},
 		{name: "jsonl", format: JSONLFormat{}},
@@ -518,6 +522,7 @@ func SerializeTo(ctx context.Context, db *orm.DB, w io.Writer, format string, ob
 		return err
 	}
 	o := NewOptions(opts...)
+	o.DB = db
 	seq := iterObjects(ctx, db, objs, o)
 	return f.Serialize(w, seq, o)
 }
@@ -531,5 +536,7 @@ func Deserialize(ctx context.Context, db *orm.DB, format string, r io.Reader, op
 			yield(nil, err)
 		}
 	}
-	return FromObjects(ctx, db, f.Deserialize(r), opts...)
+	o := NewOptions(opts...)
+	o.DB = db
+	return FromObjects(ctx, db, f.Deserialize(r, o), opts...)
 }

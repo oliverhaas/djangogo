@@ -586,9 +586,14 @@ func TestSerializersPre1000ADDate(t *testing.T) {
 				dateValues := getFieldValues(t, format, serialStr, "pub_date")
 				djangotest.AssertEqual(t, len(dateValues), 1)
 				// Divergence from Django's USE_TZ=False test setting: djangogo stores
-				// datetimes in UTC and writes them with a trailing "Z".
+				// datetimes in UTC and writes them with a trailing "Z" in JSON/JSONL
+				// and "+00:00" in XML.
 				got := strings.ReplaceAll(dateValues[0].(string), "T", " ")
-				djangotest.AssertEqual(t, got, "0001-02-03 04:05:06Z")
+				want := "0001-02-03 04:05:06Z"
+				if format == "xml" {
+					want = "0001-02-03 04:05:06+00:00"
+				}
+				djangotest.AssertEqual(t, got, want)
 			})
 		})
 	}

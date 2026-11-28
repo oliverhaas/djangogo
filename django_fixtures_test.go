@@ -415,9 +415,12 @@ func (h *fixtureHarness) dumpdataRun(args []string, wantOutput string, opts dump
 	} else {
 		commandOutput = strings.TrimSpace(h.out.String())
 	}
-	if format == "json" {
+	switch format {
+	case "json":
 		djangotest.AssertJSONEqual(h.t, commandOutput, wantOutput)
-	} else {
+	case "xml":
+		djangotest.AssertXMLEqual(h.t, commandOutput, wantOutput)
+	default:
 		djangotest.AssertEqual(h.t, commandOutput, wantOutput)
 	}
 	return nil
@@ -545,7 +548,7 @@ func TestTestCaseFixtureLoadingClassFixtures(t *testing.T) {
 // Python TestCase class inheritance overriding the class attribute fixtures = [].
 
 // Ported from Django: tests/fixtures/tests.py::FixtureLoadingTests.test_loading_and_dumping
-// Check loading JSON fixtures with natural keys and dumping apps and models in JSON format.
+// Check loading JSON and XML fixtures with natural keys and dumping apps and models in JSON and XML format.
 func TestFixtureLoadingLoadingAndDumping(t *testing.T) {
 	eachFixtureApp(t, func(t *testing.T, h *fixtureHarness) {
 		ctx := context.Background()
@@ -608,7 +611,13 @@ func TestFixtureLoadingLoadingAndDumping(t *testing.T) {
 			"Poker has no place on ESPN",
 		})
 
-		// FIXME-PORT: Go: xml serializer format, Django: loads fixture3.xml here.
+		h.loaddata("fixture3.xml", "-v", "0")
+		djangotest.AssertSequenceEqual(t, h.articleHeadlines(), []string{
+			"XML identified as leading cause of cancer",
+			"Django conquers world!",
+			"Copyright is fine the way it is",
+			"Poker on TV is great!",
+		})
 
 		h.loaddata("fixture6.json", "-v", "0")
 		djangotest.AssertSequenceEqual(t, h.tagReprs(), []string{
@@ -616,7 +625,13 @@ func TestFixtureLoadingLoadingAndDumping(t *testing.T) {
 			`<Tag: <Article: Copyright is fine the way it is> tagged "law">`,
 		})
 
-		// FIXME-PORT: Go: xml serializer format, Django: loads fixture7.xml here.
+		h.loaddata("fixture7.xml", "-v", "0")
+		djangotest.AssertSequenceEqual(t, h.tagReprs(), []string{
+			`<Tag: <Article: Copyright is fine the way it is> tagged "copyright">`,
+			`<Tag: <Article: Copyright is fine the way it is> tagged "legal">`,
+			`<Tag: <Article: Django conquers world!> tagged "django">`,
+			`<Tag: <Article: Django conquers world!> tagged "world domination">`,
+		})
 
 		h.loaddata("fixture8.json", "-v", "0")
 		djangotest.AssertSequenceEqual(t, h.visaReprs(), []string{
@@ -625,13 +640,41 @@ func TestFixtureLoadingLoadingAndDumping(t *testing.T) {
 			"<Visa: Stephane Grappelli Can add user>",
 		})
 
-		// FIXME-PORT: Go: xml serializer format, Django: loads fixture9.xml and dumps XML here.
+		h.loaddata("fixture9.xml", "-v", "0")
+		djangotest.AssertSequenceEqual(t, h.visaReprs(), []string{
+			`<Visa: Artist formerly known as "Prince" Can change user>`,
+			"<Visa: Django Reinhardt Can add user, Can change user, Can delete user>",
+			"<Visa: Stephane Grappelli Can add user, Can delete user>",
+		})
+
+		djangotest.AssertSequenceEqual(t, h.articleHeadlines(), []string{
+			"XML identified as leading cause of cancer",
+			"Django conquers world!",
+			"Copyright is fine the way it is",
+			"Poker on TV is great!",
+		})
+
+		h.dumpdataAssert(
+			[]string{"fixtures.book"},
+			`[{"pk": 1, "model": "fixtures.book", "fields": `+
+				`{"name": "Music for all ages", "authors": [3, 1]}}]`,
+			dumpdataOpts{},
+		)
+
+		h.dumpdataAssert(
+			[]string{"fixtures.book"},
+			`[{"pk": 1, "model": "fixtures.book", "fields": `+
+				`{"name": "Music for all ages", "authors": `+
+				`[["Artist formerly known as \"Prince\""], ["Django Reinhardt"]]}}]`,
+			dumpdataOpts{naturalForeignKeys: true},
+		)
 
 		h.dumpdataAssert(
 			[]string{"fixtures.person"},
 			`[{"fields": {"name": "Django Reinhardt"}, "model": "fixtures.person"}, `+
 				`{"fields": {"name": "Stephane Grappelli"}, "model": "fixtures.person"}, `+
-				`{"fields": {"name": "Prince"}, "model": "fixtures.person"}]`,
+				`{"fields": {"name": "Artist formerly known as \"Prince\""}, `+
+				`"model": "fixtures.person"}]`,
 			dumpdataOpts{naturalPrimaryKeys: true},
 		)
 
@@ -640,36 +683,146 @@ func TestFixtureLoadingLoadingAndDumping(t *testing.T) {
 			`[{"pk": 1, "model": "fixtures.category", "fields": `+
 				`{"description": "Latest news stories", "title": "News Stories"}}, `+
 				`{"pk": 2, "model": "fixtures.article", "fields": `+
-				`{"headline": "Poker has no place on ESPN", `+
-				`"pub_date": "2006-06-16T12:00:00Z"}}, `+
+				`{"headline": "Poker on TV is great!", `+
+				`"pub_date": "2006-06-16T11:00:00Z"}}, `+
 				`{"pk": 3, "model": "fixtures.article", "fields": `+
 				`{"headline": "Copyright is fine the way it is", `+
 				`"pub_date": "2006-06-16T14:00:00Z"}}, `+
 				`{"pk": 4, "model": "fixtures.article", "fields": `+
 				`{"headline": "Django conquers world!", `+
 				`"pub_date": "2006-06-16T15:00:00Z"}}, `+
+				`{"pk": 5, "model": "fixtures.article", "fields": `+
+				`{"headline": "XML identified as leading cause of cancer", `+
+				`"pub_date": "2006-06-16T16:00:00Z"}}, `+
 				`{"pk": 1, "model": "fixtures.tag", "fields": `+
 				`{"tagged_type": ["fixtures", "article"], "name": "copyright", `+
 				`"tagged_id": 3}}, `+
 				`{"pk": 2, "model": "fixtures.tag", "fields": `+
-				`{"tagged_type": ["fixtures", "article"], "name": "law", `+
+				`{"tagged_type": ["fixtures", "article"], "name": "legal", `+
 				`"tagged_id": 3}}, `+
+				`{"pk": 3, "model": "fixtures.tag", "fields": `+
+				`{"tagged_type": ["fixtures", "article"], "name": "django", `+
+				`"tagged_id": 4}}, `+
+				`{"pk": 4, "model": "fixtures.tag", "fields": `+
+				`{"tagged_type": ["fixtures", "article"], "name": "world domination", `+
+				`"tagged_id": 4}}, `+
 				`{"pk": 1, "model": "fixtures.person", `+
 				`"fields": {"name": "Django Reinhardt"}}, `+
 				`{"pk": 2, "model": "fixtures.person", `+
 				`"fields": {"name": "Stephane Grappelli"}}, `+
 				`{"pk": 3, "model": "fixtures.person", `+
-				`"fields": {"name": "Prince"}}, `+
+				`"fields": {"name": "Artist formerly known as \"Prince\""}}, `+
 				`{"pk": 1, "model": "fixtures.visa", `+
 				`"fields": {"person": ["Django Reinhardt"], "permissions": `+
 				`[["add_user", "auth", "user"], ["change_user", "auth", "user"], `+
 				`["delete_user", "auth", "user"]]}}, `+
-				`{"pk": 2, "model": "fixtures.visa", `+
-				`"fields": {"person": ["Stephane Grappelli"], "permissions": `+
-				`[["add_user", "auth", "user"]]}}, `+
-				`{"pk": 3, "model": "fixtures.visa", `+
-				`"fields": {"person": ["Prince"], "permissions": []}}]`,
+				`{"pk": 2, "model": "fixtures.visa", "fields": `+
+				`{"person": ["Stephane Grappelli"], "permissions": `+
+				`[["add_user", "auth", "user"], ["delete_user", "auth", "user"]]}}, `+
+				`{"pk": 3, "model": "fixtures.visa", "fields": `+
+				`{"person": ["Artist formerly known as \"Prince\""], "permissions": `+
+				`[["change_user", "auth", "user"]]}}, `+
+				`{"pk": 1, "model": "fixtures.book", "fields": `+
+				`{"name": "Music for all ages", "authors": `+
+				`[["Artist formerly known as \"Prince\""], ["Django Reinhardt"]]}}]`,
 			dumpdataOpts{naturalForeignKeys: true},
+		)
+
+		h.dumpdataAssert(
+			[]string{"fixtures"},
+			`<?xml version="1.0" encoding="utf-8"?><django-objects version="1.0">`+
+				`<object pk="1" model="fixtures.category">`+
+				`<field type="CharField" name="title">News Stories</field>`+
+				`<field type="TextField" name="description">Latest news stories</field>`+
+				`</object>`+
+				`<object pk="2" model="fixtures.article">`+
+				`<field type="CharField" name="headline">Poker on TV is great!</field>`+
+				`<field type="DateTimeField" name="pub_date">2006-06-16T11:00:00+00:00</field>`+
+				`</object>`+
+				`<object pk="3" model="fixtures.article">`+
+				`<field type="CharField" name="headline">Copyright is fine the way it is`+
+				`</field>`+
+				`<field type="DateTimeField" name="pub_date">2006-06-16T14:00:00+00:00</field>`+
+				`</object>`+
+				`<object pk="4" model="fixtures.article">`+
+				`<field type="CharField" name="headline">Django conquers world!</field>`+
+				`<field type="DateTimeField" name="pub_date">2006-06-16T15:00:00+00:00</field>`+
+				`</object>`+
+				`<object pk="5" model="fixtures.article">`+
+				`<field type="CharField" name="headline">`+
+				`XML identified as leading cause of cancer</field>`+
+				`<field type="DateTimeField" name="pub_date">2006-06-16T16:00:00+00:00</field>`+
+				`</object>`+
+				`<object pk="1" model="fixtures.tag">`+
+				`<field type="CharField" name="name">copyright</field>`+
+				`<field to="contenttypes.contenttype" name="tagged_type" `+
+				`rel="ManyToOneRel"><natural>fixtures</natural><natural>article</natural>`+
+				`</field>`+
+				`<field type="PositiveIntegerField" name="tagged_id">3</field>`+
+				`</object>`+
+				`<object pk="2" model="fixtures.tag">`+
+				`<field type="CharField" name="name">legal</field>`+
+				`<field to="contenttypes.contenttype" name="tagged_type" `+
+				`rel="ManyToOneRel"><natural>fixtures</natural><natural>article</natural>`+
+				`</field>`+
+				`<field type="PositiveIntegerField" name="tagged_id">3</field></object>`+
+				`<object pk="3" model="fixtures.tag">`+
+				`<field type="CharField" name="name">django</field>`+
+				`<field to="contenttypes.contenttype" name="tagged_type" `+
+				`rel="ManyToOneRel"><natural>fixtures</natural><natural>article</natural>`+
+				`</field>`+
+				`<field type="PositiveIntegerField" name="tagged_id">4</field>`+
+				`</object>`+
+				`<object pk="4" model="fixtures.tag">`+
+				`<field type="CharField" name="name">world domination</field>`+
+				`<field to="contenttypes.contenttype" name="tagged_type" `+
+				`rel="ManyToOneRel"><natural>fixtures</natural><natural>article</natural>`+
+				`</field>`+
+				`<field type="PositiveIntegerField" name="tagged_id">4</field>`+
+				`</object>`+
+				`<object pk="1" model="fixtures.person">`+
+				`<field type="CharField" name="name">Django Reinhardt</field>`+
+				`</object>`+
+				`<object pk="2" model="fixtures.person">`+
+				`<field type="CharField" name="name">Stephane Grappelli</field>`+
+				`</object>`+
+				`<object pk="3" model="fixtures.person">`+
+				`<field type="CharField" name="name">Artist formerly known as "Prince"`+
+				`</field>`+
+				`</object>`+
+				`<object pk="1" model="fixtures.visa">`+
+				`<field to="fixtures.person" name="person" rel="ManyToOneRel">`+
+				`<natural>Django Reinhardt</natural></field>`+
+				`<field to="auth.permission" name="permissions" rel="ManyToManyRel">`+
+				`<object><natural>add_user</natural><natural>auth</natural>`+
+				`<natural>user</natural></object><object><natural>change_user</natural>`+
+				`<natural>auth</natural><natural>user</natural></object>`+
+				`<object><natural>delete_user</natural><natural>auth</natural>`+
+				`<natural>user</natural></object></field>`+
+				`</object>`+
+				`<object pk="2" model="fixtures.visa">`+
+				`<field to="fixtures.person" name="person" rel="ManyToOneRel">`+
+				`<natural>Stephane Grappelli</natural></field>`+
+				`<field to="auth.permission" name="permissions" rel="ManyToManyRel">`+
+				`<object><natural>add_user</natural><natural>auth</natural>`+
+				`<natural>user</natural></object>`+
+				`<object><natural>delete_user</natural><natural>auth</natural>`+
+				`<natural>user</natural></object></field>`+
+				`</object>`+
+				`<object pk="3" model="fixtures.visa">`+
+				`<field to="fixtures.person" name="person" rel="ManyToOneRel">`+
+				`<natural>Artist formerly known as "Prince"</natural></field>`+
+				`<field to="auth.permission" name="permissions" rel="ManyToManyRel">`+
+				`<object><natural>change_user</natural><natural>auth</natural>`+
+				`<natural>user</natural></object></field>`+
+				`</object>`+
+				`<object pk="1" model="fixtures.book">`+
+				`<field type="CharField" name="name">Music for all ages</field>`+
+				`<field to="fixtures.person" name="authors" rel="ManyToManyRel">`+
+				`<object><natural>Artist formerly known as "Prince"</natural></object>`+
+				`<object><natural>Django Reinhardt</natural></object></field>`+
+				`</object></django-objects>`,
+			dumpdataOpts{format: "xml", naturalForeignKeys: true},
 		)
 	})
 }
@@ -1181,7 +1334,46 @@ func TestFixtureLoadingOutputFormats(t *testing.T) {
 			dumpdataOpts{naturalForeignKeys: true},
 		)
 
-		// FIXME-PORT: Go: xml serializer format, Django: also dumps in XML format here.
+		h.dumpdataAssert(
+			[]string{"fixtures"},
+			`<?xml version="1.0" encoding="utf-8"?><django-objects version="1.0">`+
+				`<object pk="1" model="fixtures.category">`+
+				`<field type="CharField" name="title">News Stories</field>`+
+				`<field type="TextField" name="description">Latest news stories</field>`+
+				`</object>`+
+				`<object pk="2" model="fixtures.article">`+
+				`<field type="CharField" name="headline">Poker has no place on ESPN</field>`+
+				`<field type="DateTimeField" name="pub_date">2006-06-16T12:00:00+00:00</field>`+
+				`</object>`+
+				`<object pk="3" model="fixtures.article">`+
+				`<field type="CharField" name="headline">Time to reform copyright</field>`+
+				`<field type="DateTimeField" name="pub_date">2006-06-16T13:00:00+00:00</field>`+
+				`</object>`+
+				`<object pk="1" model="fixtures.tag">`+
+				`<field type="CharField" name="name">copyright</field>`+
+				`<field to="contenttypes.contenttype" name="tagged_type" `+
+				`rel="ManyToOneRel"><natural>fixtures</natural>`+
+				`<natural>article</natural></field>`+
+				`<field type="PositiveIntegerField" name="tagged_id">3</field>`+
+				`</object>`+
+				`<object pk="2" model="fixtures.tag">`+
+				`<field type="CharField" name="name">law</field>`+
+				`<field to="contenttypes.contenttype" name="tagged_type" `+
+				`rel="ManyToOneRel"><natural>fixtures</natural>`+
+				`<natural>article</natural></field>`+
+				`<field type="PositiveIntegerField" name="tagged_id">3</field>`+
+				`</object>`+
+				`<object pk="1" model="fixtures.person">`+
+				`<field type="CharField" name="name">Django Reinhardt</field>`+
+				`</object>`+
+				`<object pk="2" model="fixtures.person">`+
+				`<field type="CharField" name="name">Stephane Grappelli</field>`+
+				`</object>`+
+				`<object pk="3" model="fixtures.person">`+
+				`<field type="CharField" name="name">Prince</field>`+
+				`</object></django-objects>`,
+			dumpdataOpts{format: "xml", naturalForeignKeys: true},
+		)
 	})
 }
 
@@ -1261,7 +1453,7 @@ func TestFixtureLoadingStdinWithoutFormat(t *testing.T) {
 }
 
 // Ported from Django: tests/fixtures/tests.py::FixtureLoadingTests.test_loading_stdin
-// Check that loaddata "-" reads fixture data from standard input with --format=json.
+// Check that loaddata "-" reads fixture data from standard input with --format=json and --format=xml.
 func TestFixtureLoadingLoadingStdin(t *testing.T) {
 	eachFixtureApp(t, func(t *testing.T, h *fixtureHarness) {
 		data, err := os.ReadFile(filepath.Join(fixturesTestDataDir, "fixture1.json"))
@@ -1275,7 +1467,17 @@ func TestFixtureLoadingLoadingStdin(t *testing.T) {
 			"Poker has no place on ESPN",
 		})
 
-		// FIXME-PORT: Go: xml serializer format, Django: also tests loading fixture3.xml from stdin with --format=xml.
+		data, err = os.ReadFile(filepath.Join(fixturesTestDataDir, "fixture3.xml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.app.In = bytes.NewReader(data)
+		h.loaddata("--format=xml", "-", "-v", "0")
+		djangotest.AssertSequenceEqual(t, h.articleHeadlines(), []string{
+			"XML identified as leading cause of cancer",
+			"Time to reform copyright",
+			"Poker on TV is great!",
+		})
 	})
 }
 
@@ -1300,7 +1502,7 @@ func TestNonexistentFixtureNoConstraintChecking(t *testing.T) {
 }
 
 // Ported from Django: tests/fixtures/tests.py::FixtureTransactionTests.test_format_discovery
-// Check that loaddata discovers uncompressed and compressed JSON fixtures by base name.
+// Check that loaddata discovers fixtures by base name and rejects a base name that matches several formats.
 func TestFixtureTransactionFormatDiscovery(t *testing.T) {
 	eachFixtureApp(t, func(t *testing.T, h *fixtureHarness) {
 		h.loaddata("fixture1", "-v", "0")
@@ -1309,7 +1511,13 @@ func TestFixtureTransactionFormatDiscovery(t *testing.T) {
 			"Poker has no place on ESPN",
 		})
 
-		// FIXME-PORT: Go: xml serializer format, Django: loaddata "fixture2" is ambiguous between fixture2.json and fixture2.xml.
+		err := h.loaddataErr("fixture2", "-v", "0")
+		assertFixtureCommandError(t, err, "Multiple fixtures named 'fixture2'")
+
+		djangotest.AssertSequenceEqual(t, h.articleHeadlines(), []string{
+			"Time to reform copyright",
+			"Poker has no place on ESPN",
+		})
 
 		h.dumpdataAssert(
 			[]string{"fixtures"},

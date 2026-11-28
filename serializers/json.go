@@ -91,7 +91,7 @@ func dumpObject(obj *Object) pyjson.Object {
 // Deserialize reads a JSON array of serialized objects from r and yields each
 // *Object. A JSON syntax error yields a DeserializationError with an empty
 // message; structural errors yield "Error deserializing object: ...".
-func (JSONFormat) Deserialize(r io.Reader) iter.Seq2[*Object, error] {
+func (JSONFormat) Deserialize(r io.Reader, _ *Options) iter.Seq2[*Object, error] {
 	return func(yield func(*Object, error) bool) {
 		if r == nil {
 			yield(nil, NewDeserializationError(""))

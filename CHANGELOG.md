@@ -1005,6 +1005,15 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - Contenttypes and auth: `ContentType`, `Permission`, `User` and `Group` have
   Django's natural keys, so `dumpdata --natural-foreign --natural-primary`
   writes them as Django does. `NaturalKey` returns `[]any`.
+- Serializers: the `xml` format ports Django's XML serializer, so `loaddata`
+  and `dumpdata` read and write `.xml` fixtures as Django does. A document
+  with a DTD fails with `DTDForbiddenError`, and a text value with a control
+  character fails with Django's message. A format's `Deserialize` gets the
+  `Options`, whose `DB` field holds the database. `orm.Field.InternalType`
+  returns the name that Django's `get_internal_type()` returns, and
+  `orm.Kind.FieldClassName` returns the Django field class name.
+- Testing: `djangotest.AssertXMLEqual` and `AssertXMLNotEqual` compare XML
+  as Django's `assertXMLEqual` and `assertXMLNotEqual` do.
 
 ### Changed
 

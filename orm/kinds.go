@@ -133,9 +133,15 @@ func kindString(k Kind) string {
 	}
 }
 
-// djangoKindFieldName returns the Django field class name for error messages.
-func djangoKindFieldName(k Kind) string {
+// FieldClassName returns the name of the Django model field class that
+// corresponds to k, such as "EmailField" for KindEmail. Django words some
+// error messages and questions with this name.
+func (k Kind) FieldClassName() string {
 	switch k {
+	case KindAuto:
+		return "BigAutoField"
+	case KindInt:
+		return "IntegerField"
 	case KindSmallInt:
 		return "SmallIntegerField"
 	case KindBigInt:
@@ -150,6 +156,22 @@ func djangoKindFieldName(k Kind) string {
 		return "FloatField"
 	case KindDecimal:
 		return "DecimalField"
+	case KindChar:
+		return "CharField"
+	case KindText:
+		return "TextField"
+	case KindSlug:
+		return "SlugField"
+	case KindEmail:
+		return "EmailField"
+	case KindURL:
+		return "URLField"
+	case KindGenericIPAddress:
+		return "GenericIPAddressField"
+	case KindBool:
+		return "BooleanField"
+	case KindDateTime:
+		return "DateTimeField"
 	case KindDate:
 		return "DateField"
 	case KindTime:
@@ -162,17 +184,31 @@ func djangoKindFieldName(k Kind) string {
 		return "JSONField"
 	case KindBinary:
 		return "BinaryField"
-	case KindSlug:
-		return "SlugField"
-	case KindEmail:
-		return "EmailField"
-	case KindURL:
-		return "URLField"
-	case KindGenericIPAddress:
-		return "GenericIPAddressField"
 	default:
 		return "Field"
 	}
+}
+
+// InternalType returns the Django internal field type name for f, matching
+// Django's Field.get_internal_type().
+func (f *Field) InternalType() string {
+	if f == nil {
+		return "Field"
+	}
+	if f.Rel != nil {
+		switch f.Rel.Kind {
+		case RelFK:
+			return "ForeignKey"
+		case RelO2O:
+			return "OneToOneField"
+		case RelM2M:
+			return "ManyToManyField"
+		}
+	}
+	if f.Kind == KindEmail || f.Kind == KindURL {
+		return "CharField"
+	}
+	return f.Kind.FieldClassName()
 }
 
 // IntRange returns the documented inclusive [min, max] integer range of f when

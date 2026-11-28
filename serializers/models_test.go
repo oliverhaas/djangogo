@@ -2,7 +2,10 @@ package serializers_test
 
 import (
 	"context"
+	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +19,7 @@ import (
 
 // testFormats holds the serializer formats exercised by SerializersTestBase and
 // SerializersTransactionTestBase tests.
-var testFormats = []string{"json", "jsonl"}
+var testFormats = []string{"json", "jsonl", "xml"}
 
 // CategoryMetaData is Django's serializers.CategoryMetaData.
 type CategoryMetaData struct {
@@ -381,6 +384,21 @@ func validateOutput(format, serialStr string) bool {
 			}
 		}
 		return true
+	case "xml":
+		dec := xml.NewDecoder(strings.NewReader(serialStr))
+		seenRoot := false
+		for {
+			tok, err := dec.Token()
+			if errors.Is(err, io.EOF) {
+				return seenRoot
+			}
+			if err != nil {
+				return false
+			}
+			if _, ok := tok.(xml.StartElement); ok {
+				seenRoot = true
+			}
+		}
 	default:
 		return false
 	}
@@ -427,6 +445,30 @@ func getPKValues(t *testing.T, format, serialStr string) []any {
 			out = append(out, pk)
 		}
 		return out
+	case "xml":
+		var out []any
+		dec := xml.NewDecoder(strings.NewReader(serialStr))
+		for {
+			tok, err := dec.Token()
+			if errors.Is(err, io.EOF) {
+				return out
+			}
+			if err != nil {
+				t.Fatalf("Decode XML: %v", err)
+			}
+			se, ok := tok.(xml.StartElement)
+			if !ok || se.Name.Local != "object" {
+				continue
+			}
+			var pk any
+			for _, a := range se.Attr {
+				if a.Name.Local == "pk" && a.Value != "" {
+					pk = a.Value
+					break
+				}
+			}
+			out = append(out, pk)
+		}
 	default:
 		t.Fatalf("unsupported format %q", format)
 		return nil
@@ -493,6 +535,51 @@ func getFieldValues(t *testing.T, format, serialStr, fieldName string) []any {
 			}
 		}
 		return out
+	case "xml":
+		var out []any
+		dec := xml.NewDecoder(strings.NewReader(serialStr))
+		for {
+			tok, err := dec.Token()
+			if errors.Is(err, io.EOF) {
+				return out
+			}
+			if err != nil {
+				t.Fatalf("Decode XML: %v", err)
+			}
+			se, ok := tok.(xml.StartElement)
+			if !ok || se.Name.Local != "field" {
+				continue
+			}
+			matched := false
+			for _, a := range se.Attr {
+				if a.Name.Local == "name" && a.Value == fieldName {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+			var b strings.Builder
+			depth := 1
+			for depth > 0 {
+				inner, err := dec.Token()
+				if err != nil {
+					t.Fatalf("Decode XML field: %v", err)
+				}
+				switch it := inner.(type) {
+				case xml.StartElement:
+					depth++
+				case xml.EndElement:
+					depth--
+				case xml.CharData:
+					if depth == 1 {
+						b.Write(it)
+					}
+				}
+			}
+			out = append(out, b.String())
+		}
 	default:
 		t.Fatalf("unsupported format %q", format)
 		return nil
@@ -517,6 +604,16 @@ func pkLessSerializedString(t *testing.T, format string) string {
 	case "jsonl":
 		return "{\"pk\": null,\"model\": \"serializers.category\",\"fields\": {\"name\": \"Reference\"}}\n" +
 			"{\"model\": \"serializers.category\",\"fields\": {\"name\": \"Non-fiction\"}}"
+	case "xml":
+		return `<?xml version="1.0" encoding="utf-8"?>
+<django-objects version="1.0">
+    <object model="serializers.category">
+        <field type="CharField" name="name">Reference</field>
+    </object>
+    <object model="serializers.category">
+        <field type="CharField" name="name">Non-fiction</field>
+    </object>
+</django-objects>`
 	default:
 		t.Fatalf("unsupported format %q", format)
 		return ""
@@ -556,6 +653,18 @@ func mappingOrderingTemplate(t *testing.T, format string) string {
 			"\"categories\": [%d,%d]," +
 			"\"meta_data\": []," +
 			"\"topics\": []}}\n"
+	case "xml":
+		return `<?xml version="1.0" encoding="utf-8"?>
+<django-objects version="1.0">
+  <object model="serializers.article" pk="%d">
+    <field name="author" rel="ManyToOneRel" to="serializers.author">%d</field>
+    <field name="headline" type="CharField">Poker has no place on ESPN</field>
+    <field name="pub_date" type="DateTimeField">2006-06-16T11:00:00+00:00</field>
+    <field name="categories" rel="ManyToManyRel" to="serializers.category"><object pk="%d"></object><object pk="%d"></object></field>
+    <field name="meta_data" rel="ManyToManyRel" to="serializers.categorymetadata"></field>
+    <field name="topics" rel="ManyToManyRel" to="serializers.topic"></field>
+  </object>
+</django-objects>`
 	default:
 		t.Fatalf("unsupported format %q", format)
 		return ""
@@ -597,6 +706,24 @@ func forwardRefsSerializedString(t *testing.T, format string) string {
 		return "{\"pk\": 1,\"model\": \"serializers.article\",\"fields\": {\"headline\": \"Forward references pose no problem\",\"pub_date\": \"2006-06-16T15:00:00\",\"categories\": [1],\"author\": 1}}\n" +
 			"{\"pk\": 1,\"model\": \"serializers.category\",\"fields\": {\"name\": \"Reference\"}}\n" +
 			"{\"pk\": 1,\"model\": \"serializers.author\",\"fields\": {\"name\": \"Agnes\"}}"
+	case "xml":
+		return `<?xml version="1.0" encoding="utf-8"?>
+<django-objects version="1.0">
+    <object pk="1" model="serializers.article">
+        <field to="serializers.author" name="author" rel="ManyToOneRel">1</field>
+        <field type="CharField" name="headline">Forward references pose no problem</field>
+        <field type="DateTimeField" name="pub_date">2006-06-16T15:00:00</field>
+        <field to="serializers.category" name="categories" rel="ManyToManyRel">
+            <object pk="1"></object>
+        </field>
+        <field to="serializers.categorymetadata" name="meta_data" rel="ManyToManyRel"></field>
+    </object>
+    <object pk="1" model="serializers.author">
+        <field type="CharField" name="name">Agnes</field>
+    </object>
+    <object pk="1" model="serializers.category">
+        <field type="CharField" name="name">Reference</field></object>
+</django-objects>`
 	default:
 		t.Fatalf("unsupported format %q", format)
 		return ""

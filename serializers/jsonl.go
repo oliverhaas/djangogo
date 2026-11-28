@@ -45,7 +45,7 @@ func (JSONLFormat) Serialize(w io.Writer, objs iter.Seq2[*Object, error], _ *Opt
 // Deserialize reads JSON Lines from r, skipping blank lines, and yields each
 // *Object. A JSON syntax error yields a DeserializationError with an empty
 // message; structural errors yield "Error deserializing object: ...".
-func (JSONLFormat) Deserialize(r io.Reader) iter.Seq2[*Object, error] {
+func (JSONLFormat) Deserialize(r io.Reader, _ *Options) iter.Seq2[*Object, error] {
 	return func(yield func(*Object, error) bool) {
 		if r == nil {
 			yield(nil, NewDeserializationError(""))

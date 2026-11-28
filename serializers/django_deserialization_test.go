@@ -3,9 +3,14 @@ package serializers_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"iter"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/internal/pyjson"
 	"github.com/oliverhaas/djangogo/orm"
@@ -187,6 +192,75 @@ func TestDeserializerYAMLBytesInput(t *testing.T) {
 
 // Ported from Django: tests/serializers/test_deserialization.py::TestDeserializer.test_crafted_xml_performance
 // Check that the xml deserializer processes deeply nested crafted XML in linear time.
+// Django times one run of each size. The Go run is short enough that scheduler
+// noise under a loaded test run breaks the factor bound, so each size takes the
+// fastest of craftedXMLRuns runs.
 func TestDeserializerCraftedXMLPerformance(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: xml serializer format, Django: test_crafted_xml_performance verifies linear-time XML deserialization on deeply nested field content")
+	const craftedXMLRuns = 5
+	db := newTestDeserializerDB(t)
+	ctx := context.Background()
+
+	buildCraftedXML := func(depth, leafTextLen int) string {
+		nestedOpen := strings.Repeat("<nested>", depth)
+		nestedClose := strings.Repeat("</nested>", depth)
+		leaf := strings.Repeat("x", leafTextLen)
+		fieldContent := nestedOpen + leaf + nestedClose
+		return fmt.Sprintf(`
+                <django-objects version="1.0">
+                   <object model="contenttypes.contenttype" pk="1">
+                      <field name="app_label">%s</field>
+                      <field name="model">m</field>
+                   </object>
+                </django-objects>
+            `, fieldContent)
+	}
+
+	deserialize := func(t *testing.T, craftedXML string) time.Duration {
+		t.Helper()
+		runtime.GC()
+		start := time.Now()
+		result, err := collectDeserialized(ctx, db, "xml", craftedXML)
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Fatalf("Deserialize crafted XML: %v", err)
+		}
+		djangotest.AssertEqual(t, len(result), 1)
+		if _, ok := result[0].Object.(*contenttypes.ContentType); !ok {
+			t.Fatalf("got %T, want *contenttypes.ContentType", result[0].Object)
+		}
+		return elapsed
+	}
+
+	assertFactor := func(label string, params [][2]int, factor float64) {
+		t.Run(label, func(t *testing.T) {
+			var factors []float64
+			var prevTime time.Duration
+			for i, p := range params {
+				craftedXML := buildCraftedXML(p[0], p[1])
+				elapsed := deserialize(t, craftedXML)
+				for range craftedXMLRuns - 1 {
+					elapsed = min(elapsed, deserialize(t, craftedXML))
+				}
+				if i > 0 && prevTime > 0 {
+					factors = append(factors, float64(elapsed)/float64(prevTime))
+				}
+				prevTime = elapsed
+			}
+			var sum float64
+			for _, f := range factors {
+				sum += f
+			}
+			avg := sum / float64(len(factors))
+			if avg > factor {
+				t.Errorf("average factor = %v, want <= %v", avg, factor)
+			}
+		})
+	}
+
+	assertFactor(
+		"varying depth, varying length",
+		[][2]int{{50, 2000}, {100, 4000}, {200, 8000}, {400, 16000}, {800, 32000}},
+		2,
+	)
+	assertFactor("constant depth, varying length", [][2]int{{100, 1}, {100, 1000}}, 2)
 }

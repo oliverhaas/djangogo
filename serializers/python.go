@@ -44,7 +44,7 @@ func (pythonFormat) Serialize(_ io.Writer, objs iter.Seq2[*Object, error], _ *Op
 
 // Deserialize returns an error because the python format operates on *Object
 // values via FromObjects rather than an io.Reader stream.
-func (pythonFormat) Deserialize(_ io.Reader) iter.Seq2[*Object, error] {
+func (pythonFormat) Deserialize(_ io.Reader, _ *Options) iter.Seq2[*Object, error] {
 	return func(yield func(*Object, error) bool) {
 		yield(nil, NewDeserializationError("Error deserializing object: python format requires FromObjects"))
 	}
@@ -519,7 +519,8 @@ func FromObjects(
 		for obj, err := range objs {
 			if err != nil {
 				var de *DeserializationError
-				if errors.As(err, &de) {
+				var dtdErr *DTDForbiddenError
+				if errors.As(err, &de) || errors.As(err, &dtdErr) {
 					yield(nil, err)
 				} else {
 					yield(nil, NewDeserializationError("Error deserializing object: "+err.Error()))

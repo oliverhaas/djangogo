@@ -469,7 +469,7 @@ func (c *compiler) lookupOf(rest []string, path *fieldPath) (string, []string, e
 		}
 		return "", nil, c.unsupportedLookup(strings.Join(rest, lookupSep), name, kind, supported)
 	}
-	kind, fieldName := path.field.Kind, djangoFieldName(path.field)
+	kind, fieldName := path.field.Kind, path.field.Kind.FieldClassName()
 	last := len(rest) - 1
 	for _, name := range rest[:last] {
 		if !slices.Contains(transformsOf(kind), name) {
@@ -477,7 +477,7 @@ func (c *compiler) lookupOf(rest []string, path *fieldPath) (string, []string, e
 			return "", nil, c.unsupportedLookup(unsupported, name, fieldName, lookupCandidates(kind))
 		}
 		kind = outputOf(kind, name)
-		fieldName = djangoFieldName(&Field{Kind: kind})
+		fieldName = kind.FieldClassName()
 	}
 	switch name := rest[last]; {
 	case slices.Contains(lookupNames, name):
@@ -547,25 +547,4 @@ func (c *compiler) fieldPredicate(lookup string, transforms []string, col colNod
 		}
 	}
 	return c.buildPredicate(lookup, lhs, &Field{Kind: kind}, value, nil)
-}
-
-// djangoFieldName returns the name of the Django field class that corresponds
-// to the kind of f, used in error messages that Django words with it.
-func djangoFieldName(f *Field) string {
-	switch f.Kind {
-	case KindAuto:
-		return "BigAutoField"
-	case KindInt:
-		return "IntegerField"
-	case KindChar:
-		return "CharField"
-	case KindText:
-		return "TextField"
-	case KindBool:
-		return "BooleanField"
-	case KindDateTime:
-		return "DateTimeField"
-	default:
-		return djangoKindFieldName(f.Kind)
-	}
 }
