@@ -2,9 +2,12 @@ package orm
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/oliverhaas/djangogo/validators"
 )
 
 // fieldOrExpr returns x as an expression, with a string naming a field: the
@@ -83,12 +86,49 @@ func Greatest(args ...any) Expr { return call("GREATEST", args) }
 // on SQLite. NULL arguments behave as for Greatest.
 func Least(args ...any) Expr { return call("LEAST", args) }
 
+// NullIf returns NULL when a equals b, and a otherwise, Django's NullIf. Each
+// argument is a field key or an Expr; pass Value("") for a literal:
+//
+//	Annotate("alias", orm.NullIf("alias", "name"))
+func NullIf(a, b any) Expr { return call("NULLIF", []any{a, b}) }
+
+// fnCollate marks the exprCall of Collate, whose value is the collation name.
+const fnCollate = "COLLATE"
+
+// fnNow marks the exprCall of Now, which has no arguments.
+const fnNow = "NOW"
+
+// collationName matches a valid collation name, Django's Collate.collation_re.
+var collationName = regexp.MustCompile(`^[\p{L}\p{N}_-]+$`)
+
+// Collate reads arg with the collation collation, Django's Collate: the
+// SQL is arg COLLATE "collation". arg is a field key or an Expr. The name is
+// quoted as an identifier, and one that is not letters, digits, "_" and "-"
+// makes the query fail with Django's message. Collation names depend on the
+// database, such as "nocase" on SQLite or "sv-x-icu" on PostgreSQL:
+//
+//	Filter("alias", orm.Collate(orm.Value("a"), "nocase"))
+//	OrderBy(orm.Collate("alias", "binary"))
+func Collate(arg any, collation string) Expr {
+	return Expr{kind: exprCall, fn: fnCollate, args: []Expr{fieldOrExpr(arg)}, value: collation}
+}
+
+// Now returns the current date and time of the database, Django's Now. On
+// PostgreSQL it is STATEMENT_TIMESTAMP(), the time at the start of the
+// statement and not of the transaction. On SQLite it is
+// STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'), in UTC with millisecond precision:
+//
+//	Update(ctx, "published", orm.Now())
+//	Filter("published__lte", orm.Now())
+func Now() Expr { return Expr{kind: exprCall, fn: fnNow} }
+
 // callNames are the Django names of the functions of call, by SQL name.
 var callNames = map[string]string{
 	"COALESCE": "Coalesce",
 	fnConcat:   "Concat",
 	"GREATEST": "Greatest",
 	"LEAST":    "Least",
+	"NULLIF":   "NullIf",
 }
 
 // Concat joins the text of its arguments, Django's Concat. Each argument is a
@@ -99,12 +139,29 @@ var callNames = map[string]string{
 //	Annotate("label", orm.Concat("name", orm.Value(" ("), "goes_by", orm.Value(")")))
 func Concat(args ...any) Expr { return call(fnConcat, args) }
 
-// resolveCall binds Coalesce, Concat, Greatest or Least. Concat casts each
-// argument that is not text to text on every dialect, as Cast does. Django's
-// ConcatPair casts on PostgreSQL only and leaves the conversion to the || of
-// SQLite, which gives the same text. Greatest and Least are MAX and MIN on
-// SQLite.
+// resolveCall binds Coalesce, Collate, Concat, Greatest, Least, NullIf or
+// Now. Concat casts each argument that is not text to text on every dialect,
+// as Cast does. Django's ConcatPair casts on PostgreSQL only and leaves the
+// conversion to the || of SQLite, which gives the same text. Greatest and
+// Least are MAX and MIN on SQLite.
 func (c *compiler) resolveCall(e Expr) (sqlNode, error) {
+	switch e.fn {
+	case fnNow:
+		if c.d.Name() == "sqlite" {
+			return rawNode{sql: "STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')", typ: typeTime}, nil
+		}
+		return rawNode{sql: "STATEMENT_TIMESTAMP()", typ: typeTime}, nil
+	case fnCollate:
+		collation, _ := e.value.(string)
+		if !collationName.MatchString(collation) {
+			return nil, fmt.Errorf("orm: invalid collation name: %s.", validators.PyRepr(collation)) //nolint:revive,staticcheck // Django's message
+		}
+		arg, err := c.resolveExpr(e.args[0])
+		if err != nil {
+			return nil, err
+		}
+		return collateNode{inner: arg, collation: collation}, nil
+	}
 	if len(e.args) < 2 {
 		return nil, fmt.Errorf("orm: %s must take at least two expressions", callNames[e.fn])
 	}
@@ -190,8 +247,11 @@ func (e Expr) outputKind(input Kind) Kind {
 	case exprNot:
 		return KindBool
 	case exprCall:
-		if e.fn == fnConcat {
+		switch e.fn {
+		case fnConcat:
 			return KindText
+		case fnNow:
+			return KindDateTime
 		}
 	}
 	return input

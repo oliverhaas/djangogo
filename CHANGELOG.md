@@ -1014,6 +1014,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `orm.Kind.FieldClassName` returns the Django field class name.
 - Testing: `djangotest.AssertXMLEqual` and `AssertXMLNotEqual` compare XML
   as Django's `assertXMLEqual` and `assertXMLNotEqual` do.
+- ORM: the database functions `orm.NullIf`, `orm.Collate` and `orm.Now` port
+  Django's `NullIf`, `Collate` and `Now`. `Collate` refuses a collation name
+  with other characters than letters, digits, `_` and `-` with Django's
+  message. A queryset passed as an argument of a function, of `Case` or of
+  the arithmetic methods of `Expr` is its `Subquery`, as Django resolves a
+  `QuerySet`.
 
 ### Changed
 

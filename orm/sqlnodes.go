@@ -523,8 +523,13 @@ type callNode struct {
 	args []sqlNode
 }
 
-// render writes "FN(a, b, ...)".
+// render writes "FN(a, b, ...)". A decimal result is cast to NUMERIC on
+// SQLite, as for a funcNode.
 func (n callNode) render(w *sqlWriter) {
+	if n.vtype() == typeDecimal && w.d.Name() == "sqlite" {
+		w.write("CAST(")
+		defer w.write(" AS NUMERIC)")
+	}
 	w.write(n.fn + "(")
 	for i, a := range n.args {
 		if i > 0 {
@@ -540,6 +545,25 @@ func (n callNode) vtype() valueType { return commonType(n.args) }
 
 // aggregate reports whether an argument holds an aggregate.
 func (n callNode) aggregate() bool { return anyAggregate(n.args) }
+
+// collateNode is an expression read with a collation, Django's Collate.
+type collateNode struct {
+	inner     sqlNode
+	collation string
+}
+
+// render writes `inner COLLATE "collation"`.
+func (n collateNode) render(w *sqlWriter) {
+	n.inner.render(w)
+	w.write(" COLLATE ")
+	w.ident(n.collation)
+}
+
+// vtype is the type of the expression.
+func (n collateNode) vtype() valueType { return n.inner.vtype() }
+
+// aggregate reports whether the expression holds an aggregate.
+func (n collateNode) aggregate() bool { return n.inner.aggregate() }
 
 // concatNode joins the text of its arguments, each NULL taken as the empty
 // text, as Django's Concat does with ConcatPair and COALESCE.

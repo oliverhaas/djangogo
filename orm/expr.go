@@ -119,8 +119,8 @@ func F(key string) Expr { return Expr{kind: exprField, key: key} }
 // wrapped automatically.
 func Value(v any) Expr { return Expr{kind: exprValue, value: v} }
 
-// toExpr returns x as an expression: an Expr unchanged, any other value as a
-// literal.
+// toExpr returns x as an expression: an Expr unchanged, a queryset as its
+// Subquery, as Django resolves a QuerySet, and any other value as a literal.
 func toExpr(x any) Expr {
 	switch e := x.(type) {
 	case Expr:
@@ -129,6 +129,8 @@ func toExpr(x any) Expr {
 		if e != nil {
 			return *e
 		}
+	case AnyQuerySet:
+		return Subquery(e)
 	}
 	return Value(x)
 }

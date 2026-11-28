@@ -21,7 +21,8 @@ var functionNames = map[string]string{
 	"LOWER": "Lower", "UPPER": "Upper", "LENGTH": "Length",
 	"TRIM": "Trim", "LTRIM": "LTrim", "RTRIM": "RTrim",
 	"COALESCE": "Coalesce", fnConcat: "Concat", "ABS": "Abs",
-	"GREATEST": "Greatest", "LEAST": "Least",
+	"GREATEST": "Greatest", "LEAST": "Least", "NULLIF": "NullIf",
+	fnCollate: "Collate", fnNow: "Now",
 }
 
 // ConstraintSource returns Go source code that builds c, such as
@@ -247,6 +248,10 @@ func (g sourceWriter) expr(e Expr) (string, error) {
 				return "", err
 			}
 			args[i] = arg
+		}
+		if e.fn == fnCollate {
+			collation, _ := e.value.(string)
+			args = append(args, strconv.Quote(collation))
 		}
 		return "orm." + functionNames[e.fn] + "(" + strings.Join(args, ", ") + ")", nil
 	case exprCast:

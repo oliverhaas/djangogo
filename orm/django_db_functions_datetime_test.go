@@ -2,6 +2,8 @@ package orm_test
 
 import (
 	"context"
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -465,6 +467,56 @@ func TestDBFunctionsTruncTimeComparison(t *testing.T) {
 			Exists(ctx)
 		if err != nil || !exists {
 			t.Fatalf("filter on annotations: exists = %v, %v; want true", exists, err)
+		}
+	})
+}
+
+// Ported from Django: tests/db_functions/datetime/test_now.py::NowTests.test_basic
+//
+// A Go field cannot hold an expression, so the published date of a2 is set
+// with an update instead of a2.published = Now() + timedelta(days=2).
+func TestNowBasic(t *testing.T) {
+	djangotest.EachDB(t, []any{djangotest.App("db_functions", &fnArticle{})}, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		articles := orm.Query[fnArticle](db)
+		a1 := create(t, db, &fnArticle{Title: "How to Django", Text: fnLoremIpsum, Written: time.Now()})
+		a2 := create(t, db, &fnArticle{Title: "How to Time Travel", Text: fnLoremIpsum, Written: time.Now()})
+		for _, want := range []int64{1, 0} {
+			n, err := articles.Filter("id", a1.ID, "published", nil).Update(ctx, "published", orm.Now())
+			if err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			djangotest.AssertEqual(t, n, want)
+		}
+		if err := articles.RefreshFromDB(ctx, a1); err != nil {
+			t.Fatalf("RefreshFromDB: %v", err)
+		}
+		djangotest.AssertEqual(t, a1.Published != nil, true)
+		if _, err := articles.Filter("id", a2.ID).Update(ctx, "published", orm.Now().Add(orm.Value(48*time.Hour))); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if err := articles.RefreshFromDB(ctx, a2); err != nil {
+			t.Fatalf("RefreshFromDB: %v", err)
+		}
+		djangotest.AssertEqual(t, a2.Published != nil, true)
+		title := func(a fnArticle) string { return a.Title }
+		djangotest.AssertQuerySetEqual(t, articles.Filter("published__lte", orm.Now()), []string{"How to Django"}, title)
+		djangotest.AssertQuerySetEqual(t, articles.Filter("published__gt", orm.Now()), []string{"How to Time Travel"}, title)
+	})
+}
+
+// Ported from Django: tests/db_functions/datetime/test_now.py::NowTests.test_microseconds
+func TestNowMicroseconds(t *testing.T) {
+	djangotest.EachDB(t, []any{djangotest.App("db_functions", &fnArticle{})}, func(t *testing.T, db *orm.DB) {
+		create(t, db, &fnArticle{Title: "How to Django", Text: fnLoremIpsum, Written: time.Now()})
+		articles := orm.Query[fnArticle](db).Annotate("now_string", orm.Cast(orm.Now(), orm.Field{Kind: orm.KindText}))
+		nowString, _ := firstValue(t, articles.ValuesList("now_string")).(string)
+		precision := 6
+		if db.Dialect().Name() == "sqlite" {
+			precision = 3
+		}
+		if !regexp.MustCompile(fmt.Sprintf(`^.*\.\d{1,%d}`, precision)).MatchString(nowString) {
+			t.Errorf("now_string = %q, want fractional seconds of at most %d digits", nowString, precision)
 		}
 	})
 }

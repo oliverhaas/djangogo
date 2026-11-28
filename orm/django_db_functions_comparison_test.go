@@ -8,6 +8,7 @@ import (
 
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/orm"
+	"github.com/oliverhaas/djangogo/validators"
 )
 
 // fnArticle is Django's db_functions.Article without its many-to-many field
@@ -36,10 +37,10 @@ type fnDTModel struct {
 // fnFan is Django's db_functions.Fan.
 type fnFan struct {
 	ID       int64
-	Name     string `orm:"max_length=50"`
-	Age      int16  `orm:"type=positive_smallint;default=30"`
-	Author   orm.FK[fnAuthor]
-	FanSince *time.Time `orm:"null;blank"`
+	Name     string           `orm:"max_length=50"`
+	Age      int16            `orm:"type=positive_smallint;default=30"`
+	Author   orm.FK[fnAuthor] `orm:"related_name=fans"`
+	FanSince *time.Time       `orm:"null;blank"`
 }
 
 // fnFloatModel is Django's db_functions.FloatModel.
@@ -52,7 +53,7 @@ type fnFloatModel struct {
 // fnComparisonModels returns the models of the ports of
 // tests/db_functions/comparison.
 func fnComparisonModels() []any {
-	return []any{djangotest.App("db_functions", &fnAuthor{}, &fnArticle{}, &fnDTModel{}, &fnFan{}, &fnFloatModel{})}
+	return []any{djangotest.App("db_functions", &fnAuthor{}, &fnArticle{}, &fnDTModel{}, &fnFan{}, &fnFloatModel{}, &fnDecimalModel{})}
 }
 
 // fnLoremIpsum is the text of Django's db_functions tests.
@@ -121,9 +122,30 @@ func TestCoalesceOrdering(t *testing.T) {
 	})
 }
 
-// No Go counterpart: tests/db_functions/comparison/test_coalesce.py::CoalesceTests.test_empty_queryset
-// passes a queryset and a Subquery as an argument of Coalesce. The ORM has no
-// subquery expressions.
+// Ported from Django: tests/db_functions/comparison/test_coalesce.py::CoalesceTests.test_empty_queryset
+func TestCoalesceEmptyQueryset(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		create(t, db, &fnAuthor{Name: "John Smith"})
+		queryset := orm.Query[fnAuthor](db).Values("id")
+		tests := []struct {
+			description string
+			emptyQuery  any
+		}{
+			{"QuerySet.none()", queryset.None()},
+			{"QuerySet.filter(id=0)", queryset.Filter("id", 0)},
+			{"Subquery(QuerySet.none())", orm.Subquery(queryset.None())},
+			{"Subquery(Queryset.filter(id=0)", orm.Subquery(queryset.Filter("id", 0))},
+		}
+		for _, tt := range tests {
+			t.Run(tt.description, func(t *testing.T) {
+				qs := orm.Query[fnAuthor](db).Annotate("annotation", orm.Coalesce(tt.emptyQuery, 42))
+				djangotest.AssertNumQueries(t, db, 1, func() {
+					djangotest.AssertEqual(t, firstValue(t, qs.ValuesList("annotation")), any(int64(42)))
+				})
+			})
+		}
+	})
+}
 
 // Ported from Django: tests/db_functions/comparison/test_cast.py::CastTests.test_cast_from_value
 func TestCastFromValue(t *testing.T) {
@@ -341,5 +363,330 @@ func TestCastToTextField(t *testing.T) {
 		create(t, db, &fnAuthor{Name: "Bob", Age: 1, Alias: new("1")})
 		authors := orm.Query[fnAuthor](db).Annotate("age_text", orm.Cast("age", orm.Field{Kind: orm.KindText}))
 		assertFlat(t, authors.ValuesList("age_text"), []any{"1"})
+	})
+}
+
+// fnGreatestLeastIgnoresNulls is Django's greatest_least_ignores_nulls
+// feature: PostgreSQL skips a NULL argument of GREATEST and LEAST.
+func fnGreatestLeastIgnoresNulls(db *orm.DB) bool { return db.Dialect().Name() == "postgres" }
+
+// fnAssertQueryError fails t unless running vl fails with an error that
+// contains want.
+func fnAssertQueryError(t *testing.T, vl *orm.ValuesListQuerySet, want string) {
+	t.Helper()
+	_, err := vl.All(context.Background())
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want an error with %q", err, want)
+	}
+}
+
+// Ported from Django: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_basic
+func TestGreatestBasic(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		before := now.Add(-time.Hour)
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: before, Published: &now})
+		articles := orm.Query[fnArticle](db).Annotate("last_updated", orm.Greatest("written", "published"))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("last_updated")).(time.Time).Equal(now), true)
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_ignores_null
+func TestGreatestIgnoresNull(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		if !fnGreatestLeastIgnoresNulls(db) {
+			t.Skip("SQLite does not skip NULL arguments (greatest_least_ignores_nulls)")
+		}
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: now})
+		articles := orm.Query[fnArticle](db).Annotate("last_updated", orm.Greatest("written", "published"))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("last_updated")).(time.Time).Equal(now), true)
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_propagates_null
+func TestGreatestPropagatesNull(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		if fnGreatestLeastIgnoresNulls(db) {
+			t.Skip("PostgreSQL skips NULL arguments (greatest_least_ignores_nulls)")
+		}
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: time.Now()})
+		articles := orm.Query[fnArticle](db).Annotate("last_updated", orm.Greatest("written", "published"))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("last_updated")), nil)
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_coalesce_workaround
+func TestGreatestCoalesceWorkaround(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		past := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: now})
+		articles := orm.Query[fnArticle](db).Annotate("last_updated",
+			orm.Greatest(orm.Coalesce("written", past), orm.Coalesce("published", past)))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("last_updated")).(time.Time).Equal(now), true)
+	})
+}
+
+// No Go counterpart: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_coalesce_workaround_mysql
+// runs on MySQL only.
+
+// Ported from Django: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_all_null
+func TestGreatestAllNull(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: time.Now()})
+		articles := orm.Query[fnArticle](db).Annotate("last_updated", orm.Greatest("published", "updated"))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("last_updated")), nil)
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_one_expressions
+//
+// Django raises the error when Greatest is built; the query fails with it.
+func TestGreatestOneExpressions(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		fnAssertQueryError(t, orm.Query[fnArticle](db).Annotate("g", orm.Greatest("written")).ValuesList("g"),
+			"Greatest must take at least two expressions")
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_related_field
+func TestGreatestRelatedField(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		author := create(t, db, &fnAuthor{Name: "John Smith", Age: 45})
+		create(t, db, &fnFan{Name: "Margaret", Age: 50, Author: fkTo[fnAuthor](author.ID)})
+		authors := orm.Query[fnAuthor](db).Annotate("highest_age", orm.Greatest("age", "fans__age"))
+		djangotest.AssertEqual(t, firstValue(t, authors.ValuesList("highest_age")), any(int64(50)))
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_update
+func TestGreatestUpdate(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		author := create(t, db, &fnAuthor{Name: "James Smith", GoesBy: new("Jim")})
+		if _, err := orm.Query[fnAuthor](db).Update(ctx, "alias", orm.Greatest("name", "goes_by")); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if err := orm.Query[fnAuthor](db).RefreshFromDB(ctx, author); err != nil {
+			t.Fatalf("RefreshFromDB: %v", err)
+		}
+		djangotest.AssertEqual(t, *author.Alias, "Jim")
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_greatest.py::GreatestTests.test_decimal_filter
+func TestGreatestDecimalFilter(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		obj := create(t, db, &fnDecimalModel{N1: orm.MustDecimal("1.1"), N2: new(orm.MustDecimal("1.2"))})
+		rows := orm.Query[fnDecimalModel](db).Annotate("greatest", orm.Greatest("n1", "n2")).
+			Filter("greatest", orm.MustDecimal("1.2")).ValuesList("id")
+		assertFlat(t, rows, []any{obj.ID})
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_least.py::LeastTests.test_basic
+func TestLeastBasic(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		before := now.Add(-time.Hour)
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: before, Published: &now})
+		articles := orm.Query[fnArticle](db).Annotate("first_updated", orm.Least("written", "published"))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("first_updated")).(time.Time).Equal(before), true)
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_least.py::LeastTests.test_ignores_null
+func TestLeastIgnoresNull(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		if !fnGreatestLeastIgnoresNulls(db) {
+			t.Skip("SQLite does not skip NULL arguments (greatest_least_ignores_nulls)")
+		}
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: now})
+		articles := orm.Query[fnArticle](db).Annotate("first_updated", orm.Least("written", "published"))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("first_updated")).(time.Time).Equal(now), true)
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_least.py::LeastTests.test_propagates_null
+func TestLeastPropagatesNull(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		if fnGreatestLeastIgnoresNulls(db) {
+			t.Skip("PostgreSQL skips NULL arguments (greatest_least_ignores_nulls)")
+		}
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: time.Now()})
+		articles := orm.Query[fnArticle](db).Annotate("first_updated", orm.Least("written", "published"))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("first_updated")), nil)
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_least.py::LeastTests.test_coalesce_workaround
+func TestLeastCoalesceWorkaround(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		future := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: now})
+		articles := orm.Query[fnArticle](db).Annotate("last_updated",
+			orm.Least(orm.Coalesce("written", future), orm.Coalesce("published", future)))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("last_updated")).(time.Time).Equal(now), true)
+	})
+}
+
+// No Go counterpart: tests/db_functions/comparison/test_least.py::LeastTests.test_coalesce_workaround_mysql
+// runs on MySQL only.
+
+// Ported from Django: tests/db_functions/comparison/test_least.py::LeastTests.test_all_null
+func TestLeastAllNull(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		create(t, db, &fnArticle{Title: "Testing with Django", Written: time.Now()})
+		articles := orm.Query[fnArticle](db).Annotate("first_updated", orm.Least("published", "updated"))
+		djangotest.AssertEqual(t, firstValue(t, articles.ValuesList("first_updated")), nil)
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_least.py::LeastTests.test_one_expressions
+//
+// Django raises the error when Least is built; the query fails with it.
+func TestLeastOneExpressions(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		fnAssertQueryError(t, orm.Query[fnArticle](db).Annotate("l", orm.Least("written")).ValuesList("l"),
+			"Least must take at least two expressions")
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_least.py::LeastTests.test_related_field
+func TestLeastRelatedField(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		author := create(t, db, &fnAuthor{Name: "John Smith", Age: 45})
+		create(t, db, &fnFan{Name: "Margaret", Age: 50, Author: fkTo[fnAuthor](author.ID)})
+		authors := orm.Query[fnAuthor](db).Annotate("lowest_age", orm.Least("age", "fans__age"))
+		djangotest.AssertEqual(t, firstValue(t, authors.ValuesList("lowest_age")), any(int64(45)))
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_least.py::LeastTests.test_update
+func TestLeastUpdate(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		author := create(t, db, &fnAuthor{Name: "James Smith", GoesBy: new("Jim")})
+		if _, err := orm.Query[fnAuthor](db).Update(ctx, "alias", orm.Least("name", "goes_by")); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if err := orm.Query[fnAuthor](db).RefreshFromDB(ctx, author); err != nil {
+			t.Fatalf("RefreshFromDB: %v", err)
+		}
+		djangotest.AssertEqual(t, *author.Alias, "James Smith")
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_least.py::LeastTests.test_decimal_filter
+func TestLeastDecimalFilter(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		obj := create(t, db, &fnDecimalModel{N1: orm.MustDecimal("1.1"), N2: new(orm.MustDecimal("1.2"))})
+		rows := orm.Query[fnDecimalModel](db).Annotate("least", orm.Least("n1", "n2")).
+			Filter("least", orm.MustDecimal("1.1")).ValuesList("id")
+		assertFlat(t, rows, []any{obj.ID})
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_nullif.py::NullIfTests.test_basic
+func TestNullIfBasic(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		create(t, db, &fnAuthor{Name: "John Smith", Alias: new("smithj")})
+		create(t, db, &fnAuthor{Name: "Rhonda", Alias: new("Rhonda")})
+		authors := orm.Query[fnAuthor](db).Annotate("nullif", orm.NullIf("alias", "name"))
+		assertFlat(t, authors.OrderBy("name").ValuesList("nullif"), []any{"smithj", nil})
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_nullif.py::NullIfTests.test_null_argument
+func TestNullIfNullArgument(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		create(t, db, &fnAuthor{Name: "John Smith", Alias: new("smithj")})
+		create(t, db, &fnAuthor{Name: "Rhonda", Alias: new("Rhonda")})
+		authors := orm.Query[fnAuthor](db).Annotate("nullif", orm.NullIf("name", orm.Value(nil)))
+		assertFlat(t, authors.OrderBy("name").ValuesList("nullif"), []any{"John Smith", "Rhonda"})
+	})
+}
+
+// No Go counterpart: tests/db_functions/comparison/test_nullif.py::NullIfTests.test_too_few_args
+// NullIf takes exactly two arguments, so the compiler rejects other counts.
+
+// No Go counterpart: tests/db_functions/comparison/test_nullif.py::NullIfTests.test_null_literal
+// runs on Oracle only.
+
+// fnTestCollation returns Django's test_collations entry purpose of the
+// database, or "" when the database has none.
+func fnTestCollation(db *orm.DB, purpose string) string {
+	if db.Dialect().Name() == "sqlite" {
+		return map[string]string{"ci": "nocase", "cs": "binary", "non_default": "nocase", "virtual": "nocase"}[purpose]
+	}
+	return map[string]string{"deterministic": "C", "non_default": "sv-x-icu", "swedish_ci": "sv-x-icu", "virtual": "sv-x-icu"}[purpose]
+}
+
+// fnCollateAuthors creates the authors of Django's CollateTests.
+func fnCollateAuthors(t *testing.T, db *orm.DB) (*fnAuthor, *fnAuthor) {
+	t.Helper()
+	return create(t, db, &fnAuthor{Alias: new("a"), Name: "Jones 1"}), create(t, db, &fnAuthor{Alias: new("A"), Name: "Jones 2"})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_collate.py::CollateTests.test_collate_filter_ci
+func TestCollateFilterCI(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		collation := fnTestCollation(db, "ci")
+		if collation == "" {
+			t.Skip("This backend does not support case-insensitive collations.")
+		}
+		fnCollateAuthors(t, db)
+		n, err := orm.Query[fnAuthor](db).Filter("alias", orm.Collate(orm.Value("a"), collation)).Count(context.Background())
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		djangotest.AssertEqual(t, n, int64(2))
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_collate.py::CollateTests.test_collate_order_by_cs
+func TestCollateOrderByCS(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		collation := fnTestCollation(db, "cs")
+		if collation == "" {
+			t.Skip("This backend does not support case-sensitive collations.")
+		}
+		author1, author2 := fnCollateAuthors(t, db)
+		qs := orm.Query[fnAuthor](db).OrderBy(orm.Collate("alias", collation))
+		assertFlat(t, qs.ValuesList("id"), []any{author2.ID, author1.ID})
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_collate.py::CollateTests.test_language_collation_order_by
+func TestCollateLanguageCollationOrderBy(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		collation := fnTestCollation(db, "swedish_ci")
+		if collation == "" {
+			t.Skip("This backend does not support language collations.")
+		}
+		author1, author2 := fnCollateAuthors(t, db)
+		author3 := create(t, db, &fnAuthor{Alias: new("O"), Name: "Jones"})
+		author4 := create(t, db, &fnAuthor{Alias: new("Ö"), Name: "Jones"})
+		author5 := create(t, db, &fnAuthor{Alias: new("P"), Name: "Jones"})
+		qs := orm.Query[fnAuthor](db).OrderBy(orm.Collate(orm.F("alias"), collation), "name")
+		assertFlat(t, qs.ValuesList("id"), []any{author1.ID, author2.ID, author3.ID, author5.ID, author4.ID})
+	})
+}
+
+// Ported from Django: tests/db_functions/comparison/test_collate.py::CollateTests.test_invalid_collation
+//
+// Django raises the error when Collate is built; the query fails with it. A
+// Go collation is a string, so the None case has no counterpart.
+func TestCollateInvalidCollation(t *testing.T) {
+	djangotest.EachDB(t, fnComparisonModels(), func(t *testing.T, db *orm.DB) {
+		for _, value := range []string{"", `et-x-icu" OR `, `"schema"."collation"`} {
+			t.Run(value, func(t *testing.T) {
+				qs := orm.Query[fnAuthor](db).OrderBy(orm.Collate(orm.F("alias"), value))
+				fnAssertQueryError(t, qs.ValuesList("id"), "nvalid collation name: "+validators.PyRepr(value)+".")
+			})
+		}
 	})
 }
