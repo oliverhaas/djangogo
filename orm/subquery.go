@@ -3,6 +3,7 @@ package orm
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -100,6 +101,13 @@ func (c *compiler) resolveOuterRef(e Expr) (sqlNode, error) {
 	node, err := c.parent.resolveExpr(ref)
 	if err != nil {
 		return nil, err
+	}
+	if containsOver(node) {
+		name := e.key
+		if name == "" {
+			name, _ = ref.FieldName()
+		}
+		return nil, fmt.Errorf("orm: Referencing outer query window expression is not supported: %s.", name) //nolint:revive,staticcheck // Django's message
 	}
 	c.outerRefs = append(c.outerRefs, outerRef{node: node, multi: strings.Contains(e.key, lookupSep)})
 	return outerRefNode{inner: node}, nil
@@ -255,7 +263,17 @@ func (outerRefNode) aggregate() bool { return false }
 // subquery, directly or through another annotation. Aggregate then computes
 // e over a subquery, as Django's get_aggregation does for refs_subquery,
 // because a database cannot aggregate the value of a correlated subquery.
-func (q *query) refsSubquery(e Expr) bool {
+func (q *query) refsSubquery(e Expr) bool { return q.refsKind(e, exprSubquery) }
+
+// refsWindow reports whether e refers to an annotation of q that holds a
+// window, directly or through another annotation. Aggregate then computes e
+// over a subquery, as Django's get_aggregation does for refs_window, because
+// a database cannot aggregate a window.
+func (q *query) refsWindow(e Expr) bool { return q.refsKind(e, exprWindow) }
+
+// refsKind reports whether e refers to an annotation of q that holds an
+// expression of kind, directly or through another annotation.
+func (q *query) refsKind(e Expr, kind exprKind) bool {
 	seen := make(map[string]bool)
 	var ref func(key string) bool
 	ref = func(key string) bool {
@@ -266,39 +284,39 @@ func (q *query) refsSubquery(e Expr) bool {
 		seen[name] = true
 		for i := len(q.annotations) - 1; i >= 0; i-- {
 			if a := q.annotations[i]; a.name == name {
-				return mentionsSubquery(a.expr, true, ref)
+				return mentionsKind(a.expr, kind, true, ref)
 			}
 		}
 		return false
 	}
-	return mentionsSubquery(e, false, ref)
+	return mentionsKind(e, kind, false, ref)
 }
 
-// mentionsSubquery reports whether e holds a subquery, when direct is set,
-// or a key for which ref reports true.
-func mentionsSubquery(e Expr, direct bool, ref func(key string) bool) bool {
+// mentionsKind reports whether e holds an expression of kind, when direct
+// is set, or a key for which ref reports true.
+func mentionsKind(e Expr, kind exprKind, direct bool, ref func(key string) bool) bool {
 	switch e.kind {
-	case exprSubquery:
+	case kind:
 		return direct
 	case exprField:
 		return ref(e.key)
 	}
 	for _, x := range []*Expr{e.left, e.right, e.arg, e.def} {
-		if x != nil && mentionsSubquery(*x, direct, ref) {
+		if x != nil && mentionsKind(*x, kind, direct, ref) {
 			return true
 		}
 	}
-	for _, x := range e.args {
-		if mentionsSubquery(x, direct, ref) {
+	for _, x := range slices.Concat(e.args, e.partition) {
+		if mentionsKind(x, kind, direct, ref) {
 			return true
 		}
 	}
 	for _, w := range e.whens {
-		if condMentionsSubquery(w.Cond, direct, ref) || mentionsSubquery(fieldOrExpr(w.Then), direct, ref) {
+		if condMentionsKind(w.Cond, kind, direct, ref) || mentionsKind(fieldOrExpr(w.Then), kind, direct, ref) {
 			return true
 		}
 	}
-	if e.filter != nil && condMentionsSubquery(*e.filter, direct, ref) {
+	if e.filter != nil && condMentionsKind(*e.filter, kind, direct, ref) {
 		return true
 	}
 	for _, o := range e.order {
@@ -307,9 +325,9 @@ func mentionsSubquery(e Expr, direct bool, ref func(key string) bool) bool {
 		case string:
 			found = ref(t)
 		case OrderExpr:
-			found = mentionsSubquery(t.expr, direct, ref)
+			found = mentionsKind(t.expr, kind, direct, ref)
 		default:
-			found = mentionsSubquery(toExpr(o), direct, ref)
+			found = mentionsKind(toExpr(o), kind, direct, ref)
 		}
 		if found {
 			return true
@@ -318,27 +336,27 @@ func mentionsSubquery(e Expr, direct bool, ref func(key string) bool) bool {
 	return false
 }
 
-// condMentionsSubquery is mentionsSubquery for the keys, values and
-// expressions of a condition.
-func condMentionsSubquery(c Cond, direct bool, ref func(key string) bool) bool {
+// condMentionsKind is mentionsKind for the keys, values and expressions of a
+// condition.
+func condMentionsKind(c Cond, kind exprKind, direct bool, ref func(key string) bool) bool {
 	for _, ch := range c.children {
 		switch {
 		case ch.sub != nil:
-			if condMentionsSubquery(*ch.sub, direct, ref) {
+			if condMentionsKind(*ch.sub, kind, direct, ref) {
 				return true
 			}
 		case ch.expr != nil:
-			if mentionsSubquery(*ch.expr, direct, ref) {
+			if mentionsKind(*ch.expr, kind, direct, ref) {
 				return true
 			}
 		default:
 			if ref(ch.key) {
 				return true
 			}
-			if v, ok := ch.value.(Expr); ok && mentionsSubquery(v, direct, ref) {
+			if v, ok := ch.value.(Expr); ok && mentionsKind(v, kind, direct, ref) {
 				return true
 			}
-			if v, ok := ch.value.(*Expr); ok && v != nil && mentionsSubquery(*v, direct, ref) {
+			if v, ok := ch.value.(*Expr); ok && v != nil && mentionsKind(*v, kind, direct, ref) {
 				return true
 			}
 		}

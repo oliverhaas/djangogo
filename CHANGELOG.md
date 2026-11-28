@@ -1068,6 +1068,18 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   SQLite, Extract of a duration fails, as in Django. A truncated datetime is
   an instant; Django gives it in the zone of `tzinfo`. A dialect that
   implements `orm.TruncDialect` supports Trunc.
+- ORM: window expressions. `orm.Window` computes an aggregate or a window
+  function over a window of rows, with `Expr.PartitionBy`, `Expr.OrderBy`
+  and `Expr.Frame`. The frames are `orm.RowRange` and `orm.ValueRange`, and
+  `WindowFrame.Exclusion` leaves rows out. The window functions are
+  `RowNumber`, `Rank`, `DenseRank`, `CumeDist`, `PercentRank`, `Ntile`,
+  `FirstValue`, `LastValue`, `NthValue`, `Lag` and `Lead`; `Expr.Default`
+  sets the default of Lag and Lead. An Update that assigns a window, an
+  OuterRef to a window annotation and a wrong frame bound fail with
+  Django's messages. Aggregate over a window annotation runs over a
+  subquery, as in Django. Django refuses a `ValueRange` offset other than
+  zero on PostgreSQL; the ORM allows it there. A filter against a window
+  is not supported yet.
 
 ### Changed
 

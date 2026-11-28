@@ -33,7 +33,7 @@ func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, err
 	skip := c.empty && emptyValuesKnown(aggs)
 
 	if !q.hasAggregates() && !q.sliced() && !q.distinct && !slices.ContainsFunc(aggs, func(a annotation) bool {
-		return q.refsSubquery(a.expr)
+		return q.refsSubquery(a.expr) || q.refsWindow(a.expr)
 	}) {
 		items := make([]selectItem, len(aggs))
 		for i, a := range aggs {

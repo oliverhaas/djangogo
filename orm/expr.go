@@ -45,6 +45,11 @@ const (
 	// exprOuterRef references a field of the query that a subquery is part
 	// of, OuterRef.
 	exprOuterRef
+	// exprWindow is an expression evaluated over a window of rows, Window.
+	exprWindow
+	// exprWindowFunc is a call of a window function, such as Rank or Lag,
+	// which is valid only as the source of a Window.
+	exprWindowFunc
 )
 
 // Expr is an SQL value expression: a field reference (F), a literal (Value),
@@ -53,9 +58,9 @@ const (
 // (Lower, Upper, Length, Trim, LTrim, RTrim, Concat), Abs, Coalesce,
 // Greatest, Least, Cast, a conditional expression (Case), the negation of a
 // boolean expression (Not), an expression of a given type
-// (ExpressionWrapper), the value of a query (Subquery, Exists) or a field of
-// the query a subquery is part of (OuterRef). It is immutable; every method
-// returns a new Expr.
+// (ExpressionWrapper), the value of a query (Subquery, Exists), a field of
+// the query a subquery is part of (OuterRef) or an expression over a window
+// of rows (Window). It is immutable; every method returns a new Expr.
 //
 // An Expr can be the value of a filter, so a column is compared with another
 // column or with a computed value:
@@ -117,6 +122,13 @@ type Expr struct {
 	// sub is the query of an exprSubquery, and exists reports an Exists.
 	sub    *query
 	exists bool
+	// partition holds the terms of a Window's PartitionBy, and frame its
+	// Frame, nil without one. order holds the terms of its OrderBy.
+	partition []Expr
+	frame     *WindowFrame
+	// err is the error of a constructor that got an invalid argument, which
+	// the query reports, as Django raises in the constructor.
+	err error
 }
 
 // F references a model field by key, like Django's F(): F("views") or, across
@@ -238,14 +250,16 @@ func (e Expr) Filter(args ...any) Expr {
 }
 
 // OrderBy orders the values that a StringAgg joins, Django's order_by
-// argument of an aggregate. Each term is a field key, "-" and a key for
-// descending order, an Expr or an OrderExpr:
+// argument of an aggregate, or the rows of each partition of a Window. Each
+// term is a field key, "-" and a key for descending order, an Expr or an
+// OrderExpr:
 //
 //	orm.StringAgg("name", orm.Value(";")).OrderBy("-original_opening")
+//	orm.Window(orm.Rank()).OrderBy(orm.F("salary").Desc())
 //
 // An aggregate with an ordering has no default alias. OrderBy is an error on
-// an expression that is not a StringAgg, as Django allows order_by only
-// where the order changes the value.
+// an expression that is neither a StringAgg nor a Window, as Django allows
+// order_by only where the order changes the value.
 func (e Expr) OrderBy(terms ...any) Expr {
 	e.order = slices.Clone(terms)
 	return e

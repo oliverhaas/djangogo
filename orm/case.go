@@ -45,8 +45,11 @@ func Case(whens ...When) Expr {
 //
 //	Aggregate(ctx, "total", orm.Sum("pages").Default(0))
 //
+// Of Lag and Lead, x is the value for a row that has no row at the offset,
+// a field key or an Expr, or another Go value as a literal.
+//
 // Default is an error on Count, whose value over no rows is 0, and on an
-// expression that is neither a Case nor an aggregate.
+// expression that is neither a Case, an aggregate, Lag nor Lead.
 func (e Expr) Default(x any) Expr {
 	var d Expr
 	if e.kind == exprAggregate {

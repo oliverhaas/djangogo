@@ -358,6 +358,12 @@ func (e Expr) outputKind(input Kind) Kind {
 		case fnTruncTime:
 			return KindTime
 		}
+	case exprWindow:
+		return e.arg.outputKind(input)
+	case exprWindowFunc:
+		if e.typed {
+			return e.output
+		}
 	}
 	return input
 }

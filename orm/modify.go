@@ -191,5 +191,11 @@ func (c *compiler) assignedValue(f *Field, value any) (sqlNode, error) {
 	if n.aggregate() {
 		return nil, &FieldError{Model: c.q.model.Name(), Message: "aggregate functions are not allowed in this query"}
 	}
+	if containsOver(n) {
+		return nil, &FieldError{
+			Model:   c.q.model.Name(),
+			Message: fmt.Sprintf("window expressions are not allowed in this query (%s=%s)", f.Attr, exprClassName(*expr)),
+		}
+	}
 	return n, nil
 }

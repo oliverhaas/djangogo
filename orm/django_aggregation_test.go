@@ -2644,7 +2644,28 @@ func TestAggregateAnnotationPruningReferencedComposedSubqueryRequiresWrapping(t 
 
 // Ported from Django: tests/aggregation/tests.py::AggregateAnnotationPruningTests.test_referenced_window_requires_wrapping
 func TestAggregateAnnotationPruningReferencedWindowRequiresWrapping(t *testing.T) {
-	t.Skip("needs Window, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agPruningSetUp(t, db)
+		totalBooksQS := orm.Query[agBook](db).Annotate("avg_publisher_pages", orm.Coalesce(
+			orm.Window(orm.Avg("pages")).PartitionBy(orm.F("publisher")),
+			orm.Value(0.0),
+		))
+		capture := djangotest.CaptureQueries(db)
+		aggregate, err := totalBooksQS.Aggregate(context.Background(),
+			"sum_avg_publisher_pages", orm.Sum("avg_publisher_pages"),
+			"books_count", orm.Count("id"),
+		)
+		capture.Stop()
+		if err != nil {
+			t.Fatalf("Aggregate: %v", err)
+		}
+		djangotest.AssertEqual(t, capture.Len(), 1)
+		sql := strings.ToLower(capture.Queries()[0].SQL)
+		if n := strings.Count(sql, "select"); n != 2 {
+			t.Errorf("SQL has %d SELECTs, want 2 (subquery wrapping required): %s", n, sql)
+		}
+		agAssertMap(t, aggregate, map[string]any{"sum_avg_publisher_pages": 1100.0, "books_count": int64(2)})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateAnnotationPruningTests.test_aggregate_reference_lookup_rhs

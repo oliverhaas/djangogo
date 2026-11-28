@@ -732,6 +732,12 @@ func (n aggNode) render(w *sqlWriter) {
 		w.write("CAST(")
 		defer w.write(" AS NUMERIC)")
 	}
+	n.renderCall(w)
+}
+
+// renderCall writes the aggregate without the cast of a decimal on SQLite,
+// as the source of a window, which casts outside the OVER clause.
+func (n aggNode) renderCall(w *sqlWriter) {
 	w.write(n.fn + "(")
 	if n.distinct {
 		w.write("DISTINCT ")
@@ -745,9 +751,24 @@ func (n aggNode) render(w *sqlWriter) {
 		w.write(", ")
 		x.render(w)
 	}
-	for i, o := range n.order {
+	if len(n.order) > 0 {
+		w.write(" ")
+		writeOrderTerms(w, n.order)
+	}
+	w.write(")")
+	if n.filter != nil {
+		w.write(" FILTER (WHERE ")
+		n.filter.render(w)
+		w.write(")")
+	}
+}
+
+// writeOrderTerms writes "ORDER BY" and the terms of order, each with its
+// direction, the ordering of an aggregate or of a window.
+func writeOrderTerms(w *sqlWriter, order []orderItem) {
+	for i, o := range order {
 		if i == 0 {
-			w.write(" ORDER BY ")
+			w.write("ORDER BY ")
 		} else {
 			w.write(", ")
 		}
@@ -763,12 +784,6 @@ func (n aggNode) render(w *sqlWriter) {
 		case o.nullsFirst:
 			w.write(" NULLS FIRST")
 		}
-	}
-	w.write(")")
-	if n.filter != nil {
-		w.write(" FILTER (WHERE ")
-		n.filter.render(w)
-		w.write(")")
 	}
 }
 
@@ -878,6 +893,11 @@ func readsJoin(n sqlNode) bool {
 		return readsJoin(n.inner)
 	case subqueryNode:
 		return slices.ContainsFunc(n.refs, func(r outerRef) bool { return readsJoin(r.node) })
+	case windowNode:
+		return readsJoin(n.source) || slices.ContainsFunc(n.partition, readsJoin) ||
+			slices.ContainsFunc(n.order, func(o orderItem) bool { return readsJoin(o.node) })
+	case windowFuncNode:
+		return slices.ContainsFunc(n.args, readsJoin)
 	default:
 		return false
 	}

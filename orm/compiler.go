@@ -146,17 +146,24 @@ func (c *compiler) baseColumn(f *Field) colNode {
 // resolveExpr binds an expression to the query: field references become
 // columns (or the annotation of that name) and literals become parameters.
 func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
 	if e.distinct && e.kind != exprAggregate {
 		return nil, errors.New("orm: Distinct applies to aggregates only")
 	}
 	if e.filter != nil && e.kind != exprAggregate {
 		return nil, errors.New("orm: Filter applies to aggregates only")
 	}
-	if e.def != nil && e.kind != exprCase && e.kind != exprAggregate {
-		return nil, errors.New("orm: Default applies to Case and aggregates only")
+	if e.def != nil && e.kind != exprCase && e.kind != exprAggregate &&
+		(e.kind != exprWindowFunc || (e.fn != fnLag && e.fn != fnLead)) {
+		return nil, errors.New("orm: Default applies to Case, aggregates, Lag and Lead only")
 	}
-	if e.order != nil && e.kind != exprAggregate {
-		return nil, errors.New("orm: OrderBy applies to aggregates only")
+	if e.order != nil && e.kind != exprAggregate && e.kind != exprWindow {
+		return nil, errors.New("orm: OrderBy applies to aggregates and windows only")
+	}
+	if (e.partition != nil || e.frame != nil) && e.kind != exprWindow {
+		return nil, errors.New("orm: PartitionBy and Frame apply to windows only")
 	}
 	if e.hasOutput && (e.kind != exprCall || !slices.Contains([]string{fnTrunc, fnTruncDate, fnTruncTime}, e.fn)) {
 		return nil, errors.New("orm: Output applies to the Trunc functions only")
@@ -249,6 +256,10 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		return c.resolveSubquery(e)
 	case exprOuterRef:
 		return c.resolveOuterRef(e)
+	case exprWindow:
+		return c.resolveWindow(e)
+	case exprWindowFunc:
+		return nil, fmt.Errorf("orm: %s is only valid as the source of a Window", windowFuncName(e.fn))
 	case exprStar:
 		return nil, errors.New(`orm: "*" is only valid as the argument of Count`)
 	default:
@@ -711,10 +722,12 @@ func (c *compiler) sourceKind(e Expr) (Kind, bool) {
 		if e.arg != nil {
 			return c.sourceKind(*e.arg)
 		}
-	case exprCall:
+	case exprCall, exprWindowFunc:
 		if len(e.args) > 0 {
 			return c.sourceKind(e.args[0])
 		}
+	case exprWindow:
+		return c.sourceKind(*e.arg)
 	}
 	return 0, false
 }
@@ -903,8 +916,10 @@ func columnsOf(n sqlNode) []sqlNode {
 		return []sqlNode{v}
 	case binaryNode:
 		// Django groups by the expression as a whole: grouping pages % 10 by
-		// pages would split a group into one group per page count.
-		if !v.aggregate() {
+		// pages would split a group into one group per page count. A window
+		// cannot be grouped by, so an expression that holds one is grouped
+		// by its parts.
+		if !v.aggregate() && !containsOver(v) {
 			return []sqlNode{v}
 		}
 		return append(columnsOf(v.left), columnsOf(v.right)...)
@@ -913,14 +928,14 @@ func columnsOf(n sqlNode) []sqlNode {
 		// split a group such as one year into one group per value.
 		return []sqlNode{v}
 	case funcNode:
-		if v.aggregate() {
+		if v.aggregate() || containsOver(v) {
 			return columnsOf(v.arg)
 		}
 		return []sqlNode{v}
 	case callNode, concatNode, convertNode, caseNode, truncNode:
 		// Django groups by a function or a Case as a whole, and by the
-		// columns of its parts when it holds an aggregate.
-		if !n.aggregate() {
+		// columns of its parts when it holds an aggregate or a window.
+		if !n.aggregate() && !containsOver(n) {
 			return []sqlNode{n}
 		}
 		var out []sqlNode
@@ -938,6 +953,17 @@ func columnsOf(n sqlNode) []sqlNode {
 		return columnsOf(v.node)
 	case notNode:
 		return columnsOf(v.inner)
+	case windowNode:
+		// A window is grouped by its partition and order terms, as Django's
+		// Window.get_group_by_cols does, not by its source.
+		var out []sqlNode
+		for _, p := range v.partition {
+			out = append(out, columnsOf(p)...)
+		}
+		for _, o := range v.order {
+			out = append(out, columnsOf(o.node)...)
+		}
+		return out
 	case subqueryNode:
 		// A subquery is grouped by the columns of the outer query it reads,
 		// or as a whole when one of them crosses a relation, as Django's
