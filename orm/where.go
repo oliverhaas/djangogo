@@ -169,53 +169,94 @@ func (n *whereNode) containsAggregate() bool {
 	return false
 }
 
-// split divides the tree into the part that can filter rows before grouping
-// (WHERE) and the part that needs the aggregates (HAVING). Children joined by
-// AND are split one by one; children joined by OR, or by AND under a negation,
-// must stay together, so the whole node goes to HAVING. It ports Django's
-// WhereNode.split_having_qualify.
-func (n *whereNode) split(negated bool) (where, having *whereNode) {
-	if n.empty() {
-		return nil, nil
+// containsOver reports whether any predicate of the tree references a
+// window, which forces it into the QUALIFY part.
+func (n *whereNode) containsOver() bool {
+	for _, ch := range n.children {
+		if ch.node != nil {
+			if ch.node.containsOver() {
+				return true
+			}
+		} else if ch.pred.containsOver() {
+			return true
+		}
 	}
-	if !n.containsAggregate() {
-		return n, nil
+	return false
+}
+
+// errHeterogeneousQualify refuses a disjunction of a window predicate and a
+// row predicate in a query with aggregates, as Django does.
+var errHeterogeneousQualify = errors.New("orm: Heterogeneous disjunctive predicates against window functions are " + //nolint:revive,staticcheck // Django's message
+	"not implemented when performing conditional aggregation.")
+
+// split divides the tree into the part that can filter rows before grouping
+// (WHERE), the part that needs the aggregates (HAVING) and the part that
+// needs the windows (QUALIFY), which filters the rows of the query after
+// they are computed. Children joined by AND are split one by one; children
+// joined by OR, or by AND under a negation, must stay together, so the
+// whole node goes to HAVING, or to QUALIFY when it holds a window. A
+// disjunction of a window predicate and a row predicate cannot stay
+// together in a query with aggregates, mustGroupBy, because the QUALIFY
+// part would filter the grouped rows. It ports Django's
+// WhereNode.split_having_qualify.
+func (n *whereNode) split(negated, mustGroupBy bool) (where, having, qualify *whereNode, err error) {
+	if n.empty() {
+		return nil, nil, nil, nil
+	}
+	agg, over := n.containsAggregate(), n.containsOver()
+	if !agg && !over {
+		return n, nil, nil, nil
 	}
 	inNegated := negated != n.negated
-	if (inNegated && n.conn == connAnd) || (!inNegated && n.conn == connOr) {
-		return nil, n
+	connected := (inNegated && n.conn == connAnd) || (!inNegated && n.conn == connOr)
+	if connected && !over {
+		return nil, n, nil, nil
 	}
-	var whereParts, havingParts []whereChild
+	var whereParts, havingParts, qualifyParts []whereChild
 	for _, ch := range n.children {
 		switch {
 		case ch.node != nil:
-			wn, hn := ch.node.split(inNegated)
+			wn, hn, qn, err := ch.node.split(inNegated, mustGroupBy)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			if wn != nil {
 				whereParts = append(whereParts, whereChild{node: wn})
 			}
 			if hn != nil {
 				havingParts = append(havingParts, whereChild{node: hn})
 			}
+			if qn != nil {
+				qualifyParts = append(qualifyParts, whereChild{node: qn})
+			}
+		case ch.pred.containsOver():
+			qualifyParts = append(qualifyParts, ch)
 		case ch.pred.containsAggregate():
 			havingParts = append(havingParts, ch)
 		default:
 			whereParts = append(whereParts, ch)
 		}
 	}
-	if len(whereParts) > 0 {
-		where = &whereNode{conn: n.conn, negated: n.negated, children: whereParts}
+	if connected && len(qualifyParts) > 0 {
+		if len(whereParts) > 0 && mustGroupBy {
+			return nil, nil, nil, errHeterogeneousQualify
+		}
+		return nil, nil, n, nil
 	}
-	if len(havingParts) > 0 {
-		having = &whereNode{conn: n.conn, negated: n.negated, children: havingParts}
+	part := func(children []whereChild) *whereNode {
+		if len(children) == 0 {
+			return nil
+		}
+		return &whereNode{conn: n.conn, negated: n.negated, children: children}
 	}
-	return where, having
+	return part(whereParts), part(havingParts), part(qualifyParts), nil
 }
 
 // addFilters resolves every Filter and Exclude condition of the query, in
-// call order, into c.where and c.having, and before each one the annotations
-// added before it. A join that was INNER before a call is INNER after it: a
-// later call may only relax the joins it introduced itself, as in Django's
-// Query.add_q.
+// call order, into c.where, c.having and c.qualify, and before each one the
+// annotations added before it. A join that was INNER before a call is INNER
+// after it: a later call may only relax the joins it introduced itself, as
+// in Django's Query.add_q.
 func (c *compiler) addFilters() error {
 	root := &whereNode{conn: connAnd}
 	if mf := c.q.m2mFilter; mf != nil && c.q.model != nil && c.q.model.PrimaryKey() != nil {
@@ -296,8 +337,9 @@ func (c *compiler) addFilters() error {
 	case matchAll:
 		return nil
 	}
-	c.where, c.having = root.split(false)
-	return nil
+	var err error
+	c.where, c.having, c.qualify, err = root.split(false, c.q.hasAggregates())
+	return err
 }
 
 // addQ resolves one condition tree. It returns the resolved node and the joins

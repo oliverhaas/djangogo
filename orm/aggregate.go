@@ -32,7 +32,7 @@ func (q *query) aggregateSQL(aggs []annotation) (string, []any, []valueType, err
 	// The values over no rows are known when every expression has one.
 	skip := c.empty && emptyValuesKnown(aggs)
 
-	if !q.hasAggregates() && !q.sliced() && !q.distinct && !slices.ContainsFunc(aggs, func(a annotation) bool {
+	if !q.hasAggregates() && !q.sliced() && !q.distinct && c.qualify.empty() && !slices.ContainsFunc(aggs, func(a annotation) bool {
 		return q.refsSubquery(a.expr) || q.refsWindow(a.expr)
 	}) {
 		items := make([]selectItem, len(aggs))

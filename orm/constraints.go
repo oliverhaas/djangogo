@@ -585,6 +585,10 @@ func resolveAgainst(db *DB, m *Model, against map[*Field]*instanceValue, e Expr)
 	return c.resolveExpr(e)
 }
 
+// errOverConstraint refuses a constraint condition against a window, which
+// SQL computes after the rows it constrains.
+var errOverConstraint = errors.New("orm: a constraint condition must not use a window expression")
+
 // holdsFor reports whether the instance rv meets cond, a condition on the
 // fields of m. The database evaluates it with the values of the instance in
 // place of the columns, and a condition that is unknown because of a NULL
@@ -600,10 +604,12 @@ func holdsFor(ctx context.Context, db *DB, m *Model, rv reflect.Value, cond Cond
 		return false, err
 	case c.empty:
 		return false, nil
-	case c.where == nil && c.having == nil:
+	case c.where == nil && c.having == nil && c.qualify == nil:
 		return true, nil
 	case c.having != nil:
 		return false, errors.New("orm: a constraint condition must not use an aggregate")
+	case c.qualify != nil:
+		return false, errOverConstraint
 	}
 	w := newSQLWriter(c.d)
 	w.write("SELECT 1 WHERE COALESCE(")
@@ -700,6 +706,8 @@ func conditionSQL(db *DB, m *Model, name string, cond Cond) (string, error) {
 		return "", fmt.Errorf("orm: the condition of constraint %q matches no row", name)
 	case c.having != nil:
 		return "", errors.New("orm: a constraint condition must not use an aggregate")
+	case c.qualify != nil:
+		return "", errOverConstraint
 	case c.where == nil:
 		return "", fmt.Errorf("orm: the condition of constraint %q matches every row", name)
 	}

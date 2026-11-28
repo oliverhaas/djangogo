@@ -1078,8 +1078,11 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   OuterRef to a window annotation and a wrong frame bound fail with
   Django's messages. Aggregate over a window annotation runs over a
   subquery, as in Django. Django refuses a `ValueRange` offset other than
-  zero on PostgreSQL; the ORM allows it there. A filter against a window
-  is not supported yet.
+  zero on PostgreSQL; the ORM allows it there. Filter and Exclude against
+  a window annotation select the rows in a subquery and filter them outside
+  of it, as Django emulates QUALIFY; Count, Aggregate, Update and Delete
+  work on such a queryset. A disjunction of a window filter and a plain
+  filter fails on a query with aggregates, with Django's message.
 
 ### Changed
 

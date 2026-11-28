@@ -35,8 +35,10 @@ type compiler struct {
 	// join, as Django's split_subq=False does for the condition of an
 	// aggregate's Filter.
 	noSplit bool
-	// where and having are the resolved filter conditions.
-	where, having *whereNode
+	// where, having and qualify are the resolved filter conditions:
+	// qualify holds those against windows, which filter the rows of the
+	// query after they are computed.
+	where, having, qualify *whereNode
 	// empty reports that the filters can match no row. The statement builders
 	// then return errEmptyResultSet, after they validated the rest of the query.
 	empty bool
@@ -983,8 +985,18 @@ func columnsOf(n sqlNode) []sqlNode {
 	}
 }
 
-// render writes the statement.
+// render writes the statement, wrapped in the statements that filter its
+// rows when the query filters against windows.
 func (s *selectStmt) render(w *sqlWriter) {
+	if !s.c.qualify.empty() {
+		s.renderQualify(w)
+		return
+	}
+	s.renderSelect(w)
+}
+
+// renderSelect writes the statement without the conditions against windows.
+func (s *selectStmt) renderSelect(w *sqlWriter) {
 	c := s.c
 	w.write("SELECT ")
 	if s.distinct {

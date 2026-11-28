@@ -33,10 +33,11 @@ func (q *query) deleteSQL() (string, []any, error) {
 }
 
 // renderRestriction writes the WHERE clause of an UPDATE or DELETE. Those
-// statements cannot join, so a query whose filters span relations selects the
-// matching primary keys in a subquery instead.
+// statements cannot join, so a query whose filters span relations, or
+// filter against windows, selects the matching primary keys in a subquery
+// instead.
 func (c *compiler) renderRestriction(w *sqlWriter) error {
-	if c.joins.used() == 0 && !c.q.hasAggregates() {
+	if c.joins.used() == 0 && !c.q.hasAggregates() && c.qualify.empty() {
 		if !c.where.empty() {
 			w.write(" WHERE ")
 			c.where.render(w)

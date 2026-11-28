@@ -738,13 +738,6 @@ func TestWindowRelatedOrderingWithCount(t *testing.T) {
 	})
 }
 
-// ewSkipQualify skips a test that filters against a window expression until
-// the QUALIFY emulation lands.
-func ewSkipQualify(t *testing.T) {
-	t.Helper()
-	t.Skip("FIXME-PORT: Go: filters against window expressions (QUALIFY emulation), Django: split_having_qualify and get_qualify_sql")
-}
-
 // ewRankedQS returns the employees annotated with Django's
 // department_salary_rank and department_avg_age_diff of test_filter.
 func ewRankedQS(db *orm.DB) *orm.QuerySet[ewEmployee] {
@@ -756,7 +749,6 @@ func ewRankedQS(db *orm.DB) *orm.QuerySet[ewEmployee] {
 
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_filter
 func TestWindowFilter(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		qs := ewRankedQS(db)
 		// Direct window reference.
@@ -780,7 +772,6 @@ func TestWindowFilter(t *testing.T) {
 // Django also annotates q_first_rank=Q(rank=1). Annotate takes an Expr, not
 // a Cond, so the port has only the Case annotation.
 func TestWindowFilterConditionalAnnotation(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		qs := ewQS(db).Annotate(
 			"rank", orm.Window(orm.Rank()).PartitionBy("department").OrderBy("-salary"),
@@ -798,7 +789,6 @@ func TestWindowFilterConditionalExpression(t *testing.T) {
 
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_filter_column_ref_rhs
 func TestWindowFilterColumnRefRHS(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		qs := ewQS(db).Annotate("max_dept_salary", orm.Window(orm.Max("salary")).PartitionBy("department")).
 			Filter("max_dept_salary", orm.F("salary")).OrderBy("name").ValuesList("name")
@@ -810,7 +800,6 @@ func TestWindowFilterColumnRefRHS(t *testing.T) {
 // Django selects values_list(Upper("name")). ValuesList takes keys, so the
 // port annotates the Upper first.
 func TestWindowFilterValues(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		qs := ewQS(db).Annotate(
 			"department_salary_rank", orm.Window(orm.Rank()).PartitionBy("department").OrderBy("-salary"),
@@ -829,7 +818,6 @@ func TestWindowFilterAlias(t *testing.T) {
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_filter_select_related
 // Django uses alias(). The port uses Annotate, as the ORM has no Alias.
 func TestWindowFilterSelectRelated(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		qs := ewQS(db).Annotate("department_avg_age_diff",
 			orm.Window(orm.Avg("age")).PartitionBy("department").Sub(orm.F("age"))).
@@ -845,7 +833,6 @@ func TestWindowFilterSelectRelated(t *testing.T) {
 
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_exclude
 func TestWindowExclude(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		qs := ewRankedQS(db)
 		// Direct window reference.
@@ -867,7 +854,6 @@ func TestWindowExclude(t *testing.T) {
 
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_heterogeneous_filter
 func TestWindowHeterogeneousFilter(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		qs := ewQS(db).Annotate("department_salary_rank",
 			orm.Window(orm.Rank()).PartitionBy("department").OrderBy("-salary")).
@@ -895,7 +881,6 @@ func TestWindowHeterogeneousFilter(t *testing.T) {
 
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_limited_filter
 func TestWindowLimitedFilter(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		qs := ewQS(db).Annotate("department_salary_rank",
 			orm.Window(orm.Rank()).PartitionBy("department").OrderBy("-salary")).
@@ -906,7 +891,6 @@ func TestWindowLimitedFilter(t *testing.T) {
 
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_filter_count
 func TestWindowFilterCount(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		capture := djangotest.CaptureQueries(db)
 		count := mustCount(t, ewQS(db).Annotate("department_salary_rank",
@@ -1199,6 +1183,33 @@ func TestWindowFailUpdate(t *testing.T) {
 	})
 }
 
+// TestWindowFilterUpdateDelete updates and deletes the rows a filter against
+// a window matches. Django writes the filter into the WHERE clause of the
+// UPDATE or DELETE, which the database rejects; the port selects the
+// matching primary keys through the emulation of QUALIFY.
+func TestWindowFilterUpdateDelete(t *testing.T) {
+	ewEach(t, func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		top := func() *orm.QuerySet[ewEmployee] {
+			return ewQS(db).Annotate("department_salary_rank",
+				orm.Window(orm.Rank()).PartitionBy("department").OrderBy("-salary")).
+				Filter("department_salary_rank", 1)
+		}
+		updated, err := top().Update(ctx, "age", 99)
+		if err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		djangotest.AssertEqual(t, updated, int64(5))
+		djangotest.AssertQuerySetEqual(t, ewQS(db).Filter("age", 99).OrderBy("name"),
+			[]string{"Adams", "Johnson", "Miller", "Smith", "Wilkinson"}, ewName)
+		if _, err := top().Delete(ctx); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		djangotest.AssertEqual(t, mustCount(t, ewQS(db)), int64(7))
+		djangotest.AssertEqual(t, mustCount(t, ewQS(db).Filter("age", 99)), int64(0))
+	})
+}
+
 // No Go counterpart: tests/expressions_window/tests.py::WindowFunctionTests.test_fail_insert
 // creates a row whose field holds a Window. A struct field holds a value,
 // not an expression.
@@ -1297,7 +1308,6 @@ func TestWindowInvalidTypeStartRowRange(t *testing.T) {
 
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_invalid_filter
 func TestWindowInvalidFilter(t *testing.T) {
-	ewSkipQualify(t)
 	ewEach(t, func(t *testing.T, db *orm.DB) {
 		const msg = "Heterogeneous disjunctive predicates against window functions are not " +
 			"implemented when performing conditional aggregation."

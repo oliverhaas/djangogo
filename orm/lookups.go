@@ -207,6 +207,14 @@ func (p *predicate) containsAggregate() bool {
 	return false
 }
 
+// containsOver reports whether either side references a window.
+func (p *predicate) containsOver() bool {
+	if p.lhs != nil && containsOver(p.lhs) {
+		return true
+	}
+	return slices.ContainsFunc(p.rhs, containsOver)
+}
+
 // render writes the predicate.
 func (p *predicate) render(w *sqlWriter) {
 	if p.empty {
