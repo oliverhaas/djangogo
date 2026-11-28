@@ -116,13 +116,20 @@ type transformNode struct {
 	inner sqlNode
 	// input is the kind of inner.
 	input Kind
+	// tzname is the zone a datetime is read in, the zone of In of Extract,
+	// TruncDate or TruncTime. Empty is TransformTimeZone.
+	tzname string
 }
 
 // render writes the SQL of the transform that the dialect gives, with the
 // inner expression and the parameters in their places.
 func (n transformNode) render(w *sqlWriter) {
 	td, _ := w.d.(TransformDialect)
-	tmpl, params, _ := td.TransformSQL(n.name, n.input, TransformTimeZone)
+	tzname := n.tzname
+	if tzname == "" {
+		tzname = TransformTimeZone
+	}
+	tmpl, params, _ := td.TransformSQL(n.name, n.input, tzname)
 	renderTemplate(w, tmpl, params, n.inner)
 }
 

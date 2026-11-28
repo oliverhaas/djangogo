@@ -671,6 +671,8 @@ func nodeParts(n sqlNode) []sqlNode {
 		return v.args
 	case convertNode:
 		return []sqlNode{v.inner}
+	case truncNode:
+		return []sqlNode{v.inner}
 	case caseNode:
 		return v.parts()
 	default:
@@ -866,7 +868,7 @@ func readsJoin(n sqlNode) bool {
 		return readsJoin(n.inner)
 	case funcNode:
 		return readsJoin(n.arg)
-	case callNode, concatNode, convertNode, caseNode:
+	case callNode, concatNode, convertNode, caseNode, truncNode:
 		return slices.ContainsFunc(nodeParts(n), readsJoin)
 	case condNode:
 		return slices.ContainsFunc(n.where.operands(), readsJoin)

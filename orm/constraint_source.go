@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -32,6 +33,7 @@ var functionNames = map[string]string{
 	"COS": "Cos", "COT": "Cot", "DEGREES": "Degrees", "EXP": "Exp", "FLOOR": "Floor",
 	"LN": "Ln", fnLog: "Log", fnMod: "Mod", fnPi: "Pi", fnPower: "Power", "RADIANS": "Radians",
 	fnRandom: "Random", fnRound: "Round", "SIGN": "Sign", "SIN": "Sin", "SQRT": "Sqrt", "TAN": "Tan",
+	fnExtract: "Extract", fnTrunc: "Trunc", fnTruncDate: "TruncDate", fnTruncTime: "TruncTime",
 }
 
 // ConstraintSource returns Go source code that builds c, such as
@@ -270,11 +272,18 @@ func (g sourceWriter) expr(e Expr) (string, error) {
 			}
 			args[i] = arg
 		}
-		if e.fn == fnCollate {
-			collation, _ := e.value.(string)
-			args = append(args, strconv.Quote(collation))
+		if e.fn == fnCollate || e.fn == fnExtract || e.fn == fnTrunc {
+			name, _ := e.value.(string)
+			args = append(args, strconv.Quote(name))
 		}
-		return "orm." + functionNames[e.fn] + "(" + strings.Join(args, ", ") + ")", nil
+		if e.zone != nil {
+			return "", errors.New("orm: a time zone of In has no Go source")
+		}
+		out := "orm." + functionNames[e.fn] + "(" + strings.Join(args, ", ") + ")"
+		if e.hasOutput {
+			out += ".Output(orm.Kind" + e.output.String() + ")"
+		}
+		return out, nil
 	case exprCast:
 		arg, err := g.expr(*e.arg)
 		if err != nil {

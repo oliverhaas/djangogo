@@ -2063,7 +2063,21 @@ func TestAggregationAggregationDefaultUsingTimeFromPython(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_default_using_time_from_database
 func TestAggregationAggregationDefaultUsingTimeFromDatabase(t *testing.T) {
-	t.Skip("needs TruncHour and Now, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		now := time.Now().UTC()
+		expr := orm.Min("store__friday_night_closing").Filter(orm.Not(orm.Q("store__name", "Amazon.com"))).
+			Default(orm.TruncHour(orm.Now()).Output(orm.KindTime))
+		qs := orm.Query[agBook](db).Annotate("oldest_store_opening", expr).OrderBy("isbn")
+		assertValues(t, qs.Values("isbn", "oldest_store_opening"), []map[string]any{
+			{"isbn": "013235613", "oldest_store_opening": orm.NewTime(21, 30, 0, 0)},
+			{"isbn": "013790395", "oldest_store_opening": orm.NewTime(23, 59, 59, 0)},
+			{"isbn": "067232959", "oldest_store_opening": orm.NewTime(now.Hour(), 0, 0, 0)},
+			{"isbn": "155860191", "oldest_store_opening": orm.NewTime(21, 30, 0, 0)},
+			{"isbn": "159059725", "oldest_store_opening": orm.NewTime(23, 59, 59, 0)},
+			{"isbn": "159059996", "oldest_store_opening": orm.NewTime(21, 30, 0, 0)},
+		})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_default_using_date_from_python
@@ -2084,7 +2098,19 @@ func TestAggregationAggregationDefaultUsingDateFromPython(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_default_using_date_from_database
 func TestAggregationAggregationDefaultUsingDateFromDatabase(t *testing.T) {
-	t.Skip("needs TruncDate and Now, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		now := time.Now().UTC()
+		expr := orm.Min("book__pubdate").Default(orm.TruncDate(orm.Now()))
+		qs := orm.Query[agPublisher](db).Annotate("earliest_pubdate", expr).OrderBy("name")
+		assertValues(t, qs.Values("name", "earliest_pubdate"), []map[string]any{
+			{"name": "Apress", "earliest_pubdate": orm.Date{Year: 2007, Month: 12, Day: 6}},
+			{"name": "Jonno's House of Books", "earliest_pubdate": orm.DateFromTime(now)},
+			{"name": "Morgan Kaufmann", "earliest_pubdate": orm.Date{Year: 1991, Month: 10, Day: 15}},
+			{"name": "Prentice Hall", "earliest_pubdate": orm.Date{Year: 1995, Month: 1, Day: 15}},
+			{"name": "Sams", "earliest_pubdate": orm.Date{Year: 2008, Month: 3, Day: 3}},
+		})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_default_using_datetime_from_python
@@ -2109,7 +2135,23 @@ func TestAggregationAggregationDefaultUsingDatetimeFromPython(t *testing.T) {
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_default_using_datetime_from_database
 func TestAggregationAggregationDefaultUsingDatetimeFromDatabase(t *testing.T) {
-	t.Skip("needs TruncHour and Now, which the ORM does not have")
+	djangotest.EachDB(t, agModels(), func(t *testing.T, db *orm.DB) {
+		agSetUp(t, db)
+		now := time.Now().UTC()
+		expr := orm.Min("store__original_opening").Filter(orm.Not(orm.Q("store__name", "Amazon.com"))).
+			Default(orm.TruncHour(orm.Now()).Output(orm.KindDateTime))
+		qs := orm.Query[agBook](db).Annotate("oldest_store_opening", expr).OrderBy("isbn")
+		mamma := time.Date(1945, 4, 25, 16, 24, 14, 0, time.UTC)
+		books := time.Date(2001, 3, 15, 11, 23, 37, 0, time.UTC)
+		assertValues(t, qs.Values("isbn", "oldest_store_opening"), []map[string]any{
+			{"isbn": "013235613", "oldest_store_opening": mamma},
+			{"isbn": "013790395", "oldest_store_opening": books},
+			{"isbn": "067232959", "oldest_store_opening": now.Truncate(time.Hour)},
+			{"isbn": "155860191", "oldest_store_opening": mamma},
+			{"isbn": "159059725", "oldest_store_opening": books},
+			{"isbn": "159059996", "oldest_store_opening": mamma},
+		})
+	})
 }
 
 // Ported from Django: tests/aggregation/tests.py::AggregateTestCase.test_aggregation_default_using_duration_from_python

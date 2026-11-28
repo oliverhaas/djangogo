@@ -3,6 +3,7 @@ package orm
 import (
 	"slices"
 	"strings"
+	"time"
 )
 
 // exprKind identifies the shape of an Expr.
@@ -87,9 +88,14 @@ type Expr struct {
 	// filter is the condition of an aggregate's Filter, nil without one.
 	filter *Cond
 	// output is the kind of the result of a function when typed is set.
-	// Without typed the result has the kind of the argument.
-	output Kind
-	typed  bool
+	// Without typed the result has the kind of the argument. hasOutput
+	// marks the output of Output, the output_field of a Trunc function.
+	output    Kind
+	typed     bool
+	hasOutput bool
+	// zone is the time zone of In, Django's tzinfo of Extract and Trunc,
+	// nil without one.
+	zone *time.Location
 	// numeric marks a function whose result is a decimal when an argument is
 	// a decimal and a float otherwise, Django's NumericOutputFieldMixin.
 	numeric bool

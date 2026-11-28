@@ -158,6 +158,12 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 	if e.order != nil && e.kind != exprAggregate {
 		return nil, errors.New("orm: OrderBy applies to aggregates only")
 	}
+	if e.hasOutput && (e.kind != exprCall || !slices.Contains([]string{fnTrunc, fnTruncDate, fnTruncTime}, e.fn)) {
+		return nil, errors.New("orm: Output applies to the Trunc functions only")
+	}
+	if e.zone != nil && (e.kind != exprCall || !slices.Contains([]string{fnExtract, fnTrunc, fnTruncDate, fnTruncTime}, e.fn)) {
+		return nil, errors.New("orm: In applies to Extract and Trunc only")
+	}
 	switch e.kind {
 	case exprField:
 		if n, ok := c.annots[e.key]; ok {
@@ -911,7 +917,7 @@ func columnsOf(n sqlNode) []sqlNode {
 			return columnsOf(v.arg)
 		}
 		return []sqlNode{v}
-	case callNode, concatNode, convertNode, caseNode:
+	case callNode, concatNode, convertNode, caseNode, truncNode:
 		// Django groups by a function or a Case as a whole, and by the
 		// columns of its parts when it holds an aggregate.
 		if !n.aggregate() {

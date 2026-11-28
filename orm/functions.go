@@ -209,11 +209,12 @@ var callNames = map[string]string{
 func Concat(args ...any) Expr { return call(fnConcat, args) }
 
 // resolveCall binds Coalesce, Collate, Concat, Greatest, JSONArray,
-// JSONObject, Least, NullIf, Now, the text functions of resolveText, and the
-// math functions of several or no arguments. Concat casts each argument that
-// is not text to text on every dialect, as Cast does. Django's ConcatPair
-// casts on PostgreSQL only and leaves the conversion to the || of SQLite,
-// which gives the same text. Greatest and Least are MAX and MIN on SQLite.
+// JSONObject, Least, NullIf, Now, the text functions of resolveText, the
+// math functions of several or no arguments, and Extract and Trunc. Concat
+// casts each argument that is not text to text on every dialect, as Cast
+// does. Django's ConcatPair casts on PostgreSQL only and leaves the
+// conversion to the || of SQLite, which gives the same text. Greatest and
+// Least are MAX and MIN on SQLite.
 func (c *compiler) resolveCall(e Expr) (sqlNode, error) {
 	switch e.fn {
 	case fnChr, fnLeft, fnLPad, fnMD5, fnOrd, fnRepeat, fnReplace, fnReverse,
@@ -223,6 +224,8 @@ func (c *compiler) resolveCall(e Expr) (sqlNode, error) {
 		return c.resolveMath(e)
 	case fnJSONArray, fnJSONObject:
 		return c.resolveJSON(e)
+	case fnExtract, fnTrunc, fnTruncDate, fnTruncTime:
+		return c.resolveDatetime(e)
 	case fnNow:
 		if c.d.Name() == "sqlite" {
 			return rawNode{sql: "STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')", typ: typeTime}, nil
@@ -343,6 +346,17 @@ func (e Expr) outputKind(input Kind) Kind {
 			return KindDateTime
 		case fnJSONArray, fnJSONObject:
 			return KindJSON
+		case fnExtract:
+			return KindInt
+		case fnTrunc:
+			if e.hasOutput {
+				return e.output
+			}
+			return e.args[0].outputKind(input)
+		case fnTruncDate:
+			return KindDate
+		case fnTruncTime:
+			return KindTime
 		}
 	}
 	return input

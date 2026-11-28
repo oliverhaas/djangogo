@@ -1055,6 +1055,19 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
 - Testing: on PostgreSQL, a `djangotest` database searches the `public`
   schema after its own, so the functions of an extension installed in
   `public`, such as `pgcrypto`, work in tests.
+- ORM: the date functions `orm.Extract`, `ExtractYear`, `ExtractIsoYear`,
+  `ExtractMonth`, `ExtractDay`, `ExtractWeek`, `ExtractWeekDay`,
+  `ExtractIsoWeekDay`, `ExtractQuarter`, `ExtractHour`, `ExtractMinute`,
+  `ExtractSecond`, `orm.Trunc`, `TruncYear`, `TruncQuarter`, `TruncMonth`,
+  `TruncWeek`, `TruncDay`, `TruncHour`, `TruncMinute`, `TruncSecond`,
+  `TruncDate` and `TruncTime` port Django's functions of the same names.
+  `Expr.Output` sets the kind of a Trunc function, Django's `output_field`,
+  and `Expr.In` sets the time zone of a datetime, Django's `tzinfo`. A wrong
+  argument, such as a time component of a date or a component of a duration
+  that Django cannot extract, fails the query with Django's message. On
+  SQLite, Extract of a duration fails, as in Django. A truncated datetime is
+  an instant; Django gives it in the zone of `tzinfo`. A dialect that
+  implements `orm.TruncDialect` supports Trunc.
 
 ### Changed
 
