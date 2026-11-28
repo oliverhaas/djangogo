@@ -50,6 +50,9 @@ const (
 	// exprWindowFunc is a call of a window function, such as Rank or Lag,
 	// which is valid only as the source of a Window.
 	exprWindowFunc
+	// exprKeyTransform is the value under key of the JSON value arg,
+	// KeyTransform, or its text when typed, KeyTextTransform.
+	exprKeyTransform
 )
 
 // Expr is an SQL value expression: a field reference (F), a literal (Value),

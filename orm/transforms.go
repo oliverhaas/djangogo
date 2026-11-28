@@ -67,11 +67,21 @@ func transformsOf(k Kind) []string {
 	return out
 }
 
+// hasTransform reports whether name is a transform of a value of kind k.
+// Every name is a transform of a JSON value: the value under that key, as
+// Django's JSONField.get_transform falls back on a KeyTransform.
+func hasTransform(k Kind, name string) bool {
+	return k == KindJSON || slices.Contains(transformsOf(k), name)
+}
+
 // outputOf returns the kind of the value that transform name yields for a
 // value of kind input.
 func outputOf(input Kind, name string) Kind {
 	if fn, ok := registered(input, name); ok {
 		return fn(Expr{kind: exprNode}).outputKind(input)
+	}
+	if input == KindJSON {
+		return KindJSON
 	}
 	return transformOutput(name)
 }
@@ -94,7 +104,7 @@ func transformOutput(name string) Kind {
 // of kind k, which "perhaps you meant" suggestions are chosen from: the
 // lookups and the transforms.
 func lookupCandidates(k Kind) []string {
-	return slices.Concat(lookupNames, transformsOf(k))
+	return slices.Concat(lookupsOf(k), transformsOf(k))
 }
 
 // TransformDialect is an optional capability of a Dialect: the SQL of a date
@@ -181,10 +191,14 @@ func applyTransform(d Dialect, n sqlNode, input Kind, name string) (transformNod
 }
 
 // transform wraps n, a value of kind input, in transform name: a transform
-// of RegisterTransform, or else a date or time transform.
+// of RegisterTransform, or else a key transform of a JSON value or a date or
+// time transform.
 func (c *compiler) transform(n sqlNode, input Kind, name string) (sqlNode, error) {
 	if fn, ok := registered(input, name); ok {
 		return c.resolveExpr(fn(Expr{kind: exprNode, node: n}))
+	}
+	if input == KindJSON {
+		return c.keyTransform(n, name, false)
 	}
 	return applyTransform(c.d, n, input, name)
 }
@@ -199,6 +213,9 @@ func withColumn(n sqlNode, col colNode) sqlNode {
 	case transformNode:
 		v.inner = withColumn(v.inner, col)
 		return v
+	case jsonKeyNode:
+		v.inner = withColumn(v.inner, col)
+		return v
 	case funcNode:
 		v.arg = withColumn(v.arg, col)
 		return v
@@ -211,7 +228,7 @@ func withColumn(n sqlNode, col colNode) sqlNode {
 // value of kind k accepts, each one a transform of the value before it.
 func validTransforms(k Kind, names []string) bool {
 	for _, name := range names {
-		if !slices.Contains(transformsOf(k), name) {
+		if !hasTransform(k, name) {
 			return false
 		}
 		k = outputOf(k, name)

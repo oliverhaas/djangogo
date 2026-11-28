@@ -74,7 +74,9 @@ var relationLookupNames = []string{
 }
 
 // knownLookup reports whether name is a lookup the ORM implements.
-func knownLookup(name string) bool { return slices.Contains(lookupNames, name) }
+func knownLookup(name string) bool {
+	return slices.Contains(lookupNames, name) || slices.Contains(jsonLookupNames, name)
+}
 
 // closeMatches returns up to three of the candidates that resemble word, best
 // first, for a "perhaps you meant" hint. It ports Python's
@@ -192,6 +194,9 @@ type predicate struct {
 	// null reports that the values of an "in" lookup held a nil. The list
 	// leaves it out, because NULL equals nothing.
 	null bool
+	// op is the operator of a lookup of a JSON value on PostgreSQL, such as
+	// @> for contains, written between lhs and the one rhs.
+	op string
 }
 
 // containsAggregate reports whether either side references an aggregate.
@@ -219,6 +224,12 @@ func (p *predicate) containsOver() bool {
 func (p *predicate) render(w *sqlWriter) {
 	if p.empty {
 		w.write("0 = 1")
+		return
+	}
+	if p.op != "" {
+		p.lhs.render(w)
+		w.write(" " + p.op + " ")
+		p.rhs[0].render(w)
 		return
 	}
 	if op, ok := comparisonOps[p.lookup]; ok {
@@ -308,6 +319,14 @@ func supportsRegex(d Dialect) bool {
 // expectedModel, when non-nil, overrides the model type checked when value is
 // a registered model instance.
 func (c *compiler) buildPredicate(lookup string, lhs sqlNode, field *Field, value any, expectedModel *Model) (*predicate, error) {
+	if jsonOperand(lhs, field) {
+		if p, err := c.jsonPredicate(lookup, lhs, value); p != nil || err != nil {
+			return p, err
+		}
+		if field == nil {
+			field = jsonField
+		}
+	}
 	p := &predicate{lookup: lookup, lhs: lhs}
 	if lookup == lookupIsNull {
 		b, ok := value.(bool)

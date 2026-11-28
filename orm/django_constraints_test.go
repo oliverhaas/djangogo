@@ -370,7 +370,6 @@ func TestConstraintsCheckValidateFKAttname(t *testing.T) {
 
 // Ported from Django: tests/constraints/tests.py::CheckConstraintTests.test_validate_jsonfield_exact
 func TestConstraintsCheckValidateJSONFieldExact(t *testing.T) {
-	t.Skip("FIXME-PORT: needs the key transforms of JSONField, which the orm does not have")
 	djangotest.EachDB(t, consModels(), func(t *testing.T, db *orm.DB) {
 		ctx := context.Background()
 		constraint := orm.CheckConstraint{Condition: orm.Q("data__version", "stable"), Name: "only_stable_version"}

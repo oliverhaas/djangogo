@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/oliverhaas/djangogo/internal/pyjson"
 )
 
 /*
@@ -979,7 +981,19 @@ func bindJSON(f *Field, v any) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("orm: field %s: json marshal: %w", f.Name, err)
 	}
-	return string(b), nil
+	return pythonJSON(b)
+}
+
+// pythonJSON rewrites the JSON text b in the format of Python's json.dumps,
+// which Django's JSONField writes: ", " and ": " separators and ASCII
+// escapes. SQLite compares JSON values as text, so a lookup value then
+// matches the rows that Django wrote.
+func pythonJSON(b []byte) (string, error) {
+	v, err := pyjson.Decode(b)
+	if err != nil {
+		return "", err
+	}
+	return pyjson.Marshal(v, pyjson.Options{Indent: -1, EnsureASCII: true})
 }
 
 // bindBinary converts a []byte for a KindBinary column.
@@ -1230,11 +1244,23 @@ func convertKindValue(v any, t valueType) (any, error) {
 		}
 		return u, nil
 	case typeJSON:
+		// SQLite's JSON_EXTRACT reads a key as an SQL value: a number, or a
+		// string without its quotes. Text that is not JSON is such a string,
+		// as Django's from_db_value falls back on the value json.loads
+		// cannot read.
 		switch x := v.(type) {
 		case []byte:
+			if !json.Valid(x) {
+				return marshalJSON(string(x))
+			}
 			return json.RawMessage(append([]byte(nil), x...)), nil
 		case string:
+			if !json.Valid([]byte(x)) {
+				return marshalJSON(x)
+			}
 			return json.RawMessage(x), nil
+		case int64, float64, bool:
+			return marshalJSON(x)
 		default:
 			return nil, fmt.Errorf("orm: cannot convert %T to json.RawMessage", v)
 		}
@@ -1252,6 +1278,16 @@ func convertKindValue(v any, t valueType) (any, error) {
 	default:
 		return v, nil
 	}
+}
+
+// marshalJSON returns the JSON text of v, a string or a number that the
+// driver read.
+func marshalJSON(v any) (any, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(b), nil
 }
 
 // Ensure our custom types implement sql.Scanner and driver.Valuer at compile time.

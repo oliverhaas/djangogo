@@ -391,10 +391,11 @@ func (c *compiler) buildExprFilter(e Expr) (*whereNode, error) {
 // annotationField returns the field that a value compared with the
 // annotation n binds as: a date, a datetime, a time of day or a duration binds
 // as the dialect stores that type, such as a duration in microseconds on
-// SQLite. It is nil for other types, whose values bind as they are.
+// SQLite, and a JSON value as JSON text. It is nil for other types, whose
+// values bind as they are.
 func annotationField(n sqlNode) *Field {
 	switch t := n.vtype(); t {
-	case typeDate, typeTime, typeTimeOfDay, typeDuration:
+	case typeDate, typeTime, typeTimeOfDay, typeDuration, typeJSON:
 		return &Field{Kind: valueKind(t)}
 	}
 	return nil
@@ -470,7 +471,10 @@ func (c *compiler) buildFilter(key string, value any, currentNegated bool) (*whe
 
 	isNull := pred.lookup == lookupIsNull
 	requireOuter := isNull && pred.flag && !currentNegated
-	if currentNegated && (!isNull || !pred.flag) {
+	// A nil value that is not an isnull test, which compares a JSON value
+	// with JSON null, keeps the joins and adds no test of the column, as
+	// Django skips both for a lookup whose rhs is None.
+	if currentNegated && (!isNull || !pred.flag) && value != nil {
 		requireOuter = true
 		if !isNull {
 			nullable := path.field.Null || col.join.outer
@@ -526,7 +530,7 @@ func (c *compiler) kindLookupOf(rest []string, kind Kind) (string, []string, err
 	fieldName := kind.FieldClassName()
 	last := len(rest) - 1
 	for _, name := range rest[:last] {
-		if !slices.Contains(transformsOf(kind), name) {
+		if !hasTransform(kind, name) {
 			unsupported := strings.Join(rest[slices.Index(rest, name):], lookupSep)
 			return "", nil, c.unsupportedLookup(unsupported, name, fieldName, lookupCandidates(kind))
 		}
@@ -534,9 +538,9 @@ func (c *compiler) kindLookupOf(rest []string, kind Kind) (string, []string, err
 		fieldName = kind.FieldClassName()
 	}
 	switch name := rest[last]; {
-	case slices.Contains(lookupNames, name):
+	case slices.Contains(lookupsOf(kind), name):
 		return name, rest[:last], nil
-	case slices.Contains(transformsOf(kind), name):
+	case hasTransform(kind, name):
 		return lookupExact, rest, nil
 	default:
 		return "", nil, c.unsupportedLookup(name, name, fieldName, lookupCandidates(kind))

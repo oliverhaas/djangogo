@@ -166,6 +166,10 @@ func TestConstraintSourceRebuildsConditions(t *testing.T) {
 			orm.Q("due__lte", orm.ExpressionWrapper(orm.F("start").Add(orm.F("span")), orm.Field{Kind: orm.KindDateTime, Null: true})),
 			`orm.Q("due__lte", orm.ExpressionWrapper(orm.F("start").Add(orm.F("span")), orm.Field{Kind: orm.KindDateTime}))`,
 		},
+		{
+			orm.Q("data__version", "stable", "v", orm.KeyTransform(0, orm.KeyTransform("tags", "data")), "name", orm.KeyTextTransform("name", "data")),
+			`orm.Q("data__version", "stable", "v", orm.KeyTransform("0", orm.KeyTransform("tags", orm.F("data"))), "name", orm.KeyTextTransform("name", orm.F("data")))`,
+		},
 	}
 	for _, tt := range tests {
 		assertSource(t, orm.CheckConstraint{Name: "c", Condition: tt.cond}, `orm.CheckConstraint{Name: "c", Condition: `+tt.src+`}`)

@@ -661,8 +661,8 @@ func valueKind(t valueType) Kind {
 	}
 }
 
-// nodeParts returns the expressions that a function, a Cast or a Case is
-// made of.
+// nodeParts returns the expressions that a function, a Cast, a Case or a key
+// transform is made of.
 func nodeParts(n sqlNode) []sqlNode {
 	switch v := n.(type) {
 	case callNode:
@@ -672,6 +672,8 @@ func nodeParts(n sqlNode) []sqlNode {
 	case convertNode:
 		return []sqlNode{v.inner}
 	case truncNode:
+		return []sqlNode{v.inner}
+	case jsonKeyNode:
 		return []sqlNode{v.inner}
 	case caseNode:
 		return v.parts()
@@ -883,7 +885,7 @@ func readsJoin(n sqlNode) bool {
 		return readsJoin(n.inner)
 	case funcNode:
 		return readsJoin(n.arg)
-	case callNode, concatNode, convertNode, caseNode, truncNode:
+	case callNode, concatNode, convertNode, caseNode, truncNode, jsonKeyNode:
 		return slices.ContainsFunc(nodeParts(n), readsJoin)
 	case condNode:
 		return slices.ContainsFunc(n.where.operands(), readsJoin)

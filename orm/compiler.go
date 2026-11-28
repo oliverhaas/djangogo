@@ -178,6 +178,9 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		if n, ok := c.annots[e.key]; ok {
 			return n, nil
 		}
+		if n, ok, err := c.annotationTransform(e.key); ok || err != nil {
+			return n, err
+		}
 		p, err := resolveFieldPath(c.q.model, e.key, c.annotNames)
 		if err != nil {
 			return nil, err
@@ -262,6 +265,12 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 		return c.resolveWindow(e)
 	case exprWindowFunc:
 		return nil, fmt.Errorf("orm: %s is only valid as the source of a Window", windowFuncName(e.fn))
+	case exprKeyTransform:
+		arg, err := c.resolveExpr(*e.arg)
+		if err != nil {
+			return nil, err
+		}
+		return c.keyTransform(arg, e.key, e.typed)
 	case exprStar:
 		return nil, errors.New(`orm: "*" is only valid as the argument of Count`)
 	default:
@@ -934,9 +943,10 @@ func columnsOf(n sqlNode) []sqlNode {
 			return columnsOf(v.arg)
 		}
 		return []sqlNode{v}
-	case callNode, concatNode, convertNode, caseNode, truncNode:
-		// Django groups by a function or a Case as a whole, and by the
-		// columns of its parts when it holds an aggregate or a window.
+	case callNode, concatNode, convertNode, caseNode, truncNode, jsonKeyNode:
+		// Django groups by a function, a Case or a key transform as a whole,
+		// and by the columns of its parts when it holds an aggregate or a
+		// window.
 		if !n.aggregate() && !containsOver(n) {
 			return []sqlNode{n}
 		}

@@ -2,6 +2,7 @@ package orm_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -38,10 +39,16 @@ type ewPastEmployeeDepartment struct {
 	Department string             `orm:"max_length=40"`
 }
 
+// ewDetail is Django's expressions_window.Detail.
+type ewDetail struct {
+	ID    int64
+	Value json.RawMessage
+}
+
 // ewModels returns the models of the ports of tests/expressions_window.
 func ewModels() []any {
 	return []any{djangotest.App("expressions_window",
-		&ewClassification{}, &ewEmployee{}, &ewPastEmployeeDepartment{})}
+		&ewClassification{}, &ewEmployee{}, &ewPastEmployeeDepartment{}, &ewDetail{})}
 }
 
 // ewQS returns the queryset of every employee.
@@ -1232,7 +1239,49 @@ func TestWindowExpressionWithinSubquery(t *testing.T) {
 
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_key_transform
 func TestWindowKeyTransform(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: JSONField key transforms, Django: test_key_transform partitions by KeyTransform(\"department\", \"value\")")
+	ewEach(t, func(t *testing.T, db *orm.DB) {
+		details := []*ewDetail{
+			{Value: json.RawMessage(`{"department": "IT", "name": "Smith", "salary": 37000}`)},
+			{Value: json.RawMessage(`{"department": "IT", "name": "Nowak", "salary": 32000}`)},
+			{Value: json.RawMessage(`{"department": "HR", "name": "Brown", "salary": 50000}`)},
+			{Value: json.RawMessage(`{"department": "HR", "name": "Smith", "salary": 55000}`)},
+			{Value: json.RawMessage(`{"department": "PR", "name": "Moore", "salary": 90000}`)},
+		}
+		if err := orm.Query[ewDetail](db).BulkCreate(context.Background(), details); err != nil {
+			t.Fatalf("bulk create details: %v", err)
+		}
+		tests := []struct{ partitionBy, orderBy orm.Expr }{
+			{orm.KeyTransform("department", "value"), orm.KeyTransform("name", "value")},
+			{orm.F("value__department"), orm.F("value__name")},
+		}
+		for _, tt := range tests {
+			qs := orm.Query[ewDetail](db).Annotate("department_sum", orm.Window(
+				orm.Sum(orm.Cast(orm.KeyTextTransform("salary", "value"), orm.Field{Kind: orm.KindInt})),
+			).PartitionBy(tt.partitionBy).OrderBy(tt.orderBy)).OrderBy("value__department", "department_sum")
+			rows, err := qs.ValuesList("value", "department_sum").All(context.Background())
+			if err != nil {
+				t.Fatalf("values list: %v", err)
+			}
+			got := make([][]any, len(rows))
+			for i, row := range rows {
+				var value struct {
+					Name, Department string
+					Salary           int64
+				}
+				if err := json.Unmarshal(row[0].(json.RawMessage), &value); err != nil {
+					t.Fatalf("decode %v: %v", row[0], err)
+				}
+				got[i] = []any{value.Name, value.Department, value.Salary, ewNormalize(row[1])}
+			}
+			djangotest.AssertSequenceEqual(t, got, [][]any{
+				{"Brown", "HR", int64(50000), 50000},
+				{"Smith", "HR", int64(55000), 105000},
+				{"Nowak", "IT", int64(32000), 32000},
+				{"Smith", "IT", int64(37000), 69000},
+				{"Moore", "PR", int64(90000), 90000},
+			})
+		}
+	})
 }
 
 // Ported from Django: tests/expressions_window/tests.py::WindowFunctionTests.test_invalid_start_value_range

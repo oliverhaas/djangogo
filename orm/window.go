@@ -341,6 +341,11 @@ func exprClassName(e Expr) string {
 		return "OuterRef"
 	case exprWindow:
 		return "Window"
+	case exprKeyTransform:
+		if e.typed {
+			return "KeyTextTransform"
+		}
+		return "KeyTransform"
 	default:
 		return "Expression"
 	}
@@ -550,7 +555,7 @@ func containsOver(n sqlNode) bool {
 		return containsOver(n.inner)
 	case funcNode:
 		return containsOver(n.arg)
-	case callNode, concatNode, convertNode, caseNode, truncNode:
+	case callNode, concatNode, convertNode, caseNode, truncNode, jsonKeyNode:
 		return slices.ContainsFunc(nodeParts(n), containsOver)
 	case condNode:
 		return slices.ContainsFunc(n.where.operands(), containsOver)

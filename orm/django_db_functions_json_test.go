@@ -125,12 +125,20 @@ func TestJSONArrayExplicitCast(t *testing.T) {
 
 // Ported from Django: tests/db_functions/json/test_json_array.py::JSONArrayTests.test_order_by_key
 func TestJSONArrayOrderByKey(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no key transforms of a JSON value, Django: order_by(\"arr__0\")")
+	djangotest.EachDB(t, fnJSONModels(), func(t *testing.T, db *orm.DB) {
+		fnJSONArrayAuthor(t, db)
+		qs := orm.Query[fnAuthor](db).Annotate("arr", orm.JSONArray(orm.F("alias"))).OrderBy("arr__0")
+		rawSameRows(t, mustAll(t, qs), mustAll(t, orm.Query[fnAuthor](db).OrderBy("alias")))
+	})
 }
 
 // Ported from Django: tests/db_functions/json/test_json_array.py::JSONArrayTests.test_order_by_nested_key
 func TestJSONArrayOrderByNestedKey(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no key transforms of a JSON value, Django: order_by(\"-arr__0__0\")")
+	djangotest.EachDB(t, fnJSONModels(), func(t *testing.T, db *orm.DB) {
+		fnJSONArrayAuthor(t, db)
+		qs := orm.Query[fnAuthor](db).Annotate("arr", orm.JSONArray(orm.JSONArray(orm.F("alias")))).OrderBy("-arr__0__0")
+		rawSameRows(t, mustAll(t, qs), mustAll(t, orm.Query[fnAuthor](db).OrderBy("-alias")))
+	})
 }
 
 // No Go counterpart: tests/db_functions/json/test_json_array.py::JSONArrayNotSupportedTests.test_not_supported
@@ -148,6 +156,33 @@ func TestJSONArrayNestedJSONArrayObject(t *testing.T) {
 			{"name1": "Ivan Ivanov", "nested_json_object1": {"alias1": "iivanov", "age1": 30}},
 			{"name2": "Ivan Ivanov", "nested_json_object2": {"alias2": "iivanov", "age2": 30}}
 		]`)
+	})
+}
+
+// Ported from Django: tests/db_functions/json/test_json_array.py::JSONArrayObjectTests.test_nested_json_object_array
+func TestJSONArrayNestedJSONObjectArray(t *testing.T) {
+	djangotest.EachDB(t, fnJSONModels(), func(t *testing.T, db *orm.DB) {
+		fnJSONArrayAuthor(t, db)
+		qs := orm.Query[fnAuthor](db).Annotate("json_object", orm.JSONObject(
+			"name", "name",
+			"nested_json_array", orm.JSONArray(
+				orm.JSONObject("alias1", "alias", "age1", "age"),
+				orm.JSONObject("alias2", "alias", "age2", "age"),
+			),
+		))
+		assertFirstJSON(t, qs, "json_object", `{
+			"name": "Ivan Ivanov",
+			"nested_json_array": [{"alias1": "iivanov", "age1": 30}, {"alias2": "iivanov", "age2": 30}]
+		}`)
+	})
+}
+
+// Ported from Django: tests/db_functions/json/test_json_array.py::JSONArrayObjectTests.test_order_by_nested_key
+func TestJSONArrayObjectOrderByNestedKey(t *testing.T) {
+	djangotest.EachDB(t, fnJSONModels(), func(t *testing.T, db *orm.DB) {
+		fnJSONArrayAuthor(t, db)
+		qs := orm.Query[fnAuthor](db).Annotate("arr", orm.JSONArray(orm.JSONObject("alias", orm.F("alias")))).OrderBy("-arr__0__alias")
+		rawSameRows(t, mustAll(t, qs), mustAll(t, orm.Query[fnAuthor](db).OrderBy("-alias")))
 	})
 }
 
@@ -216,12 +251,20 @@ func TestJSONObjectTextfield(t *testing.T) {
 
 // Ported from Django: tests/db_functions/json/test_json_object.py::JSONObjectTests.test_order_by_key
 func TestJSONObjectOrderByKey(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no key transforms of a JSON value, Django: order_by(\"attrs__alias\")")
+	djangotest.EachDB(t, fnJSONModels(), func(t *testing.T, db *orm.DB) {
+		fnJSONObjectAuthors(t, db)
+		qs := orm.Query[fnAuthor](db).Annotate("attrs", orm.JSONObject("alias", orm.F("alias"))).OrderBy("attrs__alias")
+		rawSameRows(t, mustAll(t, qs), mustAll(t, orm.Query[fnAuthor](db).OrderBy("alias")))
+	})
 }
 
 // Ported from Django: tests/db_functions/json/test_json_object.py::JSONObjectTests.test_order_by_nested_key
 func TestJSONObjectOrderByNestedKey(t *testing.T) {
-	t.Skip("FIXME-PORT: Go: the ORM has no key transforms of a JSON value, Django: order_by(\"-attrs__nested__alias\")")
+	djangotest.EachDB(t, fnJSONModels(), func(t *testing.T, db *orm.DB) {
+		fnJSONObjectAuthors(t, db)
+		qs := orm.Query[fnAuthor](db).Annotate("attrs", orm.JSONObject("nested", orm.JSONObject("alias", orm.F("alias")))).OrderBy("-attrs__nested__alias")
+		rawSameRows(t, mustAll(t, qs), mustAll(t, orm.Query[fnAuthor](db).OrderBy("-alias")))
+	})
 }
 
 // No Go counterpart: tests/db_functions/json/test_json_object.py::JSONObjectNotSupportedTests.test_not_supported

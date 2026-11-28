@@ -1083,6 +1083,17 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   of it, as Django emulates QUALIFY; Count, Aggregate, Update and Delete
   work on such a queryset. A disjunction of a window filter and a plain
   filter fails on a query with aggregates, with Django's message.
+- ORM: key and index transforms and the lookups of a JSON field. A filter,
+  an annotation, an ordering or a window reads a key with `value__key` or
+  an index with `value__0`, in any depth. `orm.KeyTransform`,
+  `orm.KeyTextTransform` and `orm.KT` build them as expressions. The
+  lookups `has_key`, `has_keys` and `has_any_keys` test for keys, and
+  `contains` and `contained_by` compare documents on PostgreSQL; on SQLite
+  they fail with Django's message, as in Django. A nil value of an exact
+  lookup matches JSON null, and `value__key__isnull` tests for the key.
+  Text lookups such as `value__key__icontains` compare the text of the
+  value. A check constraint with a key transform validates in Go and
+  writes its Go source to a migration.
 
 ### Changed
 
@@ -1256,6 +1267,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   matches `ErrForeignKeyViolation`; before, the `INSERT` or `UPDATE` reported
   it. Tables created before the upgrade keep their constraints until a
   migration recreates them.
+- On SQLite, an exact lookup on a JSON field missed the rows that Django
+  wrote, because the ORM wrote JSON in Go's compact format and SQLite
+  compares the text. The ORM now writes JSON values that are not a
+  `json.RawMessage` in the format of Python's `json.dumps`, as Django's
+  JSONField does: with `", "` and `": "` separators and ASCII escapes.
+  Rows written before the upgrade keep their format.
 
 ### Fixed
 

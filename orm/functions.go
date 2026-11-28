@@ -364,6 +364,11 @@ func (e Expr) outputKind(input Kind) Kind {
 		if e.typed {
 			return e.output
 		}
+	case exprKeyTransform:
+		if e.typed {
+			return e.output
+		}
+		return KindJSON
 	}
 	return input
 }

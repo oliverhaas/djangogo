@@ -304,6 +304,16 @@ func (g sourceWriter) expr(e Expr) (string, error) {
 			return "", err
 		}
 		return arg + ".Not()", nil
+	case exprKeyTransform:
+		arg, err := g.expr(*e.arg)
+		if err != nil {
+			return "", err
+		}
+		name := "KeyTransform"
+		if e.typed {
+			name = "KeyTextTransform"
+		}
+		return "orm." + name + "(" + strconv.Quote(e.key) + ", " + arg + ")", nil
 	}
 	return "", fmt.Errorf("orm: an aggregate or bound expression (kind %d) has no Go source", e.kind)
 }
