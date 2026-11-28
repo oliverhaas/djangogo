@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oliverhaas/djangogo/contenttypes"
 	"github.com/oliverhaas/djangogo/djangotest"
 	"github.com/oliverhaas/djangogo/internal/pyjson"
 	"github.com/oliverhaas/djangogo/orm"
@@ -246,23 +247,28 @@ func (*NaturalPKWithDefault) GetByNaturalKey(ctx context.Context, db *orm.DB, ke
 
 // serializerModels returns the test models registered under the "serializers" app.
 func serializerModels() []any {
-	return []any{djangotest.App("serializers",
-		&CategoryMetaData{},
-		&Category{},
-		&Author{},
-		&Topic{},
-		&Article{},
-		&AuthorProfile{},
-		&Score{},
-		&Player{},
-		&ComplexModel{},
-		&Anchor{},
-		&M2MData{},
-		&NaturalKeyAnchor{},
-		&FKDataNaturalKey{},
-		&NaturalKeyThing{},
-		&NaturalPKWithDefault{},
-	)}
+	return []any{
+		contenttypes.App{},
+		djangotest.App("serializers",
+			append([]any{
+				&CategoryMetaData{},
+				&Category{},
+				&Author{},
+				&Topic{},
+				&Article{},
+				&AuthorProfile{},
+				&Score{},
+				&Player{},
+				&ComplexModel{},
+				&Anchor{},
+				&M2MData{},
+				&NaturalKeyAnchor{},
+				&FKDataNaturalKey{},
+				&NaturalKeyThing{},
+				&NaturalPKWithDefault{},
+			}, serializerDataModels()...)...,
+		),
+	}
 }
 
 // baseTestData holds the rows created by SerializersTestBase.setUpTestData.

@@ -25,8 +25,10 @@ func IsRaw(ctx context.Context) bool {
 // and related objects are not checked. An object with a primary key updates
 // the row with that key, or is inserted when no such row exists. An object
 // without a primary key is inserted, and the key that the database assigns is
-// written back. PreSave and PostSave handlers run with IsRaw true, and Created
-// tells a PostSave handler whether the row was inserted.
+// written back. A primary key that is neither an auto field nor a relation is
+// always set, so a key of 0, false or "" updates its row.
+// PreSave and PostSave handlers run with IsRaw true, and Created tells a
+// PostSave handler whether the row was inserted.
 func SaveRaw(ctx context.Context, db *DB, obj any) error {
 	m, ok := db.Registry().ModelOf(obj)
 	rv := reflect.ValueOf(obj)
@@ -40,7 +42,7 @@ func SaveRaw(ctx context.Context, db *DB, obj any) error {
 	}
 	pk := m.PrimaryKey()
 	updated := false
-	if pk != nil && !pkFieldIsZero(pk, v.Field(pk.Index)) {
+	if pk != nil && (!pkFieldIsZero(pk, v.Field(pk.Index)) || rawPKAlwaysSet(pk)) {
 		fields, err := saveFields(m, nil)
 		if err != nil {
 			return err
@@ -63,4 +65,11 @@ func SaveRaw(ctx context.Context, db *DB, obj any) error {
 	}
 	setDeferred(m, v, nil)
 	return fireModelSignal(context.WithValue(ctx, createdKey{}, !updated), m.goType, postSave, []reflect.Value{v})
+}
+
+// rawPKAlwaysSet reports whether SaveRaw treats the primary key pk as set even
+// when it holds the Go zero value. Django treats only a None key as unset, and
+// a Go key that is neither an auto field nor a relation has no unset value.
+func rawPKAlwaysSet(pk *Field) bool {
+	return pk.Kind != KindAuto && pk.Rel == nil
 }

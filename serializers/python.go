@@ -285,7 +285,7 @@ func handleM2MField(
 	if err != nil {
 		return nil, err
 	}
-	if !useNat {
+	if !useNat && embedsRelCache(targetModel) {
 		qs = qs.Only("pk")
 	}
 	rows, err := qs.All(ctx)
@@ -301,6 +301,21 @@ func handleM2MField(
 		out = append(out, val)
 	}
 	return out, nil
+}
+
+// embedsRelCache reports whether the struct of m embeds orm.RelCache, which
+// QuerySet.Only needs to record the deferred fields.
+func embedsRelCache(m *orm.Model) bool {
+	t := m.GoType()
+	if t == nil || t.Kind() != reflect.Struct {
+		return false
+	}
+	for i := range t.NumField() {
+		if t.Field(i).Type == reflect.TypeFor[orm.RelCache]() {
+			return true
+		}
+	}
+	return false
 }
 
 // extractRelationState reads the integer primary key and optional loaded object

@@ -41,7 +41,13 @@ type rawSignalEvent struct {
 
 // saveRawModels returns the models for the SaveRaw and save-signal tests.
 func saveRawModels() []any {
-	return []any{djangotest.App("signals", &sigPerson{}, &rawStampedItem{})}
+	return []any{djangotest.App("signals", &sigPerson{}, &rawStampedItem{}, &rawCodedItem{})}
+}
+
+// rawCodedItem has a small integer primary key, which is not an auto field.
+type rawCodedItem struct {
+	Code  int16  `orm:"pk"`
+	Label string `orm:"max_length=20"`
 }
 
 // Ported from Django: tests/signals/tests.py::SignalTests.test_save_signals
@@ -231,5 +237,28 @@ func TestSaveRawInsertUpdateAndExplicitPK(t *testing.T) {
 		djangotest.AssertEqual(t, gotExplicit.CreatedAt.Equal(t3), true)
 		djangotest.AssertEqual(t, gotExplicit.UpdatedAt.Equal(t3), true)
 		djangotest.AssertEqual(t, mustCount(t, orm.Query[rawStampedItem](db)), int64(2))
+	})
+}
+
+// No Django test exists: SaveRaw treats a zero primary key that is not an auto
+// field as set, so a second raw save of the key 0 updates its row instead of
+// inserting a duplicate.
+func TestSaveRawZeroExplicitPK(t *testing.T) {
+	djangotest.EachDB(t, saveRawModels(), func(t *testing.T, db *orm.DB) {
+		ctx := context.Background()
+		item := &rawCodedItem{Code: 0, Label: "first"}
+		if err := orm.SaveRaw(ctx, db, item); err != nil {
+			t.Fatalf("SaveRaw(insert): %v", err)
+		}
+		item.Label = "second"
+		if err := orm.SaveRaw(ctx, db, item); err != nil {
+			t.Fatalf("SaveRaw(update): %v", err)
+		}
+		got, err := orm.Query[rawCodedItem](db).Get(ctx, "pk", 0)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		djangotest.AssertEqual(t, got.Label, "second")
+		djangotest.AssertEqual(t, mustCount(t, orm.Query[rawCodedItem](db)), int64(1))
 	})
 }
