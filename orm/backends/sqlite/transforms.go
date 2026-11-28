@@ -241,8 +241,8 @@ func timeExtractFunc(_ *moderncsqlite.FunctionContext, args []driver.Value) (dri
 // functionRegistration is the outcome of installing the SQL functions of this
 // package for every connection the driver opens; Open reports a failure.
 // SQLite ships the REGEXP operator without an implementation, and Django's
-// date and time functions and the aggregates StdDev, Variance and AnyValue
-// exist only where Django or this package registers them.
+// date and time functions, COT, RAND and the aggregates StdDev, Variance and
+// AnyValue exist only where Django or this package registers them.
 var functionRegistration = errors.Join(
 	moderncsqlite.RegisterDeterministicScalarFunction("regexp", 2, regexpFunc),
 	moderncsqlite.RegisterDeterministicScalarFunction("django_date_extract", 2, dateExtractFunc),
@@ -253,6 +253,8 @@ var functionRegistration = errors.Join(
 	moderncsqlite.RegisterDeterministicScalarFunction("django_format_dtdelta", 3, formatDtdeltaFunc),
 	moderncsqlite.RegisterDeterministicScalarFunction("django_timestamp_diff", 2, timestampDiffFunc),
 	moderncsqlite.RegisterDeterministicScalarFunction("django_time_diff", 2, timeDiffFunc),
+	moderncsqlite.RegisterDeterministicScalarFunction("COT", 1, cotFunc),
+	moderncsqlite.RegisterScalarFunction("RAND", 0, randFunc),
 	moderncsqlite.RegisterFunction("STDDEV_POP", statFunction(false, true)),
 	moderncsqlite.RegisterFunction("STDDEV_SAMP", statFunction(true, true)),
 	moderncsqlite.RegisterFunction("VAR_POP", statFunction(false, false)),

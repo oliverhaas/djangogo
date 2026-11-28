@@ -1024,6 +1024,15 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   Django's `JSONArray` and `JSONObject` and give a `json.RawMessage`. The
   arguments of `JSONObject` alternate a key and a value, in the order of
   Django's keyword arguments.
+- ORM: the math database functions `orm.ACos`, `ASin`, `ATan`, `ATan2`,
+  `Ceil`, `Cos`, `Cot`, `Degrees`, `Exp`, `Floor`, `Ln`, `Log`, `Mod`, `Pi`,
+  `Power`, `Radians`, `Random`, `Round`, `Sign`, `Sin`, `Sqrt` and `Tan` port
+  Django's functions of the same names. As in Django, the value is a
+  `Decimal` for a decimal argument and a `float64` otherwise, and `Ceil`,
+  `Floor`, `Round` and `Sign` keep the type of their argument. `Round` takes
+  the precision as its second argument; SQLite refuses a negative precision
+  with Django's message. The SQLite backend registers the `COT` and `RAND`
+  functions that SQLite lacks, as Django does.
 
 ### Changed
 

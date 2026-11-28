@@ -90,6 +90,9 @@ type Expr struct {
 	// Without typed the result has the kind of the argument.
 	output Kind
 	typed  bool
+	// numeric marks a function whose result is a decimal when an argument is
+	// a decimal and a float otherwise, Django's NumericOutputFieldMixin.
+	numeric bool
 	// node is the bound value of an exprNode.
 	node sqlNode
 	// args are the arguments of an exprCall, and of an exprAggregate the

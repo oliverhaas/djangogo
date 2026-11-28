@@ -23,6 +23,10 @@ var functionNames = map[string]string{
 	"COALESCE": "Coalesce", fnConcat: "Concat", "ABS": "Abs",
 	"GREATEST": "Greatest", "LEAST": "Least", "NULLIF": "NullIf",
 	fnCollate: "Collate", fnNow: "Now", fnJSONArray: "JSONArray", fnJSONObject: "JSONObject",
+	"ACOS": "ACos", "ASIN": "ASin", "ATAN": "ATan", fnATan2: "ATan2", "CEILING": "Ceil",
+	"COS": "Cos", "COT": "Cot", "DEGREES": "Degrees", "EXP": "Exp", "FLOOR": "Floor",
+	"LN": "Ln", fnLog: "Log", fnMod: "Mod", fnPi: "Pi", fnPower: "Power", "RADIANS": "Radians",
+	fnRandom: "Random", fnRound: "Round", "SIGN": "Sign", "SIN": "Sin", "SQRT": "Sqrt", "TAN": "Tan",
 }
 
 // ConstraintSource returns Go source code that builds c, such as
@@ -245,6 +249,10 @@ func (g sourceWriter) expr(e Expr) (string, error) {
 		for i, a := range e.args {
 			if key, ok := a.value.(string); ok && e.fn == fnJSONObject && i%2 == 0 {
 				args[i] = strconv.Quote(key)
+				continue
+			}
+			if precision, ok := a.value.(int); ok && e.fn == fnRound && i == 1 {
+				args[i] = strconv.Itoa(precision)
 				continue
 			}
 			arg, err := g.expr(a)

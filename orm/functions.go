@@ -209,12 +209,15 @@ var callNames = map[string]string{
 func Concat(args ...any) Expr { return call(fnConcat, args) }
 
 // resolveCall binds Coalesce, Collate, Concat, Greatest, JSONArray,
-// JSONObject, Least, NullIf or Now. Concat casts each argument that is not text to text on every dialect,
+// JSONObject, Least, NullIf, Now and the math functions of several or no
+// arguments. Concat casts each argument that is not text to text on every dialect,
 // as Cast does. Django's ConcatPair casts on PostgreSQL only and leaves the
 // conversion to the || of SQLite, which gives the same text. Greatest and
 // Least are MAX and MIN on SQLite.
 func (c *compiler) resolveCall(e Expr) (sqlNode, error) {
 	switch e.fn {
+	case fnATan2, fnLog, fnMod, fnPi, fnPower, fnRandom, fnRound:
+		return c.resolveMath(e)
 	case fnJSONArray, fnJSONObject:
 		return c.resolveJSON(e)
 	case fnNow:
@@ -312,7 +315,11 @@ func (e Expr) outputKind(input Kind) Kind {
 		if e.typed {
 			return e.output
 		}
-		return e.arg.outputKind(input)
+		k := e.arg.outputKind(input)
+		if e.numeric && k != KindDecimal {
+			return KindFloat
+		}
+		return k
 	case exprCast, exprWrap:
 		return e.castTo.Kind
 	case exprNot:

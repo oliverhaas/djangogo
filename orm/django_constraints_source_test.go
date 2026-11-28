@@ -146,6 +146,10 @@ func TestConstraintSourceRebuildsConditions(t *testing.T) {
 			`orm.Q("data", orm.JSONObject("k", orm.F("a"), "list", orm.JSONArray(orm.F("b"), orm.Value(int64(1)))))`,
 		},
 		{
+			orm.Q("n__lte", orm.Round(orm.Sqrt("a"), 2), "m__gt", orm.Log(orm.Pi(), orm.Ceil("b")), "x__lt", orm.Random()),
+			`orm.Q("n__lte", orm.Round(orm.Sqrt(orm.F("a")), 2), "m__gt", orm.Log(orm.Pi(), orm.Ceil(orm.F("b"))), "x__lt", orm.Random())`,
+		},
+		{
 			orm.Q("due__lte", orm.ExpressionWrapper(orm.F("start").Add(orm.F("span")), orm.Field{Kind: orm.KindDateTime, Null: true})),
 			`orm.Q("due__lte", orm.ExpressionWrapper(orm.F("start").Add(orm.F("span")), orm.Field{Kind: orm.KindDateTime}))`,
 		},

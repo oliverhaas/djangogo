@@ -198,8 +198,11 @@ func (c *compiler) resolveExpr(e Expr) (sqlNode, error) {
 			return nil, err
 		}
 		typ := arg.vtype()
-		if e.typed {
+		switch {
+		case e.typed:
 			typ = fieldValueType(&Field{Kind: e.output})
+		case e.numeric:
+			typ = numericType(typ)
 		}
 		return funcNode{fn: e.fn, arg: arg, typ: typ}, nil
 	case exprNode:
