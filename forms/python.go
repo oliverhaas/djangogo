@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/oliverhaas/djangogo/internal/duration"
 )
 
 // The functions below reproduce Python's conversions of values to text,
@@ -34,7 +36,7 @@ func pyString(v any) string {
 	case time.Time:
 		return formatDateTime(t)
 	case time.Duration:
-		return formatDuration(t)
+		return duration.String(t)
 	case fmt.Stringer:
 		return t.String()
 	}

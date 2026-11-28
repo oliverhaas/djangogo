@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oliverhaas/djangogo/internal/duration"
 	"github.com/oliverhaas/djangogo/orm"
 )
 
@@ -263,7 +264,7 @@ func coerceForField(mf *orm.Field) func(string) (any, error) {
 		}
 	case orm.KindDuration:
 		return func(s string) (any, error) {
-			d, ok, overflow := parseDuration(s)
+			d, ok, overflow := duration.Parse(s)
 			if !ok || overflow {
 				return nil, fmt.Errorf("forms: invalid duration choice %q", s)
 			}

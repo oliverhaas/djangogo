@@ -987,6 +987,12 @@ to follow [Semantic Versioning](https://semver.org/) once it reaches a release.
   `ResetSequences` moves the PostgreSQL key sequences past the largest key,
   and `CheckForeignKeys` reports a broken reference inside a transaction
   before the commit, with Django's message on SQLite.
+- Serializers: the new `serializers` package ports Django's
+  `django.core.serializers` with the `json` format. `Serialize` writes model
+  instances as Django writes them, byte for byte, and `Deserialize` returns
+  objects to save with `DeserializedObject.Save`, with Django's error
+  messages. Natural keys come from the `NaturalKeyer` and `NaturalKeyGetter`
+  interfaces, and `Register` adds a format.
 
 ### Changed
 
