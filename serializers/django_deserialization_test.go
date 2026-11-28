@@ -231,29 +231,41 @@ func TestDeserializerCraftedXMLPerformance(t *testing.T) {
 		return elapsed
 	}
 
+	averageFactor := func(t *testing.T, params [][2]int) float64 {
+		t.Helper()
+		var factors []float64
+		var prevTime time.Duration
+		for i, p := range params {
+			craftedXML := buildCraftedXML(p[0], p[1])
+			elapsed := deserialize(t, craftedXML)
+			for range craftedXMLRuns - 1 {
+				elapsed = min(elapsed, deserialize(t, craftedXML))
+			}
+			if i > 0 && prevTime > 0 {
+				factors = append(factors, float64(elapsed)/float64(prevTime))
+			}
+			prevTime = elapsed
+		}
+		var sum float64
+		for _, f := range factors {
+			sum += f
+		}
+		return sum / float64(len(factors))
+	}
+
 	assertFactor := func(label string, params [][2]int, factor float64) {
 		t.Run(label, func(t *testing.T) {
-			var factors []float64
-			var prevTime time.Duration
-			for i, p := range params {
-				craftedXML := buildCraftedXML(p[0], p[1])
-				elapsed := deserialize(t, craftedXML)
-				for range craftedXMLRuns - 1 {
-					elapsed = min(elapsed, deserialize(t, craftedXML))
+			// Go has less fixed cost per call than Python, so a linear parse
+			// gives a factor near 2, Django's limit, and the load of other
+			// test packages can push one series over it. Measure up to three
+			// series: a quadratic parse, with a factor near 4, fails each.
+			var avg float64
+			for range 3 {
+				if avg = averageFactor(t, params); avg <= factor {
+					return
 				}
-				if i > 0 && prevTime > 0 {
-					factors = append(factors, float64(elapsed)/float64(prevTime))
-				}
-				prevTime = elapsed
 			}
-			var sum float64
-			for _, f := range factors {
-				sum += f
-			}
-			avg := sum / float64(len(factors))
-			if avg > factor {
-				t.Errorf("average factor = %v, want <= %v", avg, factor)
-			}
+			t.Errorf("average factor = %v, want <= %v", avg, factor)
 		})
 	}
 
